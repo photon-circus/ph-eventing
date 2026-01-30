@@ -1,0 +1,12 @@
+[package]
+name = "ph-eventing"
+description = "Eventing library for embedded systems"
+authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
+license = "MIT"
+publish = false
+rust-version = "1.92.0"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/photon-circus/ph-eventing"
+
+[dependencies]
