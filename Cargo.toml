@@ -10,6 +10,12 @@ repository = "https://github.com/photon-circus/ph-eventing"
 readme = "README.md"
 keywords = ["embedded", "no-std", "lock-free", "spsc", "ring-buffer"]
 categories = ["embedded", "no-std", "concurrency"]
-publish = false
+publish = true
+exclude = [
+    "CLAUDE.md",
+    ".cargo/*",
+    ".github/*",
+    ".idea/*",
+]
 
 [dependencies]

@@ -1,11 +1,16 @@
 # ph-eventing
 
-Eventing library for embedded systems with no-std support.
+Lock-free SPSC event ring for high-throughput telemetry on no-std embedded targets.
 
 ## Features
 - Lock-free single-producer single-consumer sequence ring.
 - Producer never blocks; consumer can be slow and will drop old items when it lags.
-- No allocation, no dynamic dispatch.
+- No allocation, no dynamic dispatch, zero dependencies.
+- Designed for `#![no_std]` environments (std only for tests).
+
+## Compatibility
+- MSRV: Rust 1.92.0.
+- `SeqRing::new()` asserts `N > 0`.
 
 ## Usage
 ```rust
@@ -25,12 +30,31 @@ consumer.poll_one(|seq, v| {
 ## Semantics
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 - When the producer wraps the ring, old values are overwritten.
+- `poll_one` and `poll_up_to` drain in-order and return `PollStats` (`read`, `dropped`, `newest`).
+- `latest` reads the newest value without advancing the consumer cursor.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
+
+## Safety and Concurrency
+- This crate is SPSC by design: exactly one producer and one consumer must be active.
+- `producer()`/`consumer()` will panic if called while another handle of the same kind is active.
+- Using unsafe to bypass these constraints (or sharing handles concurrently) is undefined behavior.
+- `T: Copy` is required to avoid allocation and return values by copy.
 
 ## Testing
 Host tests require `std` and can be run with:
 ```
 cargo test
+```
+
+Coverage snapshot (2026-02-04, via `cargo llvm-cov`):
+- Lines: 279/302 (92.38%)
+- Functions: 39/44 (88.64%)
+- Regions: 467/483 (96.69%)
+- Instantiations: 79/85 (92.94%)
+
+To regenerate:
+```
+cargo llvm-cov --json --summary-only --output-path target/llvm-cov/summary.json
 ```
 
 ## License

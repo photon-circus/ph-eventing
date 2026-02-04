@@ -16,9 +16,12 @@
 //! - `T` is `Copy` to allow returning values by copy without allocation.
 //! - The `&T` passed to hooks is a reference to a local copy made during the read.
 
-use core::cell::UnsafeCell;
+use core::cell::{Cell, UnsafeCell};
+use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+#[cfg(test)]
+use core::sync::atomic::AtomicUsize;
 
 fn atomic_u32_array<const N: usize>(init: u32) -> [AtomicU32; N] {
     core::array::from_fn(|_| AtomicU32::new(init))
@@ -28,11 +31,19 @@ fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| UnsafeCell::new(MaybeUninit::uninit()))
 }
 
+#[cfg(test)]
+static TEST_AFTER_READ_TARGET: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static TEST_AFTER_READ_SEQ: AtomicU32 = AtomicU32::new(0);
+
 #[must_use]
 #[derive(Copy, Clone, Debug)]
 pub struct PollStats {
+    /// Number of items delivered to the hook.
     pub read: usize,
+    /// Number of items skipped because the consumer lagged or slots were overwritten.
     pub dropped: usize,
+    /// Newest sequence observed while polling.
     pub newest: u32,
 }
 
@@ -43,11 +54,21 @@ pub struct SeqRing<T: Copy, const N: usize> {
     published_seq: AtomicU32,
     slot_seq: [AtomicU32; N],
     slots: [UnsafeCell<MaybeUninit<T>>; N],
+    producer_taken: AtomicBool,
+    consumer_taken: AtomicBool,
 }
 
+// SAFETY: SeqRing is Sync because the producer/consumer handles enforce SPSC usage,
+// and all shared state is accessed via atomics. Values are written before their
+// sequence numbers are published with Release and read with Acquire. T: Send ensures
+// values can be transferred across threads safely.
 unsafe impl<T: Copy + Send, const N: usize> Sync for SeqRing<T, N> {}
 
 impl<T: Copy, const N: usize> SeqRing<T, N> {
+    /// Create a new ring buffer.
+    ///
+    /// # Panics
+    /// Panics if `N == 0`.
     pub fn new() -> Self {
         assert!(N > 0);
         Self {
@@ -55,6 +76,8 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
             published_seq: AtomicU32::new(0),
             slot_seq: atomic_u32_array::<N>(0),
             slots: unsafe_cell_array::<T, N>(),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
         }
     }
 
@@ -64,18 +87,36 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
     }
 
     /// Create the producer handle. Only one producer may be active.
+    ///
+    /// # Panics
+    /// Panics if a producer handle is already active.
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
-        Producer { ring: self }
+        assert!(
+            !self.producer_taken.swap(true, Ordering::AcqRel),
+            "SeqRing::producer() called while a producer is active"
+        );
+        Producer {
+            ring: self,
+            _not_sync: PhantomData,
+        }
     }
 
     /// Create the consumer handle. Only one consumer may be active.
+    ///
+    /// # Panics
+    /// Panics if a consumer handle is already active.
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
+        assert!(
+            !self.consumer_taken.swap(true, Ordering::AcqRel),
+            "SeqRing::consumer() called while a consumer is active"
+        );
         Consumer {
             ring: self,
             last_seq: 0,
             dropped_accum: 0,
+            _not_sync: PhantomData,
         }
     }
 
@@ -114,6 +155,9 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
 
         let v = unsafe { (*self.slots[idx].get()).assume_init_read() };
 
+        #[cfg(test)]
+        self.test_after_read_hook(idx);
+
         let s2 = self.slot_seq[idx].load(Ordering::Acquire);
         if s2 != seq {
             return None;
@@ -121,23 +165,50 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
 
         Some(v)
     }
+
+    #[cfg(test)]
+    fn test_after_read_hook(&self, idx: usize) {
+        let target = TEST_AFTER_READ_TARGET.load(Ordering::Acquire);
+        if target == self as *const _ as usize {
+            let seq = TEST_AFTER_READ_SEQ.load(Ordering::Relaxed);
+            self.slot_seq[idx].store(seq, Ordering::Release);
+            TEST_AFTER_READ_TARGET.store(0, Ordering::Release);
+        }
+    }
 }
 
+/// Producer handle for writing into the ring.
+///
+/// This handle is `!Sync` to prevent concurrent producers.
 pub struct Producer<'a, T: Copy, const N: usize> {
     ring: &'a SeqRing<T, N>,
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 impl<'a, T: Copy, const N: usize> Producer<'a, T, N> {
+    /// Write a value into the ring.
+    ///
+    /// Returns the sequence number assigned to the write (never 0).
     #[inline]
     pub fn push(&self, value: T) -> u32 {
         self.ring.push_inner(value)
     }
 }
 
+impl<'a, T: Copy, const N: usize> Drop for Producer<'a, T, N> {
+    fn drop(&mut self) {
+        self.ring.producer_taken.store(false, Ordering::Release);
+    }
+}
+
+/// Consumer handle for reading from the ring.
+///
+/// This handle is `!Sync` to prevent concurrent consumers.
 pub struct Consumer<'a, T: Copy, const N: usize> {
     ring: &'a SeqRing<T, N>,
     last_seq: u32,
     dropped_accum: usize,
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
@@ -167,7 +238,10 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
     }
 
     /// Drain up to `max` items (in-order).
-    /// Hook sees `&T` but it’s a reference to a **local copy** inside poll.
+    /// Hook sees `&T` but it is a reference to a **local copy** inside poll.
+    ///
+    /// If `max == 0`, this returns immediately with `read = 0`, `dropped = 0`, and
+    /// `newest` set to the latest published sequence.
     pub fn poll_up_to(&mut self, max: usize, mut hook: impl FnMut(u32, &T)) -> PollStats {
         if max == 0 {
             return PollStats {
@@ -229,8 +303,10 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         }
     }
 
-    /// “Give me the newest thing right now” (not in-order).
+    /// "Give me the newest thing right now" (not in-order).
     /// Returns true if it delivered something.
+    ///
+    /// This does not advance the consumer cursor.
     #[inline]
     pub fn latest(&self, hook: impl FnOnce(u32, &T)) -> bool {
         let newest = self.ring.newest_seq();
@@ -247,6 +323,8 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
 
     /// Fast-forward consumer so the *next* `poll_one()` yields the newest item
     /// (i.e. skip backlog).
+    ///
+    /// This does not modify the dropped counter.
     #[inline]
     pub fn skip_to_latest(&mut self) {
         let newest = self.ring.newest_seq();
@@ -256,9 +334,16 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
     }
 }
 
+impl<'a, T: Copy, const N: usize> Drop for Consumer<'a, T, N> {
+    fn drop(&mut self) {
+        self.ring.consumer_taken.store(false, Ordering::Release);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SeqRing;
+    use super::{SeqRing, TEST_AFTER_READ_SEQ, TEST_AFTER_READ_TARGET};
+    use core::sync::atomic::Ordering;
     use std::vec::Vec;
 
     #[test]
@@ -340,5 +425,103 @@ mod tests {
 
         assert!(ok);
         assert_eq!(got, Some((3, 12)));
+    }
+
+    #[test]
+    fn poll_up_to_zero_returns_newest_only() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        producer.push(42);
+
+        let stats = consumer.poll_up_to(0, |_, _| panic!("hook should not run"));
+
+        assert_eq!(stats.read, 0);
+        assert_eq!(stats.dropped, 0);
+        assert_eq!(stats.newest, 1);
+    }
+
+    #[test]
+    fn dropped_counter_can_reset() {
+        let ring = SeqRing::<u32, 2>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        for i in 0..5 {
+            producer.push(i);
+        }
+
+        let stats = consumer.poll_up_to(10, |_, _| {});
+
+        assert_eq!(consumer.dropped(), stats.dropped);
+
+        consumer.reset_dropped();
+
+        assert_eq!(consumer.dropped(), 0);
+    }
+
+    #[test]
+    fn latest_empty_returns_false() {
+        let ring = SeqRing::<u32, 4>::new();
+        let consumer = ring.consumer();
+
+        let ok = consumer.latest(|_, _| {});
+
+        assert!(!ok);
+    }
+
+    #[test]
+    fn latest_returns_false_when_slot_missing() {
+        let ring = SeqRing::<u32, 4>::new();
+        let consumer = ring.consumer();
+
+        ring.published_seq.store(1, Ordering::Release);
+
+        let ok = consumer.latest(|_, _| {});
+
+        assert!(!ok);
+    }
+
+    #[test]
+    fn poll_up_to_counts_dropped_when_slot_missing() {
+        let ring = SeqRing::<u32, 4>::new();
+        let mut consumer = ring.consumer();
+
+        ring.published_seq.store(1, Ordering::Release);
+
+        let stats = consumer.poll_up_to(1, |_, _| panic!("hook should not run"));
+
+        assert_eq!(stats.read, 0);
+        assert_eq!(stats.dropped, 1);
+        assert_eq!(consumer.dropped(), 1);
+    }
+
+    #[test]
+    fn read_seq_inner_detects_overwrite_during_read() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let seq = producer.push(7);
+
+        TEST_AFTER_READ_SEQ.store(seq.wrapping_add(1), Ordering::Relaxed);
+        TEST_AFTER_READ_TARGET.store(&ring as *const _ as usize, Ordering::Release);
+
+        let got = ring.read_seq_inner(seq);
+
+        TEST_AFTER_READ_TARGET.store(0, Ordering::Release);
+
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn push_wraps_seq_from_zero_to_one() {
+        let ring = SeqRing::<u32, 4>::new();
+
+        ring.next_seq.store(u32::MAX, Ordering::Relaxed);
+
+        let seq = ring.producer().push(1);
+
+        assert_eq!(seq, 1);
+        assert_eq!(ring.next_seq.load(Ordering::Relaxed), 1);
     }
 }
