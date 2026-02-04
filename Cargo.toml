@@ -19,3 +19,16 @@ exclude = [
 ]
 
 [dependencies]
+portable-atomic = { version = "1.13", optional = true, default-features = false, features = ["require-cas"] }
+
+[features]
+default = []
+portable-atomic = ["dep:portable-atomic"]
+portable-atomic-unsafe-assume-single-core = [
+    "portable-atomic",
+    "portable-atomic/unsafe-assume-single-core",
+]
+portable-atomic-critical-section = [
+    "portable-atomic",
+    "portable-atomic/critical-section",
+]

@@ -56,10 +56,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - thumbv6m-none-eabi
-          - thumbv7em-none-eabi
-          - riscv32imac-unknown-none-elf
+        include:
+          - target: thumbv6m-none-eabi
+            features: portable-atomic-unsafe-assume-single-core
+          - target: thumbv7em-none-eabi
+            features: ""
+          - target: riscv32imac-unknown-none-elf
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust (target ${{ matrix.target }})
@@ -68,7 +71,12 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
       - name: Check ${{ matrix.target }}
-        run: cargo check --target ${{ matrix.target }}
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo check --target ${{ matrix.target }} --features "${{ matrix.features }}"
+          else
+            cargo check --target ${{ matrix.target }}
+          fi
 
   doc:
     runs-on: ubuntu-latest

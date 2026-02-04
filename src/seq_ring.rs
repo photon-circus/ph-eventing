@@ -19,7 +19,11 @@
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::Ordering;
+#[cfg(target_has_atomic = "32")]
+use core::sync::atomic::{AtomicBool, AtomicU32};
+#[cfg(all(not(target_has_atomic = "32"), feature = "portable-atomic"))]
+use portable_atomic::{AtomicBool, AtomicU32};
 #[cfg(test)]
 use core::sync::atomic::AtomicUsize;
 

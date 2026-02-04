@@ -5,12 +5,16 @@ Lock-free SPSC event ring for high-throughput telemetry on no-std embedded targe
 ## Features
 - Lock-free single-producer single-consumer sequence ring.
 - Producer never blocks; consumer can be slow and will drop old items when it lags.
-- No allocation, no dynamic dispatch, zero dependencies.
+- No allocation, no dynamic dispatch, no required dependencies (optional `portable-atomic` for no-atomic targets).
 - Designed for `#![no_std]` environments (std only for tests).
 
 ## Compatibility
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` asserts `N > 0`.
+- Requires 32-bit atomics by default.
+- For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
+  - `portable-atomic-unsafe-assume-single-core`
+  - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
 
 ## Usage
 ```rust
