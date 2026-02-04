@@ -19,13 +19,13 @@
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+#[cfg(test)]
+use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 #[cfg(target_has_atomic = "32")]
 use core::sync::atomic::{AtomicBool, AtomicU32};
 #[cfg(all(not(target_has_atomic = "32"), feature = "portable-atomic"))]
 use portable_atomic::{AtomicBool, AtomicU32};
-#[cfg(test)]
-use core::sync::atomic::AtomicUsize;
 
 fn atomic_u32_array<const N: usize>(init: u32) -> [AtomicU32; N] {
     core::array::from_fn(|_| AtomicU32::new(init))
@@ -178,6 +178,12 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
             self.slot_seq[idx].store(seq, Ordering::Release);
             TEST_AFTER_READ_TARGET.store(0, Ordering::Release);
         }
+    }
+}
+
+impl<T: Copy, const N: usize> Default for SeqRing<T, N> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
