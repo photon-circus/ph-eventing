@@ -11,29 +11,28 @@ env:
 
 jobs:
   test:
-    name: Test
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        rust:
+        toolchain:
           - stable
           - 1.92.0  # MSRV
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust ${{ matrix.rust }}
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ matrix.toolchain }}
       - name: Run tests
         run: cargo test --verbose
 
   fmt:
-    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust (fmt)
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           components: rustfmt
@@ -41,12 +40,11 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust (clippy)
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           components: clippy
@@ -54,9 +52,9 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
   embedded:
-    name: Embedded targets
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         target:
           - thumbv6m-none-eabi
@@ -64,8 +62,8 @@ jobs:
           - riscv32imac-unknown-none-elf
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust (target ${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -73,12 +71,11 @@ jobs:
         run: cargo check --target ${{ matrix.target }}
 
   doc:
-    name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
+      - name: Install Rust (docs)
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
       - name: Build docs
