@@ -1,5 +1,7 @@
 # ph-eventing
 
+[![codecov](https://codecov.io/github/photon-circus/ph-eventing/graph/badge.svg?token=9SA836QO2K)](https://codecov.io/github/photon-circus/ph-eventing)
+
 Lock-free SPSC event ring for high-throughput telemetry on no-std embedded targets.
 
 ## Features
