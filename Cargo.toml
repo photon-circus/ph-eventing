@@ -12,18 +12,17 @@ keywords = ["embedded", "no-std", "lock-free", "spsc", "ring-buffer"]
 categories = ["embedded", "no-std", "concurrency"]
 publish = true
 exclude = [
-    "CLAUDE.md",
-    "CONTRIBUTING.md",
     ".cargo/*",
     ".github/*",
     ".idea/*",
+    "Cargo.toml.orig",
+    "CHANGELOG.md",
+    "CLAUDE.md",
     "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
+    "CONTRIBUTING.md",    
     "LICENSE",
     "README.md",
-    "CHANGELOG.md",
-    "Cargo.toml.orig"
+    "SECURITY.md",
 ]
 
 [dependencies]
