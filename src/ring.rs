@@ -77,11 +77,7 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         if i >= self.len {
             return None;
         }
-        let idx = if self.len < N {
-            i
-        } else {
-            (self.head + i) % N
-        };
+        let idx = if self.len < N { i } else { (self.head + i) % N };
         Some(self.buf[idx])
     }
 

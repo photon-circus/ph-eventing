@@ -197,9 +197,7 @@ impl<T: Copy, const N: usize> Producer<'_, T, N> {
         unsafe {
             (*self.buf.slots[idx].get()).write(val);
         }
-        self.buf
-            .head
-            .store(head.wrapping_add(1), Ordering::Release);
+        self.buf.head.store(head.wrapping_add(1), Ordering::Release);
         Ok(())
     }
 }
@@ -241,9 +239,7 @@ impl<T: Copy, const N: usize> Consumer<'_, T, N> {
         // SAFETY: consumer is the only reader of this slot; the producer
         // will not overwrite it until tail is advanced (Release below).
         let val = unsafe { (*self.buf.slots[idx].get()).assume_init_read() };
-        self.buf
-            .tail
-            .store(tail.wrapping_add(1), Ordering::Release);
+        self.buf.tail.store(tail.wrapping_add(1), Ordering::Release);
         Some(val)
     }
 
