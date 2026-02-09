@@ -1,9 +1,9 @@
 [package]
 name = "ph-eventing"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.92.0"
-description = "Lock-free SPSC event ring for high-throughput telemetry in embedded systems"
+description = "Stack-allocated ring buffers for no-std embedded targets"
 authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
 license = "MIT"
 repository = "https://github.com/photon-circus/ph-eventing"
@@ -16,6 +16,13 @@ exclude = [
     ".cargo/*",
     ".github/*",
     ".idea/*",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "Cargo.toml.orig"
 ]
 
 [dependencies]

@@ -4,13 +4,22 @@ This document provides guidance for AI assistants working with the ph-eventing c
 
 ## Project Overview
 
-**ph-eventing** is a lock-free SPSC (Single Producer Single Consumer) event ring library for high-throughput telemetry in embedded systems. It is designed for no-std environments where allocation is not available.
+**ph-eventing** provides stack-allocated ring buffers for no-std embedded targets.
+
+It ships three primitives:
+- **`RingBuf<T, N>`** — a single-owner ring buffer (no atomics, `&mut` access). Ideal for local event logs, sample windows, and single-context collection.
+- **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
+- **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
 
 **Key characteristics:**
-- Zero external dependencies
+- Zero required dependencies (`portable-atomic` is optional)
 - `#![no_std]` by default (std only for testing)
-- Producer never blocks; consumer drops old events when lagging
-- Sequence-based tracking with torn-read prevention
+- Fixed-size, zero-allocation, `T: Copy`
+- `SeqRing`: producer never blocks; consumer drops old events when lagging
+- `SeqRing`: sequence-based tracking with torn-read prevention
+- `EventBuf`: producer gets explicit backpressure; no data silently lost
+- Common `Sink`/`Source`/`Link` traits unify producers and consumers across buffer types
+- `forward()` utility bridges any `Source` into any `Sink`
 
 ## Codebase Structure
 
@@ -23,7 +32,10 @@ ph-eventing/
 ├── LICENSE                 # MIT license
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
-    └── seq_ring.rs         # Core SeqRing implementation and tests
+    ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
+    ├── ring.rs             # Single-owner stack-allocated ring buffer
+    ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
+    └── traits.rs           # Sink, Source, Link traits and forward() utility
 ```
 
 ## Architecture
@@ -32,19 +44,35 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
-| `SeqRing<T: Copy, N>` | Main ring buffer with atomic sequence tracking |
-| `Producer<'a, T, N>` | Write handle; `push(T) -> u32` returns sequence number |
-| `Consumer<'a, T, N>` | Read handle with multiple polling modes |
-| `PollStats` | Statistics returned from poll operations |
+| `RingBuf<T: Copy + Default, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
+| `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
+| `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
+| `seq_ring::Consumer<'a, T, N>` | SeqRing read handle with multiple polling modes |
+| `PollStats` | Statistics returned from SeqRing poll operations |
+| `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
+| `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
+| `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `drain()` |
+| `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
+| `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
+| `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
 
-### Memory Ordering Strategy
+### Memory Ordering Strategy (SeqRing)
 
-The implementation uses careful atomic ordering for thread safety:
+The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - **Producer writes:** `Ordering::Release` to publish slot and sequence
 - **Consumer reads:** `Ordering::Acquire` to validate sequences
 - **Torn-read prevention:** Double-check slot sequence before/after value read
 
-### Consumer Polling Modes
+`RingBuf` uses no atomics — it is a plain struct with `&mut self` mutation.
+
+### Memory Ordering Strategy (EventBuf)
+
+`EventBuf` uses a classic Lamport SPSC queue pattern:
+- **Producer:** owns `head` (Relaxed load, Release store), reads `tail` with Acquire.
+- **Consumer:** owns `tail` (Relaxed load, Release store), reads `head` with Acquire.
+- The Release/Acquire on the cursor stores/loads act as the publication fence for slot data.
+
+### Consumer Polling Modes (SeqRing)
 
 - `poll_one(hook)` - Drain one item in-order
 - `poll_up_to(max, hook)` - Drain up to N items in-order
@@ -72,21 +100,61 @@ cargo check --target thumbv7em-none-eabi
 
 ## Testing
 
-Tests are in `src/seq_ring.rs` in the `tests` module. They require std and use the standard Rust test framework.
+Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`, and `src/traits.rs` in their respective `tests` modules. They require std and use the standard Rust test framework.
 
 **Run tests:**
 ```bash
 cargo test
 ```
 
-**Current test coverage:**
-- `poll_one_empty_returns_false` - Empty ring behavior
-- `polls_in_order` - Sequential consumption
-- `drops_when_consumer_lags` - Overwrite/drop semantics
-- `latest_reads_newest` - Out-of-order read
-- `skip_to_latest_makes_next_poll_latest` - Cursor fast-forward
+**`ring::tests`:**
+- `new_ring_is_empty` — Fresh ring state
+- `push_and_get` — Basic push/get/latest
+- `overwrite_oldest_when_full` — Wrap-around semantics
+- `clear_resets_state` — Clear behaviour
+- `iter_oldest_to_newest` — Iterator ordering
+- `iter_exact_size` — ExactSizeIterator
+- `default_is_new` — Default impl
+- `zero_capacity_panics` — N=0 assertion
+- `capacity_returns_n` — capacity() API
+- `into_iter_for_ref` — IntoIterator for &RingBuf
 
-**Doctest:** There is one doctest in `src/lib.rs` demonstrating basic usage.
+**`event_buf::tests`:**
+- `new_buf_is_empty` — Fresh buffer state
+- `push_and_pop_fifo` — FIFO ordering
+- `push_rejects_when_full` — Backpressure behaviour
+- `drain_returns_count` — Drain with callback
+- `drain_on_empty_returns_zero` — Empty drain
+- `producer_consumer_can_be_recreated` — Handle drop/recreate
+- `double_producer_panics` — SPSC enforcement
+- `double_consumer_panics` — SPSC enforcement
+- `wraps_around_correctly` — Multi-round wrap exercise
+- `default_is_new` — Default impl
+- `len_and_full_track_state` — len/is_empty/is_full tracking
+- `handles_are_send` — Producer/Consumer are Send
+
+**`seq_ring::tests`:**
+- `poll_one_empty_returns_false` — Empty ring behavior
+- `polls_in_order` — Sequential consumption
+- `drops_when_consumer_lags` — Overwrite/drop semantics
+- `latest_reads_newest` — Out-of-order read
+- `skip_to_latest_makes_next_poll_latest` — Cursor fast-forward
+- `capacity_returns_n` — capacity() API
+
+**`traits::tests`:**
+- `ringbuf_as_sink` — `RingBuf` implements `Sink`
+- `seq_producer_as_sink` — `seq_ring::Producer` implements `Sink`
+- `event_producer_as_sink` — `event_buf::Producer` implements `Sink`
+- `seq_consumer_as_source` — `seq_ring::Consumer` implements `Source`
+- `event_consumer_as_source` — `event_buf::Consumer` implements `Source`
+- `forward_seq_to_event` — SeqRing → EventBuf bridging
+- `forward_event_to_ringbuf` — EventBuf → RingBuf bridging
+- `forward_stops_when_sink_full` — Backpressure during forward
+- `forward_empty_source_transfers_nothing` — No-op forward
+- `generic_drain_seq` — Trait-generic code with SeqRing
+- `generic_drain_event` — Trait-generic code with EventBuf
+
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 46 unit tests + 7 doctests.
 
 ## Code Conventions
 
@@ -100,10 +168,11 @@ cargo test
 
 ### Safety Requirements
 
-- `T: Copy` constraint required for lock-free value returns
-- `T: Send` required for `SeqRing` to be `Sync`
-- Unsafe code is confined to `UnsafeCell` and `MaybeUninit` operations
-- No panics in hot paths; only assertion is in `SeqRing::new()` for `N > 0`
+- `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
+- `T: Default` additionally required by `RingBuf` for array initialisation
+- `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
+- Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
+- No panics in hot paths; only assertions are in `::new()` for `N > 0`
 
 ### Documentation Style
 
@@ -132,11 +201,20 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 
 ### Key Invariants to Preserve
 
-- Sequence 0 is reserved for "empty" state
-- Producer never blocks or returns errors
-- Consumer tracks dropped items accurately
-- Torn reads are impossible (double-sequence-check pattern)
-- Ring capacity `N` must be > 0
+- `RingBuf` is fully safe — no unsafe code, no interior mutability
+- `RingBuf`: Ring capacity `N` must be > 0
+- `RingBuf.len` is always ≤ `N`; `head` is always < `N`
+- `SeqRing`: Sequence 0 is reserved for "empty" state
+- `SeqRing`: Producer never blocks or returns errors
+- `SeqRing`: Consumer tracks dropped items accurately
+- `SeqRing`: Torn reads are impossible (double-sequence-check pattern)
+- `SeqRing`: Ring capacity `N` must be > 0
+- `EventBuf`: `push` must return `Err(val)` when full — never overwrite
+- `EventBuf`: `pop`/`drain` return items in strict FIFO order
+- `EventBuf`: Ring capacity `N` must be > 0
+- `EventBuf`: `head.wrapping_sub(tail)` always represents the item count
+- `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 
 ### Common Tasks
 

@@ -85,6 +85,12 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         }
     }
 
+    /// Maximum number of items the ring can hold.
+    #[inline]
+    pub const fn capacity(&self) -> usize {
+        N
+    }
+
     #[inline(always)]
     const fn idx_for(seq: u32) -> usize {
         ((seq.wrapping_sub(1)) as usize) % N
@@ -187,6 +193,15 @@ impl<T: Copy, const N: usize> Default for SeqRing<T, N> {
     }
 }
 
+impl<T: Copy, const N: usize> core::fmt::Debug for SeqRing<T, N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SeqRing")
+            .field("capacity", &N)
+            .field("published_seq", &self.published_seq.load(Ordering::Relaxed))
+            .finish()
+    }
+}
+
 /// Producer handle for writing into the ring.
 ///
 /// This handle is `!Sync` to prevent concurrent producers.
@@ -208,6 +223,14 @@ impl<'a, T: Copy, const N: usize> Producer<'a, T, N> {
 impl<'a, T: Copy, const N: usize> Drop for Producer<'a, T, N> {
     fn drop(&mut self) {
         self.ring.producer_taken.store(false, Ordering::Release);
+    }
+}
+
+impl<T: Copy, const N: usize> core::fmt::Debug for Producer<'_, T, N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("seq_ring::Producer")
+            .field("capacity", &N)
+            .finish()
     }
 }
 
@@ -347,6 +370,35 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
 impl<'a, T: Copy, const N: usize> Drop for Consumer<'a, T, N> {
     fn drop(&mut self) {
         self.ring.consumer_taken.store(false, Ordering::Release);
+    }
+}
+
+impl<T: Copy, const N: usize> core::fmt::Debug for Consumer<'_, T, N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("seq_ring::Consumer")
+            .field("capacity", &N)
+            .field("last_seq", &self.last_seq)
+            .field("dropped", &self.dropped_accum)
+            .finish()
+    }
+}
+
+impl<T: Copy, const N: usize> crate::traits::Sink<T> for Producer<'_, T, N> {
+    type Error = core::convert::Infallible;
+
+    #[inline]
+    fn try_push(&mut self, val: T) -> Result<(), core::convert::Infallible> {
+        self.push(val);
+        Ok(())
+    }
+}
+
+impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
+    #[inline]
+    fn try_pop(&mut self) -> Option<T> {
+        let mut result = None;
+        self.poll_one(|_seq, v| result = Some(*v));
+        result
     }
 }
 
@@ -533,5 +585,11 @@ mod tests {
 
         assert_eq!(seq, 1);
         assert_eq!(ring.next_seq.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn capacity_returns_n() {
+        let ring = SeqRing::<u32, 8>::new();
+        assert_eq!(ring.capacity(), 8);
     }
 }
