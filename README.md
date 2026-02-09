@@ -159,16 +159,31 @@ assert!(err.is_none());
 - `T: Copy` is required by all types to avoid allocation and return values by copy.
 
 ## Testing
-Host tests require `std` and can be run with:
+
+46 unit tests and 7 doctests covering all three buffer types plus the trait
+system. Host tests require `std`:
+
 ```
 cargo test
 ```
 
-Coverage snapshot (2026-02-04, via `cargo llvm-cov`):
-- Lines: 279/302 (92.38%)
-- Functions: 39/44 (88.64%)
-- Regions: 467/483 (96.69%)
-- Instantiations: 79/85 (92.94%)
+| Module | Tests |
+|--------|------:|
+| `event_buf` | 12 |
+| `ring` | 10 |
+| `seq_ring` | 13 |
+| `traits` | 11 |
+| doctests | 7 |
+| **Total** | **53** |
+
+Coverage snapshot (2026-02-08, via `cargo llvm-cov`):
+
+| Metric | Covered | Total | % |
+|--------|--------:|------:|--:|
+| Lines | 784 | 857 | 91.5 |
+| Functions | 115 | 130 | 88.5 |
+| Regions | 1392 | 1490 | 93.4 |
+| Instantiations | 220 | 237 | 92.8 |
 
 To regenerate:
 ```
