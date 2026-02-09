@@ -13,6 +13,7 @@ categories = ["embedded", "no-std", "concurrency"]
 publish = true
 exclude = [
     "CLAUDE.md",
+    "CONTRIBUTING.md",
     ".cargo/*",
     ".github/*",
     ".idea/*",
