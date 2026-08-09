@@ -102,13 +102,21 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Approximate number of items currently buffered.
     ///
-    /// This is a snapshot — by the time the caller acts on it the value may
-    /// already be stale.
+    /// Returns a consistent `(tail, head)` snapshot (retrying if `tail` moves
+    /// mid-load). The value may still be stale by the time the caller acts on
+    /// it, but it will not spuriously exceed [`capacity`](Self::capacity).
     #[inline]
     pub fn len(&self) -> usize {
-        let h = self.head.load(Ordering::Relaxed);
-        let t = self.tail.load(Ordering::Relaxed);
-        h.wrapping_sub(t) as usize
+        // Load tail around head so a concurrent consumer advance cannot make
+        // `head.wrapping_sub(tail)` look like a huge unsigned value.
+        loop {
+            let t1 = self.tail.load(Ordering::Acquire);
+            let h = self.head.load(Ordering::Acquire);
+            let t2 = self.tail.load(Ordering::Acquire);
+            if t1 == t2 {
+                return h.wrapping_sub(t1) as usize;
+            }
+        }
     }
 
     /// Returns `true` if the buffer contains no items (approximate).

@@ -86,7 +86,9 @@
 //! `SeqRing` and `EventBuf` require 32-bit atomics. For targets that lack them
 //! (for example `thumbv6m-none-eabi`), enable
 //! `portable-atomic-unsafe-assume-single-core` or `portable-atomic-critical-section`.
-//! `RingBuf` has no atomics requirement.
+//! The crate always compiles those modules, so no-atomic targets need one of
+//! those features even when only [`RingBuf`] is used. `RingBuf` itself uses no
+//! atomics.
 //!
 //! # Safety and concurrency
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.

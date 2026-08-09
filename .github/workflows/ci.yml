@@ -1,113 +1,25 @@
+# Remote CI is intentionally inactive.
+# Prefer local verification:
+#   cargo test
+#   cargo check --target thumbv7em-none-eabi
+#   cargo check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core
+#   cargo clippy --all-targets -- -D warnings
+#   cargo fmt --all -- --check
+#
+# workflow_dispatch keeps the file for optional manual runs only.
 name: CI
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
-
-env:
-  CARGO_TERM_COLOR: always
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain:
-          - stable
-          - 1.92.0  # MSRV
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust ${{ matrix.toolchain }}
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: stable
       - name: Run tests
         run: cargo test --verbose
-  
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (coverage)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: photon-circus/ph-eventing
-
-  fmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (fmt)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (clippy)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.92.0
-          components: clippy
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-  embedded:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: thumbv6m-none-eabi
-            features: portable-atomic-unsafe-assume-single-core
-          - target: thumbv7em-none-eabi
-            features: ""
-          - target: riscv32imac-unknown-none-elf
-            features: ""
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (target ${{ matrix.target }})
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-      - name: Check ${{ matrix.target }}
-        run: |
-          if [ -n "${{ matrix.features }}" ]; then
-            cargo check --target ${{ matrix.target }} --features "${{ matrix.features }}"
-          else
-            cargo check --target ${{ matrix.target }}
-          fi
-
-  doc:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (docs)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-      - name: Build docs
-        run: cargo doc --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings

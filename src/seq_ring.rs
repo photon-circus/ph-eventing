@@ -8,9 +8,10 @@
 //! - If the consumer lags by more than `N`, it skips ahead and reports the number of dropped items.
 //!
 //! # Memory ordering
-//! The producer writes the value, publishes the per-slot sequence, then publishes the newest
-//! sequence. The consumer validates the per-slot sequence before and after reading, which avoids
-//! torn reads when the producer overwrites a slot.
+//! The producer invalidates the per-slot sequence, writes the value, publishes the new per-slot
+//! sequence, then publishes the newest sequence. The consumer validates the per-slot sequence
+//! before and after reading, which avoids observing a new value under an old sequence number when
+//! the producer overwrites a slot.
 //!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.
@@ -147,11 +148,24 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         }
 
         let idx = Self::idx_for(seq);
+        // Invalidate before writing so a concurrent reader of the previous
+        // sequence cannot observe the new value under the old sequence number.
+        self.slot_seq[idx].store(0, Ordering::Relaxed);
+        core::sync::atomic::fence(Ordering::Release);
         unsafe { (*self.slots[idx].get()).as_mut_ptr().write(value) };
 
         self.slot_seq[idx].store(seq, Ordering::Release);
         self.published_seq.store(seq, Ordering::Release);
         seq
+    }
+
+    /// Advance past the reserved empty sequence `0`.
+    #[inline(always)]
+    const fn next_after(seq: u32) -> u32 {
+        match seq.wrapping_add(1) {
+            0 => 1,
+            n => n,
+        }
     }
 
     #[inline]
@@ -304,7 +318,7 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
 
             let lag = newest.wrapping_sub(self.last_seq) as usize;
             if lag > N {
-                let next = self.last_seq.wrapping_add(1);
+                let next = SeqRing::<T, N>::next_after(self.last_seq);
                 let keep_from = newest.wrapping_sub((N - 1) as u32);
                 let jump_drops = keep_from.wrapping_sub(next) as usize;
                 dropped += jump_drops;
@@ -312,7 +326,7 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
                 continue;
             }
 
-            let next = self.last_seq.wrapping_add(1);
+            let next = SeqRing::<T, N>::next_after(self.last_seq);
 
             match self.ring.read_seq_inner(next) {
                 Some(v) => {
@@ -585,6 +599,41 @@ mod tests {
 
         assert_eq!(seq, 1);
         assert_eq!(ring.next_seq.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn read_seq_inner_rejects_invalidated_slot() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let seq = producer.push(7);
+
+        ring.slot_seq[SeqRing::<u32, 4>::idx_for(seq)].store(0, Ordering::Release);
+
+        assert!(ring.read_seq_inner(seq).is_none());
+    }
+
+    #[test]
+    fn consumer_skips_reserved_seq_zero_on_wrap() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        ring.next_seq.store(u32::MAX - 1, Ordering::Relaxed);
+        assert_eq!(producer.push(10), u32::MAX);
+
+        consumer.skip_to_latest();
+        let mut got = None;
+        assert!(consumer.poll_one(|s, v| got = Some((s, *v))));
+        assert_eq!(got, Some((u32::MAX, 10)));
+
+        assert_eq!(producer.push(20), 1);
+
+        let mut got = None;
+        let stats = consumer.poll_up_to(4, |s, v| got = Some((s, *v)));
+
+        assert_eq!(stats.read, 1);
+        assert_eq!(stats.dropped, 0);
+        assert_eq!(got, Some((1, 20)));
     }
 
     #[test]
