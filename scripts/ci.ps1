@@ -29,7 +29,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipEmbedded,
-    [switch]$FailFast
+    [switch]$FailFast,
+    [int]$CoverageFloor = 90
 )
 
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -46,6 +47,17 @@ $checks = @(
 $denyInstalled = [bool](Get-Command cargo-deny -ErrorAction SilentlyContinue)
 if ($denyInstalled) {
     $checks += @{ Name = 'deny'; Args = @('deny', 'check') }
+}
+
+# Coverage floor. A gate, not a vanity number -- it fails only on a real drop,
+# so it cannot rot into decoration. cargo-llvm-cov uses its own target dir, so
+# this does not invalidate the normal build cache.
+$covInstalled = [bool](Get-Command cargo-llvm-cov -ErrorAction SilentlyContinue)
+if ($covInstalled) {
+    $checks += @{
+        Name = "coverage (>=$CoverageFloor% lines)"
+        Args = @('llvm-cov', '--summary-only', '--fail-under-lines', "$CoverageFloor")
+    }
 }
 
 if (-not $SkipEmbedded) {
@@ -89,6 +101,9 @@ Write-Host ''
 Write-Host 'Summary' -ForegroundColor Cyan
 if (-not $denyInstalled) {
     Write-Host '  SKIP  deny (not installed: cargo install cargo-deny)' -ForegroundColor Yellow
+}
+if (-not $covInstalled) {
+    Write-Host '  SKIP  coverage (not installed: cargo install cargo-llvm-cov)' -ForegroundColor Yellow
 }
 foreach ($result in $results) {
     if ($result.Ok) {

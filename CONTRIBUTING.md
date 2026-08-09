@@ -118,9 +118,10 @@ preserve these invariants:
    ./scripts/ci.sh      # POSIX
    ./scripts/ci.ps1     # Windows
    ```
-   That runs formatting, clippy, host tests, docs, and the `thumbv6m` /
-   `thumbv7em` / `riscv32imac` cross-compilation checks, then prints a
-   pass/fail summary.
+   That runs formatting, clippy, host tests, docs, cargo-deny, a 90% coverage
+   floor, and the `thumbv6m` / `thumbv7em` / `riscv32imac` cross-compilation
+   checks, then prints a pass/fail summary. Checks needing a separately
+   installed tool report `SKIP` rather than passing silently.
 5. Open a pull request against `master`. Describe what the change does and why.
 6. The maintainer will review and may request changes before merging.
 

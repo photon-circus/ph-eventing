@@ -1,2 +1,47 @@
+# Build output
 /target
+**/*.rs.bk
+*.profraw
+
+# ---------------------------------------------------------------------------
+# Editor, IDE, and AI/agent tooling state.
+#
+# These are per-developer settings, not project configuration. They were
+# previously covered only by individual developers' global git config, which
+# left a fresh clone free to commit them.
+#
+# Shared project config lives at the repo root and is tracked deliberately:
+# AGENTS.md, CLAUDE.md, .cargo/config.toml, deny.toml, rust-toolchain.toml.
+# To share something from an ignored directory, add a negation below rather
+# than relying on `git add -f`, so the decision is visible in the diff.
+# ---------------------------------------------------------------------------
+
+# AI / agent tooling
+.claude/
+.cursor/
+.cursorignore
+.cursorrules
+.windsurf/
+.aider*
+.continue/
+.codeium/
+.github/copilot-instructions.local.md
+
+# IDEs and editors
 .idea/
+.vscode/
+.zed/
+.fleet/
+.helix/
+*.iml
+*.code-workspace
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini

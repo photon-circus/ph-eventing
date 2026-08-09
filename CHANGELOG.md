@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.1.3 - 2026-08-09
 ### Fixed
 - `SeqRing`: the producer now invalidates a slot's sequence before overwriting it, so the consumer
   can no longer observe a fresh value under a stale sequence number.
@@ -30,11 +30,22 @@ All notable changes to this project will be documented in this file.
 - `cargo-deny` policy (`deny.toml`) covering security advisories, licences, banned and duplicate
   crates, and dependency sources. Included in the local CI run when installed, reported as skipped
   when not. The licence allow-list is `MIT` / `Apache-2.0` only.
+- Coverage gate in local CI via `cargo llvm-cov`, with a 90% line floor. Presence-gated, so a
+  missing tool reports as skipped rather than passing silently.
+- `.gitignore` entries for editor, IDE, and AI/agent tooling state. These were previously covered
+  only by individual developers' global git config, leaving a fresh clone free to commit them.
 - `AGENTS.md` as the canonical guidance for coding agents; `CLAUDE.md` is now a pointer to it.
+- Crate-level lints enforced at build time: `unsafe_op_in_unsafe_fn = "deny"`, plus warnings for
+  `missing_docs`, `missing_debug_implementations`, `unreachable_pub`,
+  `clippy::undocumented_unsafe_blocks`, and `clippy::{alloc,std}_instead_of_core`. Enabling
+  `missing_docs` surfaced seven undocumented public items, now documented.
+- `documentation` and `homepage` fields in the manifest.
 
 ### Changed
-- `LICENSE` and `README.md` are included in the published crate; `scripts/` and the agent docs are
-  excluded.
+- The published crate is now defined by an `include` allowlist instead of an `exclude` denylist.
+  Every new top-level file previously shipped by default until someone remembered to exclude it —
+  `deny.toml`, `scripts/`, and `AGENTS.md` each had to be added after the fact. `LICENSE` and
+  `README.md` are included; everything not named is not published.
 - GitHub Actions runs on manual dispatch only. Local CI is the primary gate.
 
 ### Known issues

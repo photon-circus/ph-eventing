@@ -58,6 +58,18 @@ else
     summary="${summary}  SKIP  deny (not installed)\n"
 fi
 
+# Coverage floor. A gate, not a vanity number -- it fails only on a real drop,
+# so it cannot rot into decoration. cargo-llvm-cov uses its own target dir, so
+# this does not invalidate the normal build cache.
+COVERAGE_FLOOR="${COVERAGE_FLOOR:-90}"
+if command -v cargo-llvm-cov >/dev/null 2>&1; then
+    run_check "coverage (>=${COVERAGE_FLOOR}% lines)" \
+        cargo llvm-cov --summary-only --fail-under-lines "$COVERAGE_FLOOR"
+else
+    printf '\n==> coverage\ncargo-llvm-cov not installed; skipping (cargo install cargo-llvm-cov)\n'
+    summary="${summary}  SKIP  coverage (not installed)\n"
+fi
+
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \

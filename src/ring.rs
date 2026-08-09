@@ -32,6 +32,10 @@ pub struct RingBuf<T: Copy + Default, const N: usize> {
 }
 
 impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
+    /// Create a new, empty ring buffer with every slot default-initialised.
+    ///
+    /// # Panics
+    /// Panics if `N == 0`.
     pub fn new() -> Self {
         assert!(N > 0, "RingBuf capacity N must be > 0");
         Self {
@@ -41,6 +45,10 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         }
     }
 
+    /// Append a value, overwriting the oldest entry once the ring is full.
+    ///
+    /// This never fails and never blocks; if losing the oldest entry is not
+    /// acceptable, use [`crate::EventBuf`], whose `push` reports when full.
     pub fn push(&mut self, val: T) {
         self.buf[self.head] = val;
         self.head = (self.head + 1) % N;
@@ -49,14 +57,18 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         }
     }
 
+    /// Number of elements currently stored, always in `0..=N`.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns `true` if the ring holds no elements.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Returns `true` if the ring is at capacity, so the next
+    /// [`push`](Self::push) will overwrite the oldest entry.
     pub fn is_full(&self) -> bool {
         self.len == N
     }
@@ -67,6 +79,10 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         N
     }
 
+    /// Drop every element, resetting the ring to empty.
+    ///
+    /// The backing array is left as-is; only the cursors are reset, so this is
+    /// O(1) and does not touch the stored values.
     pub fn clear(&mut self) {
         self.head = 0;
         self.len = 0;

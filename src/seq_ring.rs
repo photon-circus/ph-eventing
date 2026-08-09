@@ -79,6 +79,10 @@ static TEST_AFTER_READ_TARGET: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 static TEST_AFTER_READ_SEQ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+/// Outcome of a [`Consumer::poll_up_to`] or [`Consumer::poll_one`] call.
+///
+/// `read + dropped` accounts for every sequence the consumer advanced past, so
+/// the pair can be used to detect a lagging consumer without a separate probe.
 #[must_use]
 #[derive(Copy, Clone, Debug)]
 pub struct PollStats {

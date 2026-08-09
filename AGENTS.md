@@ -203,6 +203,31 @@ Policy lives in [deny.toml](deny.toml). Two things to know before editing it:
 are covered — verified by temporarily banning the crate and confirming the
 check fires without a CLI flag.
 
+### Coverage
+
+`cargo llvm-cov` runs as part of local CI with a **90% line floor**, so it is a
+gate rather than a number nobody reads. It is presence-gated like cargo-deny —
+`SKIP` when the tool is absent, never a silent pass:
+
+```bash
+cargo install cargo-llvm-cov     # one-time
+cargo llvm-cov --summary-only    # or: cargo cov
+```
+
+Coverage is **not deterministic** in this crate: the threaded stress tests take
+different paths each run. Three consecutive runs on one commit gave 93.18%,
+93.46%, 93.18% lines. Leave slack between the floor and the observed spread —
+a floor set at the best observed run will fail intermittently for no reason.
+Raise it only with evidence from several runs, and never lower it to make a run
+pass.
+
+Read the number with the right expectations. Coverage cannot see the
+properties that actually matter here — ordering and interleaving — so it is a
+regression alarm for untested branches, not evidence of concurrency
+correctness. Miri and Loom are that evidence. Some uncovered lines are
+deliberately hard to reach single-threaded, such as the `EventBuf::len` clamp
+fallback, which needs the consumer to move during every retry.
+
 ### Model checking (Loom)
 
 Miri samples schedules; Loom is exhaustive. It enumerates every legal execution
@@ -252,6 +277,7 @@ Individual checks are also available as cargo aliases (see
 | `cargo lint` | `clippy --all-targets -- -D warnings` |
 | `cargo docs` | `doc --no-deps` |
 | `cargo supply` | `deny check` (needs `cargo install cargo-deny`) |
+| `cargo cov` | `llvm-cov --summary-only` (needs `cargo install cargo-llvm-cov`) |
 | `cargo emb-thumbv6m` | `check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core` |
 | `cargo emb-thumbv7em` | `check --target thumbv7em-none-eabi` |
 | `cargo emb-riscv32imac` | `check --target riscv32imac-unknown-none-elf` |
@@ -410,6 +436,8 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Removing or weakening atomic ordering (Loom will catch it — a `Release` downgraded to `Relaxed` fails three models immediately)
 - Adding runtime dependencies, or moving `loom` out of `[target.'cfg(loom)'.dev-dependencies]`
 - Widening `deny.toml`'s licence allow-list or adding an `[advisories] ignore` entry to make a check pass, rather than to record a decision
+- Lowering the coverage floor in `scripts/ci.*` to make a run pass
+- Committing editor, IDE, or AI/agent settings. `.gitignore` covers the common ones; shared project config belongs at the repo root
 - Importing `core::sync::atomic` directly in `event_buf.rs` or `seq_ring.rs` instead of `crate::sync`
 - Breaking API compatibility without explicit request
 - Adding `std`-only features to the main library path
