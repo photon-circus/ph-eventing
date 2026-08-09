@@ -147,6 +147,7 @@ assert!(err.is_none());
 - When the producer wraps the ring, old values are overwritten.
 - `poll_one` and `poll_up_to` drain in-order and return `PollStats` (`read`, `dropped`, `newest`).
 - `latest` reads the newest value without advancing the consumer cursor.
+- `skip_to_latest` discards the backlog so the next poll returns the newest item.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 
 ### EventBuf
@@ -179,134 +180,60 @@ assert!(err.is_none());
   - Full reasoning, including the alternatives and why each was rejected, is in the `seq_ring`
     module docs.
 
-## Testing
+## Using it across contexts
 
-54 unit tests and 7 doctests covering all three buffer types plus the trait
-system. Host tests require `std`:
+The typical embedded shape is a producer in an interrupt handler and a consumer
+in a task loop. That works, with three things to know:
 
-```
-cargo test
-```
+- **The buffer is shared; the handles are owned.** `SeqRing<T, N>` and
+  `EventBuf<T, N>` are `Sync` when `T: Send`, so `&buf` can be handed to both
+  contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
+  the context that owns it, and never share a single handle between contexts.
+  There is no way to get a second `Producer` while one is live: `producer()`
+  panics rather than handing out a duplicate.
+- **The buffer must outlive both handles.** The handles borrow it, so the usual
+  answer is to own the buffer where it lives longest.
+- **`new()` is not a `const fn`**, so you cannot write
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` directly. Use a
+  `StaticCell`, a `OnceCell`, or a binding in `main` that outlives the tasks
+  borrowing it. This is the one ergonomic wrinkle on embedded targets and it is
+  worth knowing before you design around it.
 
-| Module | Tests |
-|--------|------:|
-| `event_buf` | 14 |
-| `ring` | 10 |
-| `seq_ring` | 19 |
-| `traits` | 11 |
-| doctests | 7 |
-| **Total** | **61** |
+### Choosing `N`
 
-### Concurrency checking
+`N` is the slot count, fixed at compile time, and the whole buffer lives inline
+— `N * size_of::<T>()` bytes of stack or static, with no allocation.
 
-`SeqRing` and `EventBuf` are lock-free, so a green `cargo test` on x86 proves
-very little — a strongly-ordered host hides exactly the ordering bugs that
-matter on ARM and RISC-V. `scripts/miri.ps1` / `scripts/miri.sh` run the suite
-under [Miri](https://github.com/rust-lang/miri), which interprets MIR against
-the C++20 weak-memory model:
+- For `EventBuf`, `N` is your backpressure threshold: the point at which `push`
+  starts returning `Err`. Size it for the largest burst you are willing to
+  absorb between drains.
+- For `SeqRing`, `N` is how far the consumer may lag before it starts losing
+  entries. Size it for the worst-case gap between polls, not for the average.
+- `N` need not be a power of two. Nothing here requires it.
 
-```
-./scripts/miri.sh
-```
+## Quality and verification
 
-It makes three host passes — full checking, the `SeqRing` overwrite test with
-the data-race detector off (see below), and a multi-seed scheduler sweep —
-then repeats the full pass on 32-bit and big-endian targets.
+`SeqRing` and `EventBuf` are lock-free, so a green test run on x86 is weak
+evidence — a strongly-ordered host cannot exhibit the ordering bugs that appear
+on ARM and RISC-V. What backs this crate, in descending order of strength:
 
-Miri needs `std` for the test harness, so the bare-metal targets cannot be run
-directly. `i686-unknown-linux-gnu` and `armv7-unknown-linux-gnueabihf` stand in
-for them: same 32-bit pointer width and `usize` range, which is what the
-sequence and cursor arithmetic actually depends on. `s390x-unknown-linux-gnu`
-covers big-endian.
+| Evidence | What it establishes |
+|----------|---------------------|
+| [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
+| [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
+| 54 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
-**Known deviation:** `SeqRing` is a seqlock, and seqlocks are formally racy —
-the consumer may copy a slot while the producer overwrites it, then discard the
-copy after the sequence re-check fails. Miri reports that copy as UB, correctly;
-this cannot be fixed in stable Rust for an arbitrary `T: Copy`. See the
-`seq_ring` module docs for the full reasoning. `EventBuf` has no such deviation
-and passes Miri with the race detector on.
+**One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
+see [Safety and Concurrency](#safety-and-concurrency) above. `EventBuf` is
+race-free by construction and passes Miri with the detector enabled.
 
-### Model checking
+Coverage is around 93% of lines, though it is a weak signal here: what matters
+is ordering and interleaving, which line coverage cannot see.
 
-Miri samples schedules; [Loom](https://github.com/tokio-rs/loom) is exhaustive.
-It enumerates every legal execution of a model — every interleaving, and every
-value each relaxed load may return under the C11 memory model — so a clean run
-proves the absence of ordering bugs at the modelled size:
-
-```
-./scripts/loom.sh
-```
-
-Five models in `src/loom_tests.rs` cover `EventBuf` (lossless FIFO delivery,
-the `len` capacity bound, and never reading unpublished data) and the `SeqRing`
-sequence protocol (the consumer never outruns the producer; `latest` never
-reports an unpublished sequence). They use capacity-2 buffers and two or three
-operations per thread, because the state space grows exponentially and bugs
-that need four items are vanishingly rare.
-
-**Loom does not affect the shipped crate.** It is a dev-dependency gated on
-`--cfg loom`, which only the script sets, so `cargo build`, `cargo test`, and
-`cargo package` never resolve it — `cargo tree` still shows zero dependencies.
-
-### Local CI
-
-This project runs its CI locally. `scripts/ci.ps1` (Windows) and
-`scripts/ci.sh` (POSIX) run the full matrix — formatting, clippy, host tests,
-docs, and the `thumbv6m` / `thumbv7em` / `riscv32imac` cross-compilation
-checks:
-
-```
-./scripts/ci.sh
-```
-
-Every check runs even if an earlier one fails, and a summary is printed at the
-end. Pass `-SkipEmbedded` / `SKIP_EMBEDDED=1` to skip the cross-compilation
-checks. The GitHub Actions workflow mirrors the same jobs but is
-manual-dispatch only.
-
-### Supply chain
-
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) enforces the
-zero-dependency stance rather than leaving it to good intentions — it fails on
-a new dependency's licence, a security advisory, a yanked crate, a duplicate
-version, a wildcard requirement, or a non-crates.io source:
-
-```
-cargo install cargo-deny
-cargo deny check
-```
-
-The policy is in [deny.toml](deny.toml), and the local CI runner includes it
-when the tool is installed (and reports it as skipped when it is not). The
-licence allow-list is deliberately just `MIT` and `Apache-2.0`; anything else
-requires a deliberate edit.
-
-### Coverage
-
-Local CI enforces a **90% line floor** via `cargo llvm-cov`, so this is a gate
-rather than a number nobody reads:
-
-```
-cargo install cargo-llvm-cov
-cargo llvm-cov --summary-only
-```
-
-Measured over the 54 unit tests with `cargo llvm-cov 0.8.7` at commit
-`45aaeb9` — approximately **93% lines, 94% regions, 91% functions**. Doctests
-are not instrumented by default.
-
-The figures are given as approximate on purpose. Three consecutive runs on the
-same commit produced 93.18%, 93.46%, and 93.18% lines: the threaded stress
-tests take different paths each run, so coverage is not deterministic here. An
-exact table would imply a precision the measurement does not have. The 90%
-floor sits comfortably below that spread.
-
-Read the number with the right expectations. Coverage cannot see the properties
-that actually matter for this crate — ordering and interleaving — so it is a
-regression alarm for untested branches, not evidence of concurrency
-correctness. The Miri and Loom runs above are that evidence. Some uncovered
-lines are deliberately hard to reach single-threaded: the `EventBuf::len` clamp
-fallback, for instance, needs the consumer to move during every retry.
+Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running
+all of the above locally. Note that **CI does not run automatically** on this
+repository — the local runs are the gate.
 
 ## License
 MIT. See `LICENSE`.

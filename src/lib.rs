@@ -109,6 +109,24 @@
 //!   was rejected. [`EventBuf`] has no such caveat, but applies backpressure
 //!   rather than overwriting, so it is not a drop-in replacement.
 //!
+//! # Using it across contexts
+//! The typical embedded shape is a producer in an interrupt handler and a
+//! consumer in a task loop.
+//!
+//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, so `&buf` can be
+//!   handed to both contexts. The `Producer` and `Consumer` handles are
+//!   `Send + !Sync`: move each into the context that owns it, never share one.
+//! - The handles borrow the buffer, so the buffer must outlive them.
+//! - **`new()` is not a `const fn`**, so
+//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` will not compile. Use a
+//!   `StaticCell`, a `OnceCell`, or a binding in `main` that outlives its
+//!   borrowers.
+//!
+//! `N` is fixed at compile time and the buffer lives inline —
+//! `N * size_of::<T>()` bytes, no allocation. For [`EventBuf`] it is the
+//! backpressure threshold; for [`SeqRing`] it is how far the consumer may lag
+//! before entries are lost. It need not be a power of two.
+//!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 //! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.

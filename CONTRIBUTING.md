@@ -98,8 +98,33 @@ cannot exhibit the bugs that appear on ARM and RISC-V. Run both checkers:
 
 Miri needs `rustup component add --toolchain nightly miri`. Loom needs nothing
 installed — it is a dev-dependency gated on `--cfg loom` that the script sets,
-and it never enters a normal build. `SeqRing` has one known, documented Miri
-deviation; see its module docs before assuming a report is new.
+and it never enters a normal build.
+
+What each pass is for:
+
+- **Miri** makes three host passes — full checking, the `SeqRing` overwrite test
+  with the data-race detector off, and a multi-seed scheduler sweep — then
+  repeats the full pass on 32-bit and big-endian targets. The bare-metal targets
+  cannot be run: Miri needs `std` for the test harness. `i686` and
+  `armv7-unknown-linux-gnueabihf` stand in for them, sharing the 32-bit pointer
+  width and `usize` range the cursor arithmetic depends on; `s390x` covers
+  big-endian. That is not academic — the 32-bit pass caught a real counter
+  overflow the 64-bit host could not see.
+- **Loom** is exhaustive where Miri samples. Keep models tiny (capacity 2, two
+  or three operations per thread): the state space grows exponentially.
+
+`SeqRing` has one known, documented Miri deviation — it is a seqlock, and the
+race is real by the letter of the memory model. Read its module docs before
+reporting a Miri finding as new.
+
+### Coverage
+
+Local CI enforces a 90% line floor via `cargo llvm-cov`. Coverage is **not
+deterministic** here — the threaded stress tests take different paths per run —
+so leave slack rather than setting the floor at the best observed run.
+
+Deeper detail on all of the above, including the traps that silently invalidate
+the checkers, is in [AGENTS.md](AGENTS.md).
 
 ## What to Contribute
 
