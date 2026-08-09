@@ -6,6 +6,8 @@
 //! - Sequence numbers are monotonically increasing `u32`; `0` is reserved to mean "empty".
 //! - The consumer can drain in-order (`poll_one`/`poll_up_to`) or sample the newest value (`latest`).
 //! - If the consumer lags by more than `N`, it skips ahead and reports the number of dropped items.
+//!   The one exception is the sequence wrap, which can drop a few extra entries depending on `N` —
+//!   see "Known limitation: extra drops at the sequence wrap" below.
 //!
 //! # Memory ordering
 //! The producer invalidates the per-slot sequence, writes the value, publishes the new per-slot
@@ -75,6 +77,40 @@
 //! - Keeping `T` small and padding-free does not remove the formal race, but it does remove any
 //!   realistic tearing: a word-sized payload is copied by a single instruction on every target
 //!   this crate supports.
+//!
+//! # Known limitation: extra drops at the sequence wrap
+//!
+//! Everywhere else these docs say the consumer keeps the last `N` entries and only loses data once
+//! it lags by more than `N`. That holds for all but one moment in the ring's life: the point where
+//! the sequence counter wraps, once every `2^32 - 1` pushes.
+//!
+//! Slots are addressed by `(seq - 1) % N`, but `push` skips the reserved value `0`, so a full
+//! cycle is `2^32 - 1` sequences rather than `2^32`. Unless `N` divides `2^32 - 1`, the slot walk
+//! does not line up across the wrap: the index jumps instead of advancing by one, and for a window
+//! straddling the wrap two live sequences can share a slot. The older of the two is overwritten
+//! before the consumer had its full `N` entries of slack.
+//!
+//! How much is lost depends entirely on `N`:
+//!
+//! | `N` | Entries lost, once per wrap |
+//! |-----|-----------------------------|
+//! | A power of two | Exactly 1 |
+//! | A divisor of `2^32 - 1` (3, 5, 15, 17, 51, 85, 255, 257, 65537, …) | 0 — the walk is seamless |
+//! | Anything else | Up to `N - 1`; e.g. `N = 48` loses 15, `N = 96` loses 33, `N = 121` loses 58 |
+//!
+//! **This is a data-loss bound, not a soundness problem.** The affected read fails its sequence
+//! check and is counted in [`PollStats::dropped`], so `read + dropped` still accounts for every
+//! published item and no stale or torn value is ever returned. It is indistinguishable from the
+//! ordinary lag-induced drops the consumer already reports.
+//!
+//! The same misalignment makes the lag-recovery jump resume up to one sequence later than it
+//! strictly needs to. That is bounded by the table above and reported identically.
+//!
+//! Practical advice: **prefer a power of two for `N`** — the cost is one lost entry per `2^32`
+//! pushes, which is beneath the noise floor for any workload that also tolerates overwrite. Pick a
+//! divisor of `2^32 - 1` if you want the wrap to be exactly seamless. Avoid values like 96 or 121
+//! if a burst of drops at a predictable interval would matter to you. If no loss is acceptable at
+//! all, [`crate::EventBuf`] applies backpressure instead and has no wrap boundary of this kind.
 //!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.

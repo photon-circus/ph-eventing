@@ -149,6 +149,10 @@ assert!(err.is_none());
 - `latest` reads the newest value without advancing the consumer cursor.
 - `skip_to_latest` discards the backlog so the next poll returns the newest item.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
+- Once every `2^32 - 1` pushes the sequence counter wraps and a few extra entries are dropped —
+  exactly one for a power-of-two `N`, none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. They
+  are reported as ordinary drops; no stale or torn value is ever returned. See
+  [Choosing `N`](#choosing-n).
 
 ### EventBuf
 - FIFO order: `pop` always returns the oldest item.
@@ -209,7 +213,21 @@ in a task loop. That works, with three things to know:
   absorb between drains.
 - For `SeqRing`, `N` is how far the consumer may lag before it starts losing
   entries. Size it for the worst-case gap between polls, not for the average.
-- `N` need not be a power of two. Nothing here requires it.
+- `N` need not be a power of two — no indexing or capacity logic requires it — but for `SeqRing`
+  a power of two is still the better default. `SeqRing` addresses slots by `(seq - 1) % N` while
+  `push` skips the reserved sequence `0`, so a full cycle is `2^32 - 1` sequences and the slot walk
+  only lines up across the wrap when `N` divides `2^32 - 1`. What that costs, once per wrap:
+
+  | `N` | Entries dropped at the wrap |
+  |-----|-----------------------------|
+  | A power of two | Exactly 1 |
+  | A divisor of `2^32 - 1` (3, 5, 15, 17, 51, 85, 255, 257, 65537, …) | 0 |
+  | Anything else | Up to `N - 1` — `N = 48` drops 15, `N = 96` drops 33, `N = 121` drops 58 |
+
+  These are reported through `PollStats` like any other drop, and no stale or torn value is ever
+  returned — it is a data-loss bound, not a correctness one. One lost entry per `2^32` pushes is
+  beneath the noise floor for anything that already tolerates overwrite, so a power of two is
+  almost always the right call. `EventBuf` has no wrap boundary of this kind.
 
 ## Quality and verification
 

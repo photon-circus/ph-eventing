@@ -132,6 +132,10 @@
 //! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.
 //! - `latest` reads the newest value without advancing the consumer cursor.
 //! - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
+//! - Once every `2^32 - 1` pushes the sequence counter wraps, and a few extra entries are dropped
+//!   there because `push` skips the reserved sequence `0`: exactly one for a power-of-two `N`,
+//!   none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. Reported as ordinary drops, never a
+//!   stale or torn value. Prefer a power of two for `N`; see the [`seq_ring`] module docs.
 //! - `Consumer::dropped` saturates rather than wrapping; `usize` is 32 bits on
 //!   the targets this crate ships to, so a long-lived lagging consumer can
 //!   reach the top of the range.

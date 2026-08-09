@@ -3,8 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
-
-Nothing yet. See [RELEASING.md](RELEASING.md) for how an entry here becomes a release.
+### Documentation
+- `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
+  by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`
+  sequences and the slot walk only lines up across the wrap when `N` divides `2^32 - 1`. Once per
+  wrap this drops exactly one entry for a power-of-two `N`, none for a divisor of `2^32 - 1`, and
+  up to `N - 1` otherwise (`N = 96` drops 33, `N = 121` drops 58). The affected reads fail their
+  sequence check and are counted in `PollStats::dropped`, so this is a data-loss bound and not a
+  soundness issue — no stale or torn value is returned, and `read + dropped` still accounts for
+  every published item. Every other statement in the docs implies lag `<= N` is lossless, which
+  was true apart from this one boundary. `README.md` now recommends a power-of-two `N` for
+  `SeqRing` rather than only noting that one is not required.
+- `.github/dependabot.yml`: corrected the guidance for validating a Dependabot PR. It pointed at
+  `./scripts/ci.sh`, which never invokes an action and so cannot validate an actions bump. It now
+  names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
+  the workflow after merge.
 
 ## 0.1.3 - 2026-08-09
 ### Fixed
