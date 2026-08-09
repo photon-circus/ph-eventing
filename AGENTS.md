@@ -44,6 +44,7 @@ ph-eventing/
 │   ├── loom.ps1            # Loom model checking (Windows)
 │   └── loom.sh             # Loom model checking (POSIX)
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
+├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
@@ -175,6 +176,19 @@ real `dropped_accum` overflow that the 64-bit host run could not.
 "fix" it by weakening the sequence guards, and do not silence it by disabling
 the race detector globally — the split-pass structure exists so everything else
 stays fully checked. See the `seq_ring` module docs.
+
+### Releasing
+
+Follow [RELEASING.md](RELEASING.md). Two things it exists to stop:
+
+- Publishing on a run that reported `SKIP` for an uninstalled tool. A `SKIP` is
+  not a pass, and nothing checks the branch remotely.
+- Treating a pre-1.0 breaking change as a patch bump. Under Cargo's semver
+  rules the **minor** position is the breaking one below 1.0, so a behaviour
+  change a caller could rely on means `0.1.x` → `0.2.0`.
+
+`cargo publish` cannot be undone. A yank discourages new use but does not
+delete the version or free the number.
 
 ### Supply chain (cargo-deny)
 

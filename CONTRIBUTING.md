@@ -133,6 +133,12 @@ preserve these invariants:
 - Prefer `const fn` where possible.
 - Public APIs must have doc comments.
 
+## Releasing
+
+Maintainers: see [RELEASING.md](RELEASING.md) for the release checklist —
+version choice, the verification runs, what ships, and what a yank does and
+does not do.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the

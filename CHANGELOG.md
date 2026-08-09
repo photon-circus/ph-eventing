@@ -40,6 +40,8 @@ All notable changes to this project will be documented in this file.
   `clippy::undocumented_unsafe_blocks`, and `clippy::{alloc,std}_instead_of_core`. Enabling
   `missing_docs` surfaced seven undocumented public items, now documented.
 - `documentation` and `homepage` fields in the manifest.
+- `RELEASING.md` — release checklist covering version choice under pre-1.0 semver, the
+  verification runs, what ships, and yank semantics.
 
 ### Changed
 - The published crate is now defined by an `include` allowlist instead of an `exclude` denylist.
