@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+Nothing yet. See [RELEASING.md](RELEASING.md) for how an entry here becomes a release.
+
 ## 0.1.3 - 2026-08-09
 ### Fixed
 - `SeqRing`: the producer now invalidates a slot's sequence before overwriting it, so the consumer
