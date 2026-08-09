@@ -121,11 +121,17 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
         // `tail` held still, so `head.wrapping_sub(tail)` cannot appear as a
         // huge unsigned value after a concurrent consumer advance.
         //
-        // The two barriers pin the `head` load between the samples: the
-        // Acquire load stops it being hoisted above `t1`, and the Acquire
-        // fence stops it sinking below `t2` (a fence orders preceding loads
-        // ahead of everything that follows, which a plain Acquire *load* on
-        // `t2` would not do).
+        // The two barriers pin the `head` load between the samples. They also
+        // make equality a sound bound: if `h` observes a producer publication
+        // that reused consumer-freed space, the following Acquire fence
+        // synchronizes through that Relaxed load. The producer acquired the
+        // newer `tail` before publishing `h`, so `t2` cannot then observe an
+        // older tail. Thus `t1 == t2` implies `h - t1 <= N`.
+        //
+        // This depends on EventBuf's backpressure protocol: the producer reads
+        // `tail` with Acquire before advancing `head`. It is not a generic
+        // double-sampling property. See AGENTS.md for the full happens-before
+        // chain.
         for _ in 0..RETRY_LIMIT {
             let t1 = self.tail.load(Ordering::Acquire);
             let h = self.head.load(Ordering::Relaxed);

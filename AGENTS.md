@@ -110,6 +110,33 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - Producer and consumer never touch the same slot, so the slots themselves are race-free; only the cursors are shared.
 - `len()` is the one observer reading both cursors. It brackets its `head` load between two `tail` samples (Acquire load, then `fence(Acquire)`), retries a bounded number of times, then falls back to a clamped estimate so it is always wait-free.
 
+#### Why `EventBuf::len` cannot exceed capacity on a successful snapshot
+
+The tempting counterexample is a capacity-2 queue where the consumer frees one
+slot, the producer publishes a third item, and `len()` appears to read
+`tail = 0`, `head = 3`, `tail = 0`. That execution is forbidden; do not add a
+clamp to the successful path as a substitute for preserving the ordering:
+
+1. The consumer's `tail.store(1, Release)` synchronizes with the producer's
+   `tail.load(Acquire)` that permits the third push.
+2. That load is sequenced before the producer's `head.store(3, Release)`.
+3. If `len()`'s Relaxed `head` load reads `3`, its following Acquire fence
+   synchronizes with that Release store. An Acquire fence deliberately upgrades
+   a preceding Relaxed load that reads from a Release store.
+4. The second `tail` load is sequenced after the fence. By transitive
+   happens-before and atomic write-read coherence, it cannot read the older
+   `tail = 0`; it must see `1` or later, so the two tail samples differ and
+   `len()` retries.
+
+The proof is specific to `EventBuf`: backpressure forces the producer to
+Acquire-load freed `tail` space before Release-publishing a reused `head`.
+It does not apply to `SeqRing`, whose producer overwrites without observing a
+consumer cursor. Both barriers in `len()` and both producer cursor orderings are
+therefore load-bearing. Clamping the equality branch would keep the return value
+in range after an ordering regression and could hide the broken snapshot from
+tests; retain the unclamped branch so its bound continues to follow from the
+memory-ordering proof.
+
 ### Internal model (SeqRing)
 
 The public API is on docs.rs; this is the part you cannot infer from it. Three
