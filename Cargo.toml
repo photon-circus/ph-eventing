@@ -20,6 +20,7 @@ exclude = [
     "CLAUDE.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
+    "scripts/*",
     "SECURITY.md",
 ]
 
@@ -37,3 +38,12 @@ portable-atomic-critical-section = [
     "portable-atomic",
     "portable-atomic/critical-section",
 ]
+
+# Loom is a dev-dependency gated on `--cfg loom`, so a normal `cargo build`,
+# `cargo test`, or `cargo package` never resolves or downloads it. The library
+# itself keeps zero runtime dependencies.
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

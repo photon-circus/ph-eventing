@@ -30,11 +30,20 @@ ph-eventing/
 ├── rust-toolchain.toml     # Rust 1.92.0 with embedded targets
 ├── README.md               # User documentation
 ├── LICENSE                 # MIT license
+├── scripts/
+│   ├── ci.ps1              # Local CI matrix (Windows)
+│   ├── ci.sh               # Local CI matrix (POSIX)
+│   ├── miri.ps1            # Miri UB/concurrency checks (Windows)
+│   ├── miri.sh             # Miri UB/concurrency checks (POSIX)
+│   ├── loom.ps1            # Loom model checking (Windows)
+│   └── loom.sh             # Loom model checking (POSIX)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
+    ├── sync.rs             # Atomic/cell shim — swaps in Loom's primitives under --cfg loom
+    ├── loom_tests.rs       # Exhaustive concurrency models (--cfg loom only)
     └── traits.rs           # Sink, Source, Link traits and forward() utility
 ```
 
@@ -59,9 +68,12 @@ ph-eventing/
 ### Memory Ordering Strategy (SeqRing)
 
 The `SeqRing` implementation uses careful atomic ordering for thread safety:
-- **Producer writes:** `Ordering::Release` to publish slot and sequence
-- **Consumer reads:** `Ordering::Acquire` to validate sequences
-- **Torn-read prevention:** Double-check slot sequence before/after value read
+- **Producer writes:** invalidate `slot_seq` to `0`, `fence(Release)`, write the value, then publish `slot_seq` and `published_seq` with `Ordering::Release`
+- **Consumer reads:** validate `slot_seq` with `Ordering::Acquire`, copy the value, `fence(Acquire)`, re-check `slot_seq`
+- **Torn-read prevention:** double-check slot sequence before/after the value read
+- **Fences, not just ordered accesses:** the `Release`/`Acquire` *fences* bracket the value access. Ordering on the `slot_seq` store/load alone is one-way and would let the value access drift across the guard it is meant to sit inside.
+- **Volatile slot access:** the value is read and written with `read_volatile`/`write_volatile`, and the consumer holds its copy as `MaybeUninit<T>` until the re-check passes, so a raced copy is discarded as raw bytes and never becomes an invalid `T`.
+- **Sequence arithmetic:** use `seq_distance`, not raw `wrapping_sub` — the latter over-counts by one across the wrap because `push` skips the reserved `0`.
 
 `RingBuf` uses no atomics — it is a plain struct with `&mut self` mutation.
 
@@ -71,6 +83,8 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - **Producer:** owns `head` (Relaxed load, Release store), reads `tail` with Acquire.
 - **Consumer:** owns `tail` (Relaxed load, Release store), reads `head` with Acquire.
 - The Release/Acquire on the cursor stores/loads act as the publication fence for slot data.
+- Producer and consumer never touch the same slot, so the slots themselves are race-free; only the cursors are shared.
+- `len()` is the one observer reading both cursors. It brackets its `head` load between two `tail` samples (Acquire load, then `fence(Acquire)`), retries a bounded number of times, then falls back to a clamped estimate so it is always wait-free.
 
 ### Consumer Polling Modes (SeqRing)
 
@@ -97,6 +111,115 @@ cargo doc --open
 # Check for specific embedded target
 cargo check --target thumbv7em-none-eabi
 ```
+
+### Local CI
+
+CI for this project runs locally; the GitHub Actions workflow mirrors the same
+jobs but is `workflow_dispatch` only, so nothing runs automatically on push or
+PR. Run the full matrix — fmt, clippy, test, doc, and the `thumbv6m` /
+`thumbv7em` / `riscv32imac` cross-compilation checks — before every commit:
+
+```bash
+./scripts/ci.sh          # POSIX
+```
+
+```powershell
+./scripts/ci.ps1         # Windows
+```
+
+Every check runs even if an earlier one fails; a pass/fail summary is printed
+at the end and the exit code is non-zero if anything failed. Skip the
+cross-compilation checks with `SKIP_EMBEDDED=1` / `-SkipEmbedded`, and stop at
+the first failure with `FAIL_FAST=1` / `-FailFast`.
+
+### Concurrency checking (Miri)
+
+`cargo test` passing on x86 proves little about `SeqRing` and `EventBuf` — a
+strongly-ordered host hides the ordering bugs that appear on ARM and RISC-V.
+Run Miri after **any** change to atomics, orderings, fences, or unsafe blocks:
+
+```bash
+./scripts/miri.sh        # POSIX; SEEDS=64 for deeper schedule exploration
+```
+
+```powershell
+./scripts/miri.ps1       # Windows; -Seeds 64
+```
+
+Requires the nightly toolchain and the `miri` component:
+`rustup component add --toolchain nightly miri`.
+
+Three host passes plus cross-target passes:
+
+| Pass | Purpose |
+|------|---------|
+| full checking (skips the `SeqRing` overwrite test) | UB, data races, provenance, leaks |
+| `SeqRing` overwrite test, race detector off | seqlock logic under Miri's scheduler |
+| multi-seed sweep | schedule exploration across interleavings |
+| `i686` / `armv7` / `s390x` | 32-bit pointer width and big-endian |
+
+**Miri cannot run the bare-metal targets** — it needs `std` for the test
+harness, and `thumbv*` / `riscv32imac` have none. The 32-bit std targets are the
+stand-in: same pointer width and `usize` range, which is what the sequence and
+cursor arithmetic depends on. This is not academic — the 32-bit pass caught a
+real `dropped_accum` overflow that the 64-bit host run could not.
+
+**`SeqRing` has a known, documented data race** (it is a seqlock). Do not
+"fix" it by weakening the sequence guards, and do not silence it by disabling
+the race detector globally — the split-pass structure exists so everything else
+stays fully checked. See the `seq_ring` module docs.
+
+### Model checking (Loom)
+
+Miri samples schedules; Loom is exhaustive. It enumerates every legal execution
+of a model — every interleaving, and every value a relaxed load may return —
+so a clean run proves the absence of ordering bugs at the modelled size.
+
+```bash
+./scripts/loom.sh                     # POSIX
+./scripts/loom.sh event_buf           # filter by name
+```
+
+```powershell
+./scripts/loom.ps1 -Filter event_buf -MaxPreemptions 3
+```
+
+Models live in [src/loom_tests.rs](src/loom_tests.rs). **Keep them tiny** —
+capacity 2, two or three operations per thread. The state space grows
+exponentially; raising `MaxPreemptions` or adding a fourth push can turn a
+5-second run into an unbounded one.
+
+Loom substitutes its own instrumented atomics and cells via
+[src/sync.rs](src/sync.rs). Rules when touching that shim:
+
+- **Never import `core::sync::atomic` directly in `event_buf.rs` or
+  `seq_ring.rs`** — go through `crate::sync`, or Loom silently stops modelling
+  that access and the models become worthless while still passing.
+- Loom's atomics are **not const-constructible**. Anything in a `static` must
+  use `core` atomics explicitly (see the test hook in `seq_ring.rs`).
+- `EventBuf` slots use `sync::TrackedCell` so Loom can verify that the producer
+  and consumer never touch the same slot. `SeqRing` slots deliberately use
+  `core::cell::UnsafeCell` — its slot access is racy by construction, and
+  tracking it would only re-report the documented deviation.
+
+**Loom must never become a runtime dependency.** It is declared under
+`[target.'cfg(loom)'.dev-dependencies]`, so a normal build never resolves it.
+After changing `Cargo.toml`, confirm with `cargo tree` — it must print the
+crate alone, with no dependencies.
+
+Individual checks are also available as cargo aliases (see
+[.cargo/config.toml](.cargo/config.toml)):
+
+| Alias | Runs |
+|-------|------|
+| `cargo f` | `fmt --all` |
+| `cargo fmt-check` | `fmt --all -- --check` |
+| `cargo t` | `test` |
+| `cargo lint` | `clippy --all-targets -- -D warnings` |
+| `cargo docs` | `doc --no-deps` |
+| `cargo emb-thumbv6m` | `check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core` |
+| `cargo emb-thumbv7em` | `check --target thumbv7em-none-eabi` |
+| `cargo emb-riscv32imac` | `check --target riscv32imac-unknown-none-elf` |
 
 ## Testing
 
@@ -131,6 +254,8 @@ cargo test
 - `wraps_around_correctly` — Multi-round wrap exercise
 - `default_is_new` — Default impl
 - `len_and_full_track_state` — len/is_empty/is_full tracking
+- `len_stays_within_capacity_while_consumer_drains` — `len()` bound under concurrency
+- `concurrent_spsc_preserves_fifo_and_loses_nothing` — threaded FIFO/no-loss stress
 - `handles_are_send` — Producer/Consumer are Send
 
 **`seq_ring::tests`:**
@@ -139,6 +264,12 @@ cargo test
 - `drops_when_consumer_lags` — Overwrite/drop semantics
 - `latest_reads_newest` — Out-of-order read
 - `skip_to_latest_makes_next_poll_latest` — Cursor fast-forward
+- `read_seq_inner_rejects_invalidated_slot` — Slot invalidated mid-overwrite reads as absent
+- `consumer_skips_reserved_seq_zero_on_wrap` — Sequence wrap skips reserved `0`
+- `lag_across_wrap_counts_drops_exactly` — Drop accounting across the `u32` wrap
+- `seq_distance_skips_the_reserved_zero` — Sequence distance excludes reserved `0`
+- `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
+- `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
 
 **`traits::tests`:**
@@ -154,7 +285,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 46 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 54 unit tests + 7 doctests.
 
 ## Code Conventions
 
@@ -197,7 +328,9 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 2. **Preserve no-std compatibility:** Never add std dependencies to library code
 3. **Maintain zero-allocation guarantee:** No heap allocations in the library
 4. **Test after changes:** Run `cargo test` to verify functionality
-5. **Check embedded targets:** Run `cargo check --target thumbv7em-none-eabi`
+5. **Run local CI before committing:** `./scripts/ci.sh` (or `./scripts/ci.ps1`) — nothing runs remotely on push, so this is the only gate
+6. **Run Miri after touching atomics or unsafe:** `./scripts/miri.sh` — native tests on x86 cannot see weak-memory or 32-bit bugs
+7. **Run Loom after changing any ordering:** `./scripts/loom.sh` — exhaustive proof for the modelled size, and it catches weakened orderings that Miri may miss
 
 ### Key Invariants to Preserve
 
@@ -206,13 +339,16 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `RingBuf.len` is always ≤ `N`; `head` is always < `N`
 - `SeqRing`: Sequence 0 is reserved for "empty" state
 - `SeqRing`: Producer never blocks or returns errors
-- `SeqRing`: Consumer tracks dropped items accurately
+- `SeqRing`: Consumer tracks dropped items accurately, including across the `u32` wrap — compare sequences with `seq_distance`, never raw `wrapping_sub`
 - `SeqRing`: Torn reads are impossible (double-sequence-check pattern)
+- `SeqRing`: A raced slot copy never materialises as a `T` — it stays `MaybeUninit<T>` until the re-check passes
 - `SeqRing`: Ring capacity `N` must be > 0
 - `EventBuf`: `push` must return `Err(val)` when full — never overwrite
 - `EventBuf`: `pop`/`drain` return items in strict FIFO order
 - `EventBuf`: Ring capacity `N` must be > 0
 - `EventBuf`: `head.wrapping_sub(tail)` always represents the item count
+- `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
+- `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 
@@ -234,6 +370,8 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 
 - Adding external dependencies
 - Using heap allocation (`Box`, `Vec`, `String` in library code)
-- Removing or weakening atomic ordering
+- Removing or weakening atomic ordering (Loom will catch it — a `Release` downgraded to `Relaxed` fails three models immediately)
+- Adding runtime dependencies, or moving `loom` out of `[target.'cfg(loom)'.dev-dependencies]`
+- Importing `core::sync::atomic` directly in `event_buf.rs` or `seq_ring.rs` instead of `crate::sync`
 - Breaking API compatibility without explicit request
 - Adding `std`-only features to the main library path

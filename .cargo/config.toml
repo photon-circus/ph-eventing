@@ -1,8 +1,26 @@
-# Local CI is primary. Remote GitHub Actions are disabled (manual dispatch only).
+# Local CI is primary. Remote GitHub Actions are manual-dispatch only.
+#
+# Run the full matrix (fmt, clippy, test, doc, embedded targets):
+#   ./scripts/ci.ps1     (Windows)
+#   ./scripts/ci.sh      (POSIX)
+#
+# The aliases below cover the individual checks for inner-loop work. Cargo
+# aliases expand to a single subcommand, so they cannot chain -- use the script
+# when you want the whole matrix.
 [alias]
 f = ["fmt", "--all"]
+fmt-check = ["fmt", "--all", "--", "--check"]
 t = "test"
-ci = "test"
-# Embedded checks (run separately; cargo aliases cannot chain targets easily):
-#   cargo check --target thumbv7em-none-eabi
-#   cargo check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core
+lint = ["clippy", "--all-targets", "--", "-D", "warnings"]
+docs = ["doc", "--no-deps"]
+
+# Embedded targets, mirroring the matrix in scripts/ci.*
+emb-thumbv6m = [
+    "check",
+    "--target",
+    "thumbv6m-none-eabi",
+    "--features",
+    "portable-atomic-unsafe-assume-single-core",
+]
+emb-thumbv7em = ["check", "--target", "thumbv7em-none-eabi"]
+emb-riscv32imac = ["check", "--target", "riscv32imac-unknown-none-elf"]

@@ -33,19 +33,43 @@ blocks inside the source file they exercise.
 
 ### Embedded target check
 
-The crate is `#![no_std]`. Before opening a PR, verify it compiles for at
-least one embedded target:
+The crate is `#![no_std]`. Before opening a PR, verify it compiles for the
+embedded targets:
 
 ```bash
-cargo check --target thumbv7em-none-eabi
+cargo emb-thumbv7em      # cargo check --target thumbv7em-none-eabi
+cargo emb-thumbv6m       # thumbv6m, with portable-atomic
+cargo emb-riscv32imac    # riscv32imac
 ```
 
 ### Formatting and lints
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo fmt-check
+cargo lint               # cargo clippy --all-targets -- -D warnings
 ```
+
+### Everything at once
+
+```bash
+./scripts/ci.sh          # or ./scripts/ci.ps1 on Windows
+```
+
+### Concurrency changes
+
+If you touch atomics, orderings, fences, or unsafe blocks in `SeqRing` or
+`EventBuf`, `cargo test` passing is not evidence — a strongly-ordered x86 host
+cannot exhibit the bugs that appear on ARM and RISC-V. Run both checkers:
+
+```bash
+./scripts/miri.sh        # UB, data races, weak memory, 32-bit and big-endian
+./scripts/loom.sh        # exhaustive model checking of every interleaving
+```
+
+Miri needs `rustup component add --toolchain nightly miri`. Loom needs nothing
+installed — it is a dev-dependency gated on `--cfg loom` that the script sets,
+and it never enters a normal build. `SeqRing` has one known, documented Miri
+deviation; see its module docs before assuming a report is new.
 
 ## What to Contribute
 
@@ -71,13 +95,16 @@ preserve these invariants:
 1. Create a feature branch from `main`.
 2. Make your changes in small, focused commits.
 3. Add or update tests as appropriate.
-4. Run the full check suite:
+4. Run the full check suite. **This project's CI runs locally** — the GitHub
+   Actions workflow is manual-dispatch only, so nothing will check your branch
+   for you:
    ```bash
-   cargo fmt --check
-   cargo clippy --all-targets -- -D warnings
-   cargo test
-   cargo check --target thumbv7em-none-eabi
+   ./scripts/ci.sh      # POSIX
+   ./scripts/ci.ps1     # Windows
    ```
+   That runs formatting, clippy, host tests, docs, and the `thumbv6m` /
+   `thumbv7em` / `riscv32imac` cross-compilation checks, then prints a
+   pass/fail summary.
 5. Open a pull request against `main`. Describe what the change does and why.
 6. The maintainer will review and may request changes before merging.
 

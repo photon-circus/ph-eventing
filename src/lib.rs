@@ -118,6 +118,7 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
+pub(crate) mod sync;
 pub mod traits;
 
 pub use event_buf::EventBuf;
@@ -125,5 +126,22 @@ pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
 pub use traits::{Link, Sink, Source};
 
+#[cfg(all(loom, test))]
+mod loom_tests;
+
 #[cfg(test)]
 extern crate std;
+
+/// Helpers shared by the concurrency tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// Scale a stress-test loop count for the current interpreter.
+    ///
+    /// Miri executes MIR rather than machine code, so a native iteration count
+    /// would take hours. Miri's value is schedule exploration, not volume — a
+    /// few hundred interleavings under its weak-memory model catch far more
+    /// than millions of native iterations on a strongly-ordered x86 host.
+    pub(crate) fn iterations(native: u32) -> u32 {
+        if cfg!(miri) { 200 } else { native }
+    }
+}

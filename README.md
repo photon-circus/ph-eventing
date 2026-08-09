@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/ph-eventing)](https://crates.io/crates/ph-eventing)
 [![docs.rs](https://img.shields.io/docsrs/ph-eventing)](https://docs.rs/ph-eventing)
-[![CI](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml/badge.svg)](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml) 
+[![CI: local](https://img.shields.io/badge/CI-local-blue)](scripts/ci.sh)
 [![License: MIT](https://img.shields.io/crates/l/ph-eventing)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.92.0-blue)](rust-toolchain.toml)
 [![no_std](https://img.shields.io/badge/no__std-yes-green)](src/lib.rs)
@@ -160,7 +160,7 @@ assert!(err.is_none());
 
 ## Testing
 
-46 unit tests and 7 doctests covering all three buffer types plus the trait
+54 unit tests and 7 doctests covering all three buffer types plus the trait
 system. Host tests require `std`:
 
 ```
@@ -169,12 +169,79 @@ cargo test
 
 | Module | Tests |
 |--------|------:|
-| `event_buf` | 12 |
+| `event_buf` | 14 |
 | `ring` | 10 |
-| `seq_ring` | 13 |
+| `seq_ring` | 19 |
 | `traits` | 11 |
 | doctests | 7 |
-| **Total** | **53** |
+| **Total** | **61** |
+
+### Concurrency checking
+
+`SeqRing` and `EventBuf` are lock-free, so a green `cargo test` on x86 proves
+very little — a strongly-ordered host hides exactly the ordering bugs that
+matter on ARM and RISC-V. `scripts/miri.ps1` / `scripts/miri.sh` run the suite
+under [Miri](https://github.com/rust-lang/miri), which interprets MIR against
+the C++20 weak-memory model:
+
+```
+./scripts/miri.sh
+```
+
+It makes three host passes — full checking, the `SeqRing` overwrite test with
+the data-race detector off (see below), and a multi-seed scheduler sweep —
+then repeats the full pass on 32-bit and big-endian targets.
+
+Miri needs `std` for the test harness, so the bare-metal targets cannot be run
+directly. `i686-unknown-linux-gnu` and `armv7-unknown-linux-gnueabihf` stand in
+for them: same 32-bit pointer width and `usize` range, which is what the
+sequence and cursor arithmetic actually depends on. `s390x-unknown-linux-gnu`
+covers big-endian.
+
+**Known deviation:** `SeqRing` is a seqlock, and seqlocks are formally racy —
+the consumer may copy a slot while the producer overwrites it, then discard the
+copy after the sequence re-check fails. Miri reports that copy as UB, correctly;
+this cannot be fixed in stable Rust for an arbitrary `T: Copy`. See the
+`seq_ring` module docs for the full reasoning. `EventBuf` has no such deviation
+and passes Miri with the race detector on.
+
+### Model checking
+
+Miri samples schedules; [Loom](https://github.com/tokio-rs/loom) is exhaustive.
+It enumerates every legal execution of a model — every interleaving, and every
+value each relaxed load may return under the C11 memory model — so a clean run
+proves the absence of ordering bugs at the modelled size:
+
+```
+./scripts/loom.sh
+```
+
+Five models in `src/loom_tests.rs` cover `EventBuf` (lossless FIFO delivery,
+the `len` capacity bound, and never reading unpublished data) and the `SeqRing`
+sequence protocol (the consumer never outruns the producer; `latest` never
+reports an unpublished sequence). They use capacity-2 buffers and two or three
+operations per thread, because the state space grows exponentially and bugs
+that need four items are vanishingly rare.
+
+**Loom does not affect the shipped crate.** It is a dev-dependency gated on
+`--cfg loom`, which only the script sets, so `cargo build`, `cargo test`, and
+`cargo package` never resolve it — `cargo tree` still shows zero dependencies.
+
+### Local CI
+
+This project runs its CI locally. `scripts/ci.ps1` (Windows) and
+`scripts/ci.sh` (POSIX) run the full matrix — formatting, clippy, host tests,
+docs, and the `thumbv6m` / `thumbv7em` / `riscv32imac` cross-compilation
+checks:
+
+```
+./scripts/ci.sh
+```
+
+Every check runs even if an earlier one fails, and a summary is printed at the
+end. Pass `-SkipEmbedded` / `SKIP_EMBEDDED=1` to skip the cross-compilation
+checks. The GitHub Actions workflow mirrors the same jobs but is
+manual-dispatch only.
 
 Coverage snapshot (2026-02-08, via `cargo llvm-cov`):
 

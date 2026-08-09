@@ -13,20 +13,54 @@
 //! before and after reading, which avoids observing a new value under an old sequence number when
 //! the producer overwrites a slot.
 //!
+//! The barriers on both sides are fences rather than ordered accesses on the sequence itself: a
+//! `Release` fence keeps the producer's invalidation ahead of its value write, and an `Acquire`
+//! fence keeps the consumer's copy ahead of its re-check. Plain `Release`/`Acquire` on the
+//! sequence stores and loads would leave the value access free to drift across the guard it is
+//! supposed to be bracketed by.
+//!
+//! Slot values are read and written with volatile accesses, and the consumer holds its copy as
+//! `MaybeUninit<T>` until the re-check passes. A copy that raced with an overwrite is therefore
+//! discarded as raw bytes and never materialises as a `T` that could violate the type's validity
+//! invariants.
+//!
+//! # Known deviation: the seqlock data race
+//! This is a seqlock, and seqlocks are formally racy. The consumer may copy a slot while the
+//! producer overwrites it; the sequence re-check then discards the copy. Miri's data-race
+//! detector reports that copy as undefined behaviour, and it is correct to: `read_volatile`
+//! constrains the compiler but does not make the access atomic.
+//!
+//! This cannot be resolved in stable Rust for an arbitrary `T: Copy`. A race-free version needs
+//! an atomic per-word copy, which needs an array length computed from `size_of::<T>()`
+//! (unstable), and any `T` carrying padding cannot be copied byte-wise without reading
+//! uninitialised memory. Eliminating the race in the design instead would mean making the
+//! producer wait for the consumer, which contradicts the whole point of an overwrite ring.
+//!
+//! What is guaranteed in practice: the volatile accesses stop the compiler from splitting,
+//! duplicating, or reordering the copy; the double sequence check stops a raced copy from ever
+//! being observed; and holding it as `MaybeUninit<T>` stops it from becoming an invalid value.
+//! `scripts/miri.*` verifies the rest of the crate with the race detector on, and this ring's
+//! logic with it off. If you need a buffer with no formal race at all, use [`crate::EventBuf`],
+//! which is race-free by construction — its producer and consumer never touch the same slot.
+//!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.
 //! - The `&T` passed to hooks is a reference to a local copy made during the read.
+//! - Sequence arithmetic goes through `seq_distance`, which accounts for the reserved value `0`
+//!   that `push` skips on wrap; raw wrapping subtraction over-counts by one across that boundary.
 
+use crate::sync::{AtomicBool, AtomicU32, Ordering, fence};
+// Slots stay on `core`'s cell rather than the Loom-tracked one. The seqlock's
+// slot access is racy by construction (see "Known deviation" above), so a
+// tracked cell would only re-report a documented deviation and mask everything
+// else Loom has to say. The sequence protocol — which is what the correctness
+// argument actually rests on — is built from the atomics above, and Loom
+// models that in full.
 use core::cell::{Cell, UnsafeCell};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 #[cfg(test)]
 use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
-#[cfg(target_has_atomic = "32")]
-use core::sync::atomic::{AtomicBool, AtomicU32};
-#[cfg(all(not(target_has_atomic = "32"), feature = "portable-atomic"))]
-use portable_atomic::{AtomicBool, AtomicU32};
 
 fn atomic_u32_array<const N: usize>(init: u32) -> [AtomicU32; N] {
     core::array::from_fn(|_| AtomicU32::new(init))
@@ -36,10 +70,14 @@ fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| UnsafeCell::new(MaybeUninit::uninit()))
 }
 
+// Test-only hook state. These use `core` atomics directly rather than the
+// `crate::sync` shim: Loom's atomics are not const-constructible, and this
+// hook is scaffolding for a single-threaded test rather than part of the
+// protocol Loom models.
 #[cfg(test)]
 static TEST_AFTER_READ_TARGET: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
-static TEST_AFTER_READ_SEQ: AtomicU32 = AtomicU32::new(0);
+static TEST_AFTER_READ_SEQ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 #[must_use]
 #[derive(Copy, Clone, Debug)]
@@ -150,9 +188,16 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         let idx = Self::idx_for(seq);
         // Invalidate before writing so a concurrent reader of the previous
         // sequence cannot observe the new value under the old sequence number.
+        // The Release fence keeps the invalidation ahead of the value write.
         self.slot_seq[idx].store(0, Ordering::Relaxed);
-        core::sync::atomic::fence(Ordering::Release);
-        unsafe { (*self.slots[idx].get()).as_mut_ptr().write(value) };
+        fence(Ordering::Release);
+
+        // SAFETY: the producer is the only writer, and `idx` is in bounds
+        // because `idx_for` reduces modulo N. The write is volatile to match
+        // the volatile read in `read_seq_inner`: a consumer may be copying
+        // this slot concurrently, so the compiler must not split, duplicate,
+        // or move the store.
+        unsafe { core::ptr::write_volatile(self.slots[idx].get(), MaybeUninit::new(value)) };
 
         self.slot_seq[idx].store(seq, Ordering::Release);
         self.published_seq.store(seq, Ordering::Release);
@@ -168,6 +213,18 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         }
     }
 
+    /// How many sequence numbers `push` actually assigned in `(from, to]`.
+    ///
+    /// Plain wrapping subtraction over-counts by one whenever the span crosses
+    /// the reserved value `0`, because `push` skips it. The span crosses `0`
+    /// exactly when `to` compares below `from`, since that is the only way the
+    /// walk from `from` up to `to` can pass through the wrap point.
+    #[inline(always)]
+    const fn seq_distance(from: u32, to: u32) -> u32 {
+        let raw = to.wrapping_sub(from);
+        if to < from { raw - 1 } else { raw }
+    }
+
     #[inline]
     fn read_seq_inner(&self, seq: u32) -> Option<T> {
         let idx = Self::idx_for(seq);
@@ -177,17 +234,35 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
             return None;
         }
 
-        let v = unsafe { (*self.slots[idx].get()).assume_init_read() };
+        // Copy the slot as raw bytes. The producer may be overwriting it right
+        // now, so the bytes are not trusted until the sequence re-check below
+        // passes — holding the copy as `MaybeUninit<T>` means a torn read
+        // cannot produce an invalid `T`, only bytes that are then discarded.
+        //
+        // SAFETY: `idx` is in bounds because `idx_for` reduces modulo N. The
+        // read is volatile so the compiler cannot split, duplicate, or hoist
+        // it, and `MaybeUninit<T>` has no validity invariant to violate.
+        let v: MaybeUninit<T> = unsafe { core::ptr::read_volatile(self.slots[idx].get()) };
 
         #[cfg(test)]
         self.test_after_read_hook(idx);
 
-        let s2 = self.slot_seq[idx].load(Ordering::Acquire);
+        // Pin the copy above the re-check. An Acquire fence orders preceding
+        // loads ahead of what follows; a plain Acquire load on `s2` would only
+        // stop *later* accesses from moving up, which would let the copy sink
+        // past the check that is supposed to validate it.
+        fence(Ordering::Acquire);
+
+        let s2 = self.slot_seq[idx].load(Ordering::Relaxed);
         if s2 != seq {
             return None;
         }
 
-        Some(v)
+        // SAFETY: the slot sequence matched `seq` both before and after the
+        // copy, and the producer invalidates the sequence before it touches a
+        // slot, so no write overlapped the read and the bytes are a complete,
+        // initialised `T`.
+        Some(unsafe { v.assume_init() })
     }
 
     #[cfg(test)]
@@ -260,6 +335,11 @@ pub struct Consumer<'a, T: Copy, const N: usize> {
 
 impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
     /// How many items have been dropped since consumer creation (or since reset).
+    ///
+    /// The counter saturates at [`usize::MAX`] rather than wrapping, so on a
+    /// 32-bit target a very long-lived lagging consumer reports "at least this
+    /// many" instead of overflowing. Call [`reset_dropped`](Self::reset_dropped)
+    /// periodically if exact long-run totals matter.
     #[inline]
     pub fn dropped(&self) -> usize {
         self.dropped_accum
@@ -316,13 +396,15 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
                 break;
             }
 
-            let lag = newest.wrapping_sub(self.last_seq) as usize;
+            let lag = SeqRing::<T, N>::seq_distance(self.last_seq, newest) as usize;
             if lag > N {
-                let next = SeqRing::<T, N>::next_after(self.last_seq);
                 let keep_from = newest.wrapping_sub((N - 1) as u32);
-                let jump_drops = keep_from.wrapping_sub(next) as usize;
-                dropped += jump_drops;
-                self.last_seq = keep_from.wrapping_sub(1);
+                let resume_after = keep_from.wrapping_sub(1);
+                // Everything in (last_seq, keep_from) is gone; count what was
+                // really assigned rather than the raw sequence span.
+                let jumped = SeqRing::<T, N>::seq_distance(self.last_seq, resume_after) as usize;
+                dropped = dropped.saturating_add(jumped);
+                self.last_seq = resume_after;
                 continue;
             }
 
@@ -336,12 +418,17 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
                 }
                 None => {
                     self.last_seq = next;
-                    dropped += 1;
+                    dropped = dropped.saturating_add(1);
                 }
             }
         }
 
-        self.dropped_accum += dropped;
+        // Saturate rather than wrap. `usize` is 32 bits on every target this
+        // crate ships to, and the sequence space is also 32 bits, so a
+        // long-running consumer that lags can genuinely reach the top of the
+        // range. Overflow here would panic in debug and silently wrap in
+        // release — on an embedded target, in a hot path.
+        self.dropped_accum = self.dropped_accum.saturating_add(dropped);
 
         PollStats {
             read,
@@ -634,6 +721,157 @@ mod tests {
         assert_eq!(stats.read, 1);
         assert_eq!(stats.dropped, 0);
         assert_eq!(got, Some((1, 20)));
+    }
+
+    #[test]
+    fn lag_across_wrap_counts_drops_exactly() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        // Park the sequence just below the wrap and consume one item, so the
+        // consumer's cursor sits in the pre-wrap region.
+        ring.next_seq.store(u32::MAX - 6, Ordering::Relaxed);
+        assert_eq!(producer.push(100), u32::MAX - 5);
+
+        let mut got = None;
+        assert!(consumer.poll_one(|s, v| got = Some((s, *v))));
+        assert_eq!(got, Some((u32::MAX - 5, 100)));
+
+        // A fresh consumer counts every sequence published before it existed
+        // as dropped; clear that so the assertions below measure only the
+        // wrap-crossing jump.
+        consumer.reset_dropped();
+
+        // 15 more pushes: five before the wrap, then 1..=10 after it. `push`
+        // skips the reserved 0, so the raw sequence span is 16 while only 15
+        // items exist — the drop accounting must not count the gap.
+        let pushed: Vec<u32> = (0..15u32).map(|i| producer.push(i)).collect();
+        assert_eq!(pushed.last().copied(), Some(10));
+
+        let mut seen = Vec::new();
+        let stats = consumer.poll_up_to(16, |seq, v| seen.push((seq, *v)));
+
+        assert_eq!(stats.read, 4);
+        assert_eq!(stats.dropped, 11);
+        assert_eq!(stats.read + stats.dropped, pushed.len());
+
+        let seqs: Vec<u32> = seen.iter().map(|(s, _)| *s).collect();
+        assert_eq!(&seqs[..], &[7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn dropped_accum_saturates_instead_of_overflowing() {
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        // A consumer that starts at 0 against a producer near the top of the
+        // sequence space books close to 2^32 drops in one poll. On a 32-bit
+        // target that is most of `usize`, so a second poll must not overflow
+        // the accumulator — every target this crate ships to is 32-bit.
+        ring.next_seq.store(u32::MAX - 2, Ordering::Relaxed);
+        producer.push(1);
+        let _ = consumer.poll_up_to(4, |_, _| {});
+        let after_first = consumer.dropped();
+        assert!(after_first > 0);
+
+        for _ in 0..8 {
+            producer.push(2);
+            let _ = consumer.poll_up_to(4, |_, _| {});
+        }
+
+        assert!(
+            consumer.dropped() >= after_first,
+            "dropped counter went backwards — it wrapped instead of saturating"
+        );
+    }
+
+    #[test]
+    fn seq_distance_skips_the_reserved_zero() {
+        type R = SeqRing<u32, 4>;
+
+        // No wrap: plain difference.
+        assert_eq!(R::seq_distance(0, 0), 0);
+        assert_eq!(R::seq_distance(0, 5), 5);
+        assert_eq!(R::seq_distance(5, 9), 4);
+
+        // Spanning the wrap: one fewer than the raw span, because 0 is never
+        // assigned by `push`.
+        assert_eq!(R::seq_distance(u32::MAX, 1), 1);
+        assert_eq!(R::seq_distance(u32::MAX - 5, 6), 11);
+        assert_eq!(R::seq_distance(u32::MAX, u32::MAX), 0);
+    }
+
+    #[test]
+    fn concurrent_overwrite_never_yields_a_mismatched_value() {
+        use core::sync::atomic::AtomicBool;
+
+        // Each payload repeats its counter four times, so a torn read shows up
+        // as elements that disagree with each other. A small ring against an
+        // unthrottled producer keeps the consumer permanently behind, which is
+        // exactly the overwrite pressure the slot-invalidation guards against.
+        let ring = SeqRing::<[u32; 4], 2>::new();
+        let total = crate::test_support::iterations(20_000);
+        let done = AtomicBool::new(false);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let producer = ring.producer();
+                for i in 0..total {
+                    producer.push([i; 4]);
+                }
+                done.store(true, Ordering::Release);
+            });
+
+            scope.spawn(|| {
+                let mut consumer = ring.consumer();
+                let mut last_seq = 0u32;
+                let mut read_total = 0usize;
+
+                loop {
+                    // Sample before polling: if the producer finishes after
+                    // this load, the next iteration still drains the tail.
+                    let finished = done.load(Ordering::Acquire);
+
+                    let mut batch_last = last_seq;
+                    let stats = consumer.poll_up_to(8, |seq, v| {
+                        assert!(
+                            seq > batch_last,
+                            "sequence went backwards: {seq} after {batch_last}"
+                        );
+                        batch_last = seq;
+
+                        // Pushes are consecutive from 0, so sequence `n`
+                        // always carries payload `n - 1`. Anything else means
+                        // a stale value surfaced under a fresh sequence, or a
+                        // fresh value under a stale one.
+                        let expected = seq - 1;
+                        assert_eq!(
+                            *v, [expected; 4],
+                            "sequence {seq} carried a stale or torn payload"
+                        );
+                    });
+
+                    last_seq = batch_last;
+                    read_total += stats.read;
+
+                    if finished && stats.read == 0 && stats.dropped == 0 {
+                        break;
+                    }
+                }
+
+                // Every published sequence was either delivered or counted as
+                // dropped — the consumer's accounting must be exact, not
+                // approximate.
+                assert_eq!(last_seq, total, "consumer stopped short of the tail");
+                assert_eq!(
+                    read_total + consumer.dropped(),
+                    total as usize,
+                    "read + dropped must account for every published item"
+                );
+            });
+        });
     }
 
     #[test]

@@ -1,16 +1,17 @@
-# Remote CI is intentionally inactive.
-# Prefer local verification:
-#   cargo test
-#   cargo check --target thumbv7em-none-eabi
-#   cargo check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core
-#   cargo clippy --all-targets -- -D warnings
-#   cargo fmt --all -- --check
+# Remote CI does not run automatically -- local CI is primary.
 #
-# workflow_dispatch keeps the file for optional manual runs only.
+# Run the same matrix locally before opening a PR:
+#   ./scripts/ci.ps1     (Windows)
+#   ./scripts/ci.sh      (POSIX)
+#
+# workflow_dispatch keeps these jobs available for optional manual runs.
 name: CI
 
 on:
   workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   test:
@@ -23,3 +24,42 @@ jobs:
           toolchain: stable
       - name: Run tests
         run: cargo test --verbose
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: clippy
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  embedded:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: thumbv6m-none-eabi
+            features: portable-atomic-unsafe-assume-single-core
+          - target: thumbv7em-none-eabi
+            features: ""
+          - target: riscv32imac-unknown-none-elf
+            features: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (target ${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Check ${{ matrix.target }}
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo check --target ${{ matrix.target }} --features "${{ matrix.features }}"
+          else
+            cargo check --target ${{ matrix.target }}
+          fi

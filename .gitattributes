@@ -1,0 +1,4 @@
+* text=auto
+
+# Shell scripts must keep LF endings so they run on POSIX checkouts.
+*.sh text eol=lf
