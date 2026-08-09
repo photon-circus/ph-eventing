@@ -182,7 +182,8 @@ Invariants that hold across the whole type:
 
 `RingBuf` requires `T: Default` while the other two do not: it initialises a
 real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
-front.
+front. On the non-Loom path `SeqRing::new` / `EventBuf::new` are `const fn` so
+the buffers can live in a `static`.
 
 ### Conditional compilation map
 
@@ -477,6 +478,7 @@ cargo test
 - `len_stays_within_capacity_while_consumer_drains` — `len()` bound under concurrency
 - `concurrent_spsc_preserves_fifo_and_loses_nothing` — threaded FIFO/no-loss stress
 - `handles_are_send` — Producer/Consumer are Send
+- `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
@@ -491,6 +493,7 @@ cargo test
 - `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
 - `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
+- `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
 
 **`traits::tests`:**
 - `ringbuf_as_sink` — `RingBuf` implements `Sink`
@@ -505,7 +508,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 54 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 56 unit tests + 7 doctests.
 
 ## Code Conventions
 
@@ -523,7 +526,8 @@ cargo test
 - `T: Default` additionally required by `RingBuf` for array initialisation
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
-- No panics in hot paths; only assertions are in `::new()` for `N > 0`
+- No panics in hot paths; `N > 0` is a const assertion on the host `SeqRing` /
+  `EventBuf` `new()` path (runtime assert under Loom); `RingBuf` still asserts at runtime
 
 ### Documentation Style
 

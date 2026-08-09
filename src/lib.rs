@@ -117,10 +117,12 @@
 //!   handed to both contexts. The `Producer` and `Consumer` handles are
 //!   `Send + !Sync`: move each into the context that owns it, never share one.
 //! - The handles borrow the buffer, so the buffer must outlive them.
-//! - **`new()` is not a `const fn`**, so
-//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` will not compile. Use a
-//!   `StaticCell`, a `OnceCell`, or a binding in `main` that outlives its
-//!   borrowers.
+//! - **`new()` is a `const fn`** on the normal build, so
+//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. (Under
+//!   `--cfg loom` it is non-const because Loom's atomics are not
+//!   const-constructible.) Handles still borrow the buffer, so an ISR /
+//!   task split typically pairs the `static` with a `StaticCell` or similar
+//!   for the handles themselves.
 //!
 //! `N` is fixed at compile time and the buffer lives inline —
 //! `N * size_of::<T>()` bytes, no allocation. For [`EventBuf`] it is the
