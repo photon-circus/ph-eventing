@@ -477,6 +477,7 @@ cargo test
 - `len_stays_within_capacity_while_consumer_drains` — `len()` bound under concurrency
 - `concurrent_spsc_preserves_fifo_and_loses_nothing` — threaded FIFO/no-loss stress
 - `handles_are_send` — Producer/Consumer are Send
+- `try_producer_and_try_consumer` — Fallible handle creation
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
@@ -491,6 +492,7 @@ cargo test
 - `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
 - `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
+- `try_producer_and_try_consumer` — Fallible handle creation
 
 **`traits::tests`:**
 - `ringbuf_as_sink` — `RingBuf` implements `Sink`
@@ -505,7 +507,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 54 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 56 unit tests + 7 doctests.
 
 ## Code Conventions
 

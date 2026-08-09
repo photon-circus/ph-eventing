@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
+  that kind is already active. The panicking `producer` / `consumer` APIs are unchanged.
+
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`

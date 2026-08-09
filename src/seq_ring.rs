@@ -208,19 +208,47 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         ((seq.wrapping_sub(1)) as usize) % N
     }
 
+    /// Try to create the producer handle.
+    ///
+    /// Returns `None` if a producer is already active. Prefer this over
+    /// [`producer`](Self::producer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Producer {
+                ring: self,
+                _not_sync: PhantomData,
+            })
+        }
+    }
+
     /// Create the producer handle. Only one producer may be active.
     ///
     /// # Panics
     /// Panics if a producer handle is already active.
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
-        assert!(
-            !self.producer_taken.swap(true, Ordering::AcqRel),
-            "SeqRing::producer() called while a producer is active"
-        );
-        Producer {
-            ring: self,
-            _not_sync: PhantomData,
+        self.try_producer()
+            .expect("SeqRing::producer() called while a producer is active")
+    }
+
+    /// Try to create the consumer handle.
+    ///
+    /// Returns `None` if a consumer is already active. Prefer this over
+    /// [`consumer`](Self::consumer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Consumer {
+                ring: self,
+                last_seq: 0,
+                dropped_accum: 0,
+                _not_sync: PhantomData,
+            })
         }
     }
 
@@ -230,16 +258,8 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
     /// Panics if a consumer handle is already active.
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
-        assert!(
-            !self.consumer_taken.swap(true, Ordering::AcqRel),
-            "SeqRing::consumer() called while a consumer is active"
-        );
-        Consumer {
-            ring: self,
-            last_seq: 0,
-            dropped_accum: 0,
-            _not_sync: PhantomData,
-        }
+        self.try_consumer()
+            .expect("SeqRing::consumer() called while a consumer is active")
     }
 
     #[inline]
@@ -951,5 +971,22 @@ mod tests {
     fn capacity_returns_n() {
         let ring = SeqRing::<u32, 8>::new();
         assert_eq!(ring.capacity(), 8);
+    }
+
+    #[test]
+    fn try_producer_and_try_consumer() {
+        let ring = SeqRing::<u32, 4>::new();
+        let p = ring.try_producer().expect("first producer");
+        assert!(ring.try_producer().is_none());
+        let mut c = ring.try_consumer().expect("first consumer");
+        assert!(ring.try_consumer().is_none());
+        p.push(7);
+        let mut got = None;
+        assert!(c.poll_one(|seq, v| got = Some((seq, *v))));
+        assert_eq!(got, Some((1, 7)));
+        drop(p);
+        drop(c);
+        assert!(ring.try_producer().is_some());
+        assert!(ring.try_consumer().is_some());
     }
 }
