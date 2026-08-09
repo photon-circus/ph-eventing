@@ -13,6 +13,7 @@ fmt-check = ["fmt", "--all", "--", "--check"]
 t = "test"
 lint = ["clippy", "--all-targets", "--", "-D", "warnings"]
 docs = ["doc", "--no-deps"]
+supply = ["deny", "check"]   # needs: cargo install cargo-deny
 
 # Embedded targets, mirroring the matrix in scripts/ci.*
 emb-thumbv6m = [

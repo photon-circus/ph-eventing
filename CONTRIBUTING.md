@@ -55,6 +55,20 @@ cargo lint               # cargo clippy --all-targets -- -D warnings
 ./scripts/ci.sh          # or ./scripts/ci.ps1 on Windows
 ```
 
+### Supply chain
+
+This crate has zero runtime dependencies and intends to keep it that way. If
+your change touches `Cargo.toml`, run:
+
+```bash
+cargo install cargo-deny     # one-time
+cargo deny check
+```
+
+New dependencies need a case made in the pull request. The licence allow-list
+in `deny.toml` is `MIT` / `Apache-2.0` only — widening it is a reviewable
+decision, not a formality.
+
 ### Concurrency changes
 
 If you touch atomics, orderings, fences, or unsafe blocks in `SeqRing` or

@@ -41,6 +41,13 @@ $checks = @(
     @{ Name = 'doc'; Args = @('doc', '--no-deps'); Env = @{ RUSTDOCFLAGS = '-D warnings' } }
 )
 
+# Supply chain: advisories, licences, bans, sources. Only added when the tool
+# is present, since it is a separate install (`cargo install cargo-deny`).
+$denyInstalled = [bool](Get-Command cargo-deny -ErrorAction SilentlyContinue)
+if ($denyInstalled) {
+    $checks += @{ Name = 'deny'; Args = @('deny', 'check') }
+}
+
 if (-not $SkipEmbedded) {
     $checks += @(
         @{ Name = 'thumbv6m-none-eabi'
@@ -80,6 +87,9 @@ foreach ($check in $checks) {
 
 Write-Host ''
 Write-Host 'Summary' -ForegroundColor Cyan
+if (-not $denyInstalled) {
+    Write-Host '  SKIP  deny (not installed: cargo install cargo-deny)' -ForegroundColor Yellow
+}
 foreach ($result in $results) {
     if ($result.Ok) {
         Write-Host ('  PASS  ' + $result.Name) -ForegroundColor Green

@@ -43,6 +43,7 @@ ph-eventing/
 │   ├── miri.sh             # Miri UB/concurrency checks (POSIX)
 │   ├── loom.ps1            # Loom model checking (Windows)
 │   └── loom.sh             # Loom model checking (POSIX)
+├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
@@ -175,6 +176,33 @@ real `dropped_accum` overflow that the 64-bit host run could not.
 the race detector globally — the split-pass structure exists so everything else
 stays fully checked. See the `seq_ring` module docs.
 
+### Supply chain (cargo-deny)
+
+The zero-dependency stance is enforced, not merely stated. `cargo deny check`
+fails on a new dependency's licence, a security advisory, a yanked crate, a
+duplicate version, a wildcard requirement, or a non-crates.io source:
+
+```bash
+cargo install cargo-deny     # one-time
+cargo deny check             # or: cargo supply
+```
+
+The local CI runner includes it when installed and reports `SKIP` when not, so
+its absence never silently passes as a clean run.
+
+Policy lives in [deny.toml](deny.toml). Two things to know before editing it:
+
+- The licence allow-list is only `MIT` and `Apache-2.0`. `portable-atomic` and
+  `critical-section` are `MIT OR Apache-2.0`, so both are satisfied. Widening
+  the list should be a deliberate decision recorded in the diff, not a reflex
+  to make a check pass.
+- `[advisories] ignore` is empty. If an advisory has to be accepted, add the
+  RUSTSEC id **with a comment explaining why it does not apply here**.
+
+`[graph] all-features = true` is set, so the optional `portable-atomic` paths
+are covered — verified by temporarily banning the crate and confirming the
+check fires without a CLI flag.
+
 ### Model checking (Loom)
 
 Miri samples schedules; Loom is exhaustive. It enumerates every legal execution
@@ -223,6 +251,7 @@ Individual checks are also available as cargo aliases (see
 | `cargo t` | `test` |
 | `cargo lint` | `clippy --all-targets -- -D warnings` |
 | `cargo docs` | `doc --no-deps` |
+| `cargo supply` | `deny check` (needs `cargo install cargo-deny`) |
 | `cargo emb-thumbv6m` | `check --target thumbv6m-none-eabi --features portable-atomic-unsafe-assume-single-core` |
 | `cargo emb-thumbv7em` | `check --target thumbv7em-none-eabi` |
 | `cargo emb-riscv32imac` | `check --target riscv32imac-unknown-none-elf` |
@@ -380,6 +409,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Using heap allocation (`Box`, `Vec`, `String` in library code)
 - Removing or weakening atomic ordering (Loom will catch it — a `Release` downgraded to `Relaxed` fails three models immediately)
 - Adding runtime dependencies, or moving `loom` out of `[target.'cfg(loom)'.dev-dependencies]`
+- Widening `deny.toml`'s licence allow-list or adding an `[advisories] ignore` entry to make a check pass, rather than to record a decision
 - Importing `core::sync::atomic` directly in `event_buf.rs` or `seq_ring.rs` instead of `crate::sync`
 - Breaking API compatibility without explicit request
 - Adding `std`-only features to the main library path

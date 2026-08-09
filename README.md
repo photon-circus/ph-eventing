@@ -251,6 +251,23 @@ end. Pass `-SkipEmbedded` / `SKIP_EMBEDDED=1` to skip the cross-compilation
 checks. The GitHub Actions workflow mirrors the same jobs but is
 manual-dispatch only.
 
+### Supply chain
+
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny) enforces the
+zero-dependency stance rather than leaving it to good intentions — it fails on
+a new dependency's licence, a security advisory, a yanked crate, a duplicate
+version, a wildcard requirement, or a non-crates.io source:
+
+```
+cargo install cargo-deny
+cargo deny check
+```
+
+The policy is in [deny.toml](deny.toml), and the local CI runner includes it
+when the tool is installed (and reports it as skipped when it is not). The
+licence allow-list is deliberately just `MIT` and `Apache-2.0`; anything else
+requires a deliberate edit.
+
 ### Coverage
 
 No snapshot is recorded here. A checked-in figure goes stale the moment the

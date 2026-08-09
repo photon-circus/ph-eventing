@@ -27,6 +27,9 @@ All notable changes to this project will be documented in this file.
   library keeps zero runtime dependencies.
 - Local CI runner (`scripts/ci.*`) covering fmt, clippy, tests, docs, and the `thumbv6m` /
   `thumbv7em` / `riscv32imac` targets.
+- `cargo-deny` policy (`deny.toml`) covering security advisories, licences, banned and duplicate
+  crates, and dependency sources. Included in the local CI run when installed, reported as skipped
+  when not. The licence allow-list is `MIT` / `Apache-2.0` only.
 - `AGENTS.md` as the canonical guidance for coding agents; `CLAUDE.md` is now a pointer to it.
 
 ### Changed

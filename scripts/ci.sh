@@ -48,6 +48,16 @@ run_check 'clippy' cargo clippy --all-targets -- -D warnings
 run_check 'test' cargo test
 run_check 'doc' env RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 
+# Supply chain: advisories, licences, bans, sources. Skipped with a notice
+# rather than failing the run if the tool is absent, since it is a separate
+# install (`cargo install cargo-deny`).
+if command -v cargo-deny >/dev/null 2>&1; then
+    run_check 'deny' cargo deny check
+else
+    printf '\n==> deny\ncargo-deny not installed; skipping (cargo install cargo-deny)\n'
+    summary="${summary}  SKIP  deny (not installed)\n"
+fi
+
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
