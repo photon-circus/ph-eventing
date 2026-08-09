@@ -6,8 +6,8 @@
 //! | Trait | Role | Implementors |
 //! |-------|------|-------------|
 //! | [`Sink`] | Accept events | [`RingBuf`], [`seq_ring::Producer`], [`event_buf::Producer`] |
-//! | [`Source`] | Yield events | [`seq_ring::Consumer`], [`event_buf::Consumer`] |
-//! | [`Link`] | Both — accept *and* yield | Blanket impl for any `Sink<In> + Source<Out>` |
+//! | [`Source`] | Yield events | [`RingBuf`], [`seq_ring::Consumer`], [`event_buf::Consumer`] |
+//! | [`Link`] | Both — accept *and* yield | Blanket impl for any `Sink<In> + Source<Out>` (including [`RingBuf`]) |
 //!
 //! The free function [`forward`] transfers items from any [`Source`] to any
 //! [`Sink`], stopping when the source is empty or the sink rejects a value.
@@ -25,7 +25,7 @@
 /// [`core::convert::Infallible`].
 ///
 /// # Implementors
-/// - [`crate::RingBuf`] — always succeeds (`Error = Infallible`).
+/// - [`crate::RingBuf`] — always succeeds (`Error = Infallible`); overwrites when full.
 /// - [`crate::seq_ring::Producer`] — always succeeds (`Error = Infallible`).
 /// - [`crate::event_buf::Producer`] — returns `Err(val)` when full (`Error = T`).
 pub trait Sink<T> {
@@ -42,6 +42,7 @@ pub trait Sink<T> {
 /// Yield events.
 ///
 /// # Implementors
+/// - [`crate::RingBuf`] — pops the oldest entry (window/log; push still overwrites when full).
 /// - [`crate::seq_ring::Consumer`] — drains the next in-order item.
 /// - [`crate::event_buf::Consumer`] — pops the oldest buffered item.
 pub trait Source<T> {
@@ -273,5 +274,34 @@ mod tests {
 
         let v = drain_all_into_vec(&mut c);
         assert_eq!(v, [1, 2]);
+    }
+
+    #[test]
+    fn ringbuf_as_source() {
+        let mut ring = RingBuf::<u32, 4>::new();
+        ring.push(1);
+        ring.push(2);
+        assert_eq!(ring.try_pop(), Some(1));
+        assert_eq!(ring.try_pop(), Some(2));
+        assert_eq!(ring.try_pop(), None);
+    }
+
+    #[test]
+    fn forward_ringbuf_to_event() {
+        let mut ring = RingBuf::<u32, 4>::new();
+        ring.push(10);
+        ring.push(20);
+
+        let eb = EventBuf::<u32, 8>::new();
+        let mut ep = eb.producer();
+
+        let (n, err) = forward(&mut ring, &mut ep, 10);
+        assert_eq!(n, 2);
+        assert!(err.is_none());
+        assert!(ring.is_empty());
+
+        let ec = eb.consumer();
+        assert_eq!(ec.pop(), Some(10));
+        assert_eq!(ec.pop(), Some(20));
     }
 }

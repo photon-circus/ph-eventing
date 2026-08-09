@@ -77,7 +77,7 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
-| `RingBuf<T: Copy + Default, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
+| `RingBuf<T: Copy, N>` | Single-owner, stack-allocated ring buffer (no atomics); `pop` + `Source` |
 | `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
 | `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
 | `seq_ring::Consumer<'a, T, N>` | SeqRing read handle with multiple polling modes |
@@ -86,7 +86,7 @@ ph-eventing/
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `drain()` |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
-| `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
+| `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` (`RingBuf`, both consumers) |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
 
 ### Memory Ordering Strategy (SeqRing)
@@ -180,9 +180,9 @@ Invariants that hold across the whole type:
   the whole skipped span. Breaking it makes the drop counter silently wrong,
   which no type check will catch.
 
-`RingBuf` requires `T: Default` while the other two do not: it initialises a
-real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
-front.
+`RingBuf` stores slots as `MaybeUninit<T>` and requires only `T: Copy`, matching
+the other two buffers. `RingBuf::new` is a `const fn` so the buffer can live in
+a `static`.
 
 ### Conditional compilation map
 
@@ -452,15 +452,18 @@ cargo test
 
 **`ring::tests`:**
 - `new_ring_is_empty` — Fresh ring state
+- `const_new_works_in_const_context` — `static` / const `new()`
 - `push_and_get` — Basic push/get/latest
 - `overwrite_oldest_when_full` — Wrap-around semantics
 - `clear_resets_state` — Clear behaviour
 - `iter_oldest_to_newest` — Iterator ordering
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
-- `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
+- `pop_returns_oldest` — `pop` FIFO from the window
+- `pop_after_wrap_preserves_order` — `pop` after overwrite
+- `works_without_default_bound` — `T: Copy` only (no `Default`)
 
 **`event_buf::tests`:**
 - `new_buf_is_empty` — Fresh buffer state
@@ -504,8 +507,10 @@ cargo test
 - `forward_empty_source_transfers_nothing` — No-op forward
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
+- `ringbuf_as_source` — `RingBuf` implements `Source`
+- `forward_ringbuf_to_event` — RingBuf → EventBuf bridging
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 54 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 59 unit tests + 7 doctests.
 
 ## Code Conventions
 
@@ -520,10 +525,9 @@ cargo test
 ### Safety Requirements
 
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
-- `T: Default` additionally required by `RingBuf` for array initialisation
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
-- Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
-- No panics in hot paths; only assertions are in `::new()` for `N > 0`
+- Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in `RingBuf`, `SeqRing`, and `EventBuf`
+- No panics in hot paths; `RingBuf` rejects `N == 0` with a const assertion (`SeqRing` / `EventBuf` still assert at runtime in `new()`)
 
 ### Documentation Style
 
@@ -554,7 +558,8 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 
 ### Key Invariants to Preserve
 
-- `RingBuf` is fully safe — no unsafe code, no interior mutability
+- `RingBuf` has no atomics or interior mutability; `unsafe` is limited to reading
+  live `MaybeUninit` slots that `push` initialised
 - `RingBuf`: Ring capacity `N` must be > 0
 - `RingBuf.len` is always ≤ `N`; `head` is always < `N`
 - `SeqRing`: Sequence 0 is reserved for "empty" state

@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `RingBuf::const fn new()`, so `static LOG: RingBuf<u32, 64> = RingBuf::new();` works. Capacity
+  `N == 0` is rejected with a const assertion.
+- `RingBuf::pop() -> Option<T>` and a `Source` implementation, so `forward` can start from a
+  `RingBuf`. Push still overwrites when full; the type remains a window/log, not an SPSC queue.
+
+### Changed
+- `RingBuf` no longer requires `T: Default`. Slots are stored as `MaybeUninit<T>` and only live
+  entries are read. Relaxed bound is semver-compatible under pre-1.0 rules (RELEASING.md).
+
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`
@@ -18,6 +28,7 @@ All notable changes to this project will be documented in this file.
   `./scripts/ci.sh`, which never invokes an action and so cannot validate an actions bump. It now
   names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
   the workflow after merge.
+- Trait tables list `RingBuf` as a `Source` / `Link`.
 
 ## 0.1.3 - 2026-08-09
 ### Fixed

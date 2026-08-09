@@ -1,9 +1,14 @@
 //! Fixed-size, stack-allocated ring buffer — no heap, no alloc, no atomics.
 //!
 //! [`RingBuf`] is a single-owner (`&mut self`) ring that overwrites the
-//! oldest element when full. It requires `T: Copy + Default` and is ideal
-//! for sample windows, local event logs, and anywhere a simple circular
-//! buffer is needed without cross-thread sharing.
+//! oldest element when full. It requires only `T: Copy` and is ideal for
+//! sample windows, local event logs, and anywhere a simple circular buffer
+//! is needed without cross-thread sharing.
+//!
+//! It also implements [`crate::traits::Source`] via [`RingBuf::pop`], so it
+//! can sit on either side of [`crate::traits::forward`]. It remains a
+//! window/log rather than an SPSC queue: [`push`](RingBuf::push) still
+//! overwrites when full.
 //!
 //! For a lock-free SPSC ring with sequence tracking, see [`crate::SeqRing`].
 //! For a lock-free SPSC ring with backpressure, see [`crate::EventBuf`].
@@ -17,29 +22,39 @@
 //! r.push(20);
 //! assert_eq!(r.latest(), Some(20));
 //! assert_eq!(r.get(0), Some(10)); // oldest
+//! assert_eq!(r.pop(), Some(10));
+//! assert_eq!(r.get(0), Some(20));
 //! ```
+
+use core::mem::MaybeUninit;
 
 /// A ring buffer of `N` elements stored entirely on the stack.
 ///
 /// Once full, new pushes overwrite the oldest entry. Iteration with
 /// [`iter()`](RingBuf::iter) yields elements from oldest to newest.
-pub struct RingBuf<T: Copy + Default, const N: usize> {
-    buf: [T; N],
+/// [`pop`](RingBuf::pop) removes and returns the oldest entry.
+pub struct RingBuf<T: Copy, const N: usize> {
+    buf: [MaybeUninit<T>; N],
     /// Write cursor — always points to the *next* slot to write.
     head: usize,
     /// Number of elements currently stored (≤ N).
     len: usize,
 }
 
-impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
-    /// Create a new, empty ring buffer with every slot default-initialised.
+impl<T: Copy, const N: usize> RingBuf<T, N> {
+    /// Create a new, empty ring buffer.
+    ///
+    /// This is a `const fn`, so the buffer can be placed in a `static`:
+    /// `static mut LOG: RingBuf<u32, 64> = RingBuf::new();`
     ///
     /// # Panics
-    /// Panics if `N == 0`.
-    pub fn new() -> Self {
-        assert!(N > 0, "RingBuf capacity N must be > 0");
+    /// Fails to compile (via a const assertion) if `N == 0`.
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "RingBuf capacity N must be > 0");
+        }
         Self {
-            buf: [T::default(); N],
+            buf: [const { MaybeUninit::uninit() }; N],
             head: 0,
             len: 0,
         }
@@ -50,11 +65,28 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
     /// This never fails and never blocks; if losing the oldest entry is not
     /// acceptable, use [`crate::EventBuf`], whose `push` reports when full.
     pub fn push(&mut self, val: T) {
-        self.buf[self.head] = val;
+        self.buf[self.head] = MaybeUninit::new(val);
         self.head = (self.head + 1) % N;
         if self.len < N {
             self.len += 1;
         }
+    }
+
+    /// Remove and return the oldest element, or `None` if empty.
+    ///
+    /// Unlike a full drain-to-empty queue, [`push`](Self::push) still
+    /// overwrites when the ring is at capacity — this is a window/log with
+    /// an optional pop, not an SPSC buffer.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == 0 {
+            return None;
+        }
+        let idx = self.index(0);
+        // SAFETY: `index(0)` addresses the oldest live slot; every live slot
+        // was written by `push` (or an overwrite of a previous live slot).
+        let val = unsafe { self.buf[idx].assume_init() };
+        self.len -= 1;
+        Some(val)
     }
 
     /// Number of elements currently stored, always in `0..=N`.
@@ -88,13 +120,21 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         self.len = 0;
     }
 
+    /// Index of the `i`-th live element (0 = oldest). Caller must ensure
+    /// `i < self.len`.
+    #[inline(always)]
+    const fn index(&self, i: usize) -> usize {
+        (self.head + N - self.len + i) % N
+    }
+
     /// Read the `i`-th element (0 = oldest).
     pub fn get(&self, i: usize) -> Option<T> {
         if i >= self.len {
             return None;
         }
-        let idx = if self.len < N { i } else { (self.head + i) % N };
-        Some(self.buf[idx])
+        let idx = self.index(i);
+        // SAFETY: `i < len` selects a live slot written by `push`.
+        Some(unsafe { self.buf[idx].assume_init() })
     }
 
     /// Most recently pushed element.
@@ -103,7 +143,9 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
             return None;
         }
         let idx = if self.head == 0 { N - 1 } else { self.head - 1 };
-        Some(self.buf[idx])
+        // SAFETY: `len > 0` means at least one `push` wrote the slot behind
+        // `head`.
+        Some(unsafe { self.buf[idx].assume_init() })
     }
 
     /// Iterate over elements oldest→newest.
@@ -112,13 +154,13 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> Default for RingBuf<T, N> {
+impl<T: Copy, const N: usize> Default for RingBuf<T, N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingBuf<T, N> {
+impl<T: Copy, const N: usize> core::fmt::Debug for RingBuf<T, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RingBuf")
             .field("len", &self.len)
@@ -128,12 +170,12 @@ impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingBuf<T, N> {
 }
 
 /// Iterator over [`RingBuf`] elements from oldest to newest.
-pub struct RingIter<'a, T: Copy + Default, const N: usize> {
+pub struct RingIter<'a, T: Copy, const N: usize> {
     ring: &'a RingBuf<T, N>,
     pos: usize,
 }
 
-impl<'a, T: Copy + Default, const N: usize> Iterator for RingIter<'a, T, N> {
+impl<'a, T: Copy, const N: usize> Iterator for RingIter<'a, T, N> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -148,9 +190,9 @@ impl<'a, T: Copy + Default, const N: usize> Iterator for RingIter<'a, T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> ExactSizeIterator for RingIter<'_, T, N> {}
+impl<T: Copy, const N: usize> ExactSizeIterator for RingIter<'_, T, N> {}
 
-impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingIter<'_, T, N> {
+impl<T: Copy, const N: usize> core::fmt::Debug for RingIter<'_, T, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RingIter")
             .field("remaining", &(self.ring.len().saturating_sub(self.pos)))
@@ -158,7 +200,7 @@ impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingIter<'_, T, N> 
     }
 }
 
-impl<'a, T: Copy + Default, const N: usize> IntoIterator for &'a RingBuf<T, N> {
+impl<'a, T: Copy, const N: usize> IntoIterator for &'a RingBuf<T, N> {
     type Item = T;
     type IntoIter = RingIter<'a, T, N>;
 
@@ -167,7 +209,7 @@ impl<'a, T: Copy + Default, const N: usize> IntoIterator for &'a RingBuf<T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> crate::traits::Sink<T> for RingBuf<T, N> {
+impl<T: Copy, const N: usize> crate::traits::Sink<T> for RingBuf<T, N> {
     type Error = core::convert::Infallible;
 
     #[inline]
@@ -177,9 +219,19 @@ impl<T: Copy + Default, const N: usize> crate::traits::Sink<T> for RingBuf<T, N>
     }
 }
 
+impl<T: Copy, const N: usize> crate::traits::Source<T> for RingBuf<T, N> {
+    #[inline]
+    fn try_pop(&mut self) -> Option<T> {
+        self.pop()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    struct NoDefault(u32);
 
     #[test]
     fn new_ring_is_empty() {
@@ -189,6 +241,13 @@ mod tests {
         assert_eq!(r.len(), 0);
         assert_eq!(r.latest(), None);
         assert_eq!(r.get(0), None);
+    }
+
+    #[test]
+    fn const_new_works_in_const_context() {
+        static RING: RingBuf<u32, 4> = RingBuf::new();
+        assert!(RING.is_empty());
+        assert_eq!(RING.capacity(), 4);
     }
 
     #[test]
@@ -259,12 +318,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "RingBuf capacity N must be > 0")]
-    fn zero_capacity_panics() {
-        let _ = RingBuf::<u32, 0>::new();
-    }
-
-    #[test]
     fn capacity_returns_n() {
         let r = RingBuf::<u32, 8>::new();
         assert_eq!(r.capacity(), 8);
@@ -278,5 +331,49 @@ mod tests {
         r.push(3);
         let v: std::vec::Vec<u32> = (&r).into_iter().collect();
         assert_eq!(v, [1, 2, 3]);
+    }
+
+    #[test]
+    fn pop_returns_oldest() {
+        let mut r = RingBuf::<u32, 4>::new();
+        r.push(10);
+        r.push(20);
+        r.push(30);
+        assert_eq!(r.pop(), Some(10));
+        assert_eq!(r.len(), 2);
+        assert_eq!(r.get(0), Some(20));
+        assert_eq!(r.get(1), Some(30));
+        assert_eq!(r.latest(), Some(30));
+        assert_eq!(r.pop(), Some(20));
+        assert_eq!(r.pop(), Some(30));
+        assert_eq!(r.pop(), None);
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn pop_after_wrap_preserves_order() {
+        let mut r = RingBuf::<u32, 3>::new();
+        r.push(1);
+        r.push(2);
+        r.push(3);
+        r.push(4); // overwrites 1; window is 2,3,4
+        assert_eq!(r.pop(), Some(2));
+        assert_eq!(r.pop(), Some(3));
+        r.push(5);
+        assert_eq!(r.get(0), Some(4));
+        assert_eq!(r.get(1), Some(5));
+        assert_eq!(r.pop(), Some(4));
+        assert_eq!(r.pop(), Some(5));
+        assert_eq!(r.pop(), None);
+    }
+
+    #[test]
+    fn works_without_default_bound() {
+        let mut r = RingBuf::<NoDefault, 2>::new();
+        r.push(NoDefault(1));
+        r.push(NoDefault(2));
+        assert_eq!(r.latest(), Some(NoDefault(2)));
+        assert_eq!(r.pop(), Some(NoDefault(1)));
+        assert_eq!(r.pop(), Some(NoDefault(2)));
     }
 }

@@ -46,7 +46,8 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 
 A straightforward, single-owner ring buffer for collecting values when you
 don't need cross-thread access. When full, new pushes silently overwrite the
-oldest entry.
+oldest entry. Requires only `T: Copy` (no `Default`). `pop` removes the oldest
+entry, and `RingBuf` implements both `Sink` and `Source`.
 
 ```rust
 use ph_eventing::RingBuf;
@@ -57,10 +58,11 @@ ring.push(2);
 ring.push(3);
 assert_eq!(ring.latest(), Some(3));
 assert_eq!(ring.get(0),  Some(1)); // oldest
+assert_eq!(ring.pop(), Some(1));
 
 // iterate oldest → newest
 for val in ring.iter() {
-    // 1, 2, 3
+    // 2, 3
 }
 ```
 
@@ -131,16 +133,18 @@ assert!(err.is_none());
 | Trait | Role | Implementors |
 |-------|------|--------------|
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
-| `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
-| `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+| `Source<T>` | Yield events | `RingBuf`, `seq_ring::Consumer`, `event_buf::Consumer` |
+| `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` (including `RingBuf`) |
 
 ## Semantics
 
 ### RingBuf
-- Single-owner (`&mut self` to push).
+- Single-owner (`&mut self` to push / pop).
 - `get(i)` returns the `i`-th element where `0` is the oldest.
 - `latest()` returns the most recently pushed element.
+- `pop()` removes and returns the oldest element.
 - `iter()` yields elements oldest → newest.
+- `new()` is a `const fn` (`N == 0` fails at compile time).
 
 ### SeqRing
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
@@ -239,7 +243,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 54 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 59 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

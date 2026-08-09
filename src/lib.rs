@@ -15,8 +15,8 @@
 //! | Trait | Role | Implementors |
 //! |-------|------|--------------|
 //! | [`Sink<T>`](traits::Sink) | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
-//! | [`Source<T>`](traits::Source) | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
-//! | [`Link<In,Out>`](traits::Link) | Both | Blanket impl for any `Sink<In> + Source<Out>` |
+//! | [`Source<T>`](traits::Source) | Yield events | `RingBuf`, `seq_ring::Consumer`, `event_buf::Consumer` |
+//! | [`Link<In,Out>`](traits::Link) | Both | Blanket impl for any `Sink<In> + Source<Out>` (including `RingBuf`) |
 //!
 //! The [`traits::forward`] function transfers items from any `Source` to any
 //! `Sink`, making it easy to bridge different buffer types.
