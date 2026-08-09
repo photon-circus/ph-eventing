@@ -77,10 +77,9 @@ let producer = ring.producer();
 let mut consumer = ring.consumer();
 
 producer.push(123);
-consumer.poll_one(|seq, v| {
-    assert_eq!(seq, 1);
-    assert_eq!(*v, 123);
-});
+assert_eq!(consumer.poll_one_value(), Some((1, 123)));
+// hook form still available:
+// consumer.poll_one(|seq, v| { ... });
 ```
 
 ### EventBuf
@@ -100,6 +99,7 @@ assert!(producer.push(1).is_ok());
 assert!(producer.push(2).is_ok());
 assert_eq!(producer.push(3), Err(3)); // full — value returned
 
+assert_eq!(consumer.peek(), Some(1));  // copy, no advance
 assert_eq!(consumer.pop(), Some(1));
 assert!(producer.push(3).is_ok());     // space freed
 ```
@@ -146,6 +146,7 @@ assert!(err.is_none());
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 - When the producer wraps the ring, old values are overwritten.
 - `poll_one` and `poll_up_to` drain in-order and return `PollStats` (`read`, `dropped`, `newest`).
+- `poll_one_value` / `latest_value` return `(seq, T)` without a hook.
 - `latest` reads the newest value without advancing the consumer cursor.
 - `skip_to_latest` discards the backlog so the next poll returns the newest item.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
@@ -156,6 +157,7 @@ assert!(err.is_none());
 
 ### EventBuf
 - FIFO order: `pop` always returns the oldest item.
+- `peek` copies the oldest item without advancing the cursor.
 - `push` returns `Ok(())` on success or `Err(val)` when the buffer is full.
 - `drain(max, hook)` consumes up to `max` items through a callback and returns the count.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
@@ -239,7 +241,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 54 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 56 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

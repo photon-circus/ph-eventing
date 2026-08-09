@@ -129,8 +129,9 @@
 //!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
-//! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.
-//! - `latest` reads the newest value without advancing the consumer cursor.
+//! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`; `poll_one_value`
+//!   returns `(seq, T)` without a hook.
+//! - `latest` / `latest_value` read the newest value without advancing the consumer cursor.
 //! - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 //! - Once every `2^32 - 1` pushes the sequence counter wraps, and a few extra entries are dropped
 //!   there because `push` skips the reserved sequence `0`: exactly one for a power-of-two `N`,
@@ -143,6 +144,7 @@
 //! # EventBuf semantics
 //! - `push` returns `Err(val)` when the buffer is full — no data is silently lost.
 //! - `pop` returns the oldest item, or `None` when empty.
+//! - `peek` copies the oldest item without advancing the consumer cursor.
 //! - `drain(max, hook)` consumes up to `max` items through a callback.
 #![no_std]
 

@@ -437,6 +437,17 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         stats.read == 1
     }
 
+    /// Drain at most one item (in-order), returning `(seq, value)`.
+    ///
+    /// Equivalent to [`poll_one`](Self::poll_one) without a hook. Drop
+    /// accounting and the `read + dropped` invariant are unchanged.
+    #[inline]
+    pub fn poll_one_value(&mut self) -> Option<(u32, T)> {
+        let mut result = None;
+        self.poll_one(|seq, v| result = Some((seq, *v)));
+        result
+    }
+
     /// Drain up to `max` items (in-order).
     /// Hook sees `&T` but it is a reference to a **local copy** inside poll.
     ///
@@ -528,6 +539,17 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         }
     }
 
+    /// Read the newest item without a hook, returning `(seq, value)`.
+    ///
+    /// Equivalent to [`latest`](Self::latest). Does not advance the consumer
+    /// cursor.
+    #[inline]
+    pub fn latest_value(&self) -> Option<(u32, T)> {
+        let mut result = None;
+        self.latest(|seq, v| result = Some((seq, *v)));
+        result
+    }
+
     /// Fast-forward consumer so the *next* `poll_one()` yields the newest item
     /// (i.e. skip backlog).
     ///
@@ -570,9 +592,7 @@ impl<T: Copy, const N: usize> crate::traits::Sink<T> for Producer<'_, T, N> {
 impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
     #[inline]
     fn try_pop(&mut self) -> Option<T> {
-        let mut result = None;
-        self.poll_one(|_seq, v| result = Some(*v));
-        result
+        self.poll_one_value().map(|(_, v)| v)
     }
 }
 
@@ -951,5 +971,25 @@ mod tests {
     fn capacity_returns_n() {
         let ring = SeqRing::<u32, 8>::new();
         assert_eq!(ring.capacity(), 8);
+    }
+
+    #[test]
+    fn poll_one_value_and_latest_value() {
+        let ring = SeqRing::<u32, 8>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        assert_eq!(consumer.poll_one_value(), None);
+        assert_eq!(consumer.latest_value(), None);
+
+        producer.push(10);
+        producer.push(20);
+
+        assert_eq!(consumer.latest_value(), Some((2, 20)));
+        assert_eq!(consumer.poll_one_value(), Some((1, 10)));
+        assert_eq!(consumer.poll_one_value(), Some((2, 20)));
+        assert_eq!(consumer.poll_one_value(), None);
+        // latest does not require an advanced cursor
+        assert_eq!(consumer.latest_value(), Some((2, 20)));
     }
 }

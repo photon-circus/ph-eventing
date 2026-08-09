@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `SeqRing` value-returning poll helpers: `Consumer::poll_one_value() -> Option<(u32, T)>` and
+  `Consumer::latest_value() -> Option<(u32, T)>`. Hook-based `poll_*` / `latest` are unchanged and
+  still maintain the `read + dropped` invariant.
+- `EventBuf::Consumer::peek() -> Option<T>` — copy the oldest item without advancing the cursor.
+
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`

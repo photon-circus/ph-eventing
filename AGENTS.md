@@ -84,7 +84,7 @@ ph-eventing/
 | `PollStats` | Statistics returned from SeqRing poll operations |
 | `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
-| `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `drain()` |
+| `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
@@ -219,8 +219,9 @@ Changes that must land together, none of which the compiler enforces:
 ### Consumer Polling Modes (SeqRing)
 
 - `poll_one(hook)` - Drain one item in-order
+- `poll_one_value()` - Same, returning `Option<(u32, T)>`
 - `poll_up_to(max, hook)` - Drain up to N items in-order
-- `latest(hook)` - Read newest item (not in-order, doesn't advance cursor)
+- `latest(hook)` / `latest_value()` - Read newest item (not in-order, doesn't advance cursor)
 - `skip_to_latest()` - Fast-forward to newest, skip backlog
 
 ## Build Commands
@@ -477,6 +478,7 @@ cargo test
 - `len_stays_within_capacity_while_consumer_drains` — `len()` bound under concurrency
 - `concurrent_spsc_preserves_fifo_and_loses_nothing` — threaded FIFO/no-loss stress
 - `handles_are_send` — Producer/Consumer are Send
+- `peek_copies_without_advancing` — `peek` vs `pop`
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
@@ -491,6 +493,7 @@ cargo test
 - `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
 - `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
+- `poll_one_value_and_latest_value` — Value-returning poll APIs
 
 **`traits::tests`:**
 - `ringbuf_as_sink` — `RingBuf` implements `Sink`
@@ -505,7 +508,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 54 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 56 unit tests + 7 doctests.
 
 ## Code Conventions
 

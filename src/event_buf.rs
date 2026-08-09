@@ -37,6 +37,7 @@
 //!
 //! assert!(producer.push(1).is_ok());
 //! assert!(producer.push(2).is_ok());
+//! assert_eq!(consumer.peek(), Some(1));
 //! assert_eq!(consumer.pop(), Some(1));
 //! assert_eq!(consumer.pop(), Some(2));
 //! assert_eq!(consumer.pop(), None); // empty
@@ -59,7 +60,8 @@ const RETRY_LIMIT: usize = 2;
 ///
 /// When the buffer is full, [`Producer::push`] returns `Err(val)` instead
 /// of overwriting, giving the producer a chance to retry, drop, or log.
-/// The consumer drains items with [`Consumer::pop`] or [`Consumer::drain`].
+/// The consumer drains items with [`Consumer::pop`] or [`Consumer::drain`],
+/// and can inspect the oldest item with [`Consumer::peek`] without consuming it.
 ///
 /// # Panics
 /// - `EventBuf::new()` panics if `N == 0`.
@@ -279,6 +281,24 @@ impl<T: Copy, const N: usize> Consumer<'_, T, N> {
         let val = self.buf.slots[idx].with(|slot| unsafe { (*slot).assume_init_read() });
         self.buf.tail.store(tail.wrapping_add(1), Ordering::Release);
         Some(val)
+    }
+
+    /// Copy the oldest item without removing it.
+    ///
+    /// Returns `None` if the buffer is empty. The consumer cursor is not
+    /// advanced, so a following [`pop`](Self::pop) returns the same value.
+    #[inline]
+    pub fn peek(&self) -> Option<T> {
+        let tail = self.buf.tail.load(Ordering::Relaxed);
+        let head = self.buf.head.load(Ordering::Acquire);
+        if tail == head {
+            return None;
+        }
+        let idx = EventBuf::<T, N>::slot_index(tail);
+        // SAFETY: same slot exclusivity as `pop` — the producer will not
+        // overwrite this slot until `tail` advances. `T: Copy`, so reading
+        // without advancing leaves a valid value for a later `pop`.
+        Some(self.buf.slots[idx].with(|slot| unsafe { (*slot).assume_init_read() }))
     }
 
     /// Drain up to `max` items, passing each to `hook`.
@@ -572,5 +592,23 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<super::Producer<'_, u32, 4>>();
         assert_send::<super::Consumer<'_, u32, 4>>();
+    }
+
+    #[test]
+    fn peek_copies_without_advancing() {
+        let buf = EventBuf::<u32, 4>::new();
+        let p = buf.producer();
+        let c = buf.consumer();
+
+        assert_eq!(c.peek(), None);
+        p.push(10).unwrap();
+        p.push(20).unwrap();
+        assert_eq!(c.peek(), Some(10));
+        assert_eq!(c.peek(), Some(10));
+        assert_eq!(buf.len(), 2);
+        assert_eq!(c.pop(), Some(10));
+        assert_eq!(c.peek(), Some(20));
+        assert_eq!(c.pop(), Some(20));
+        assert_eq!(c.peek(), None);
     }
 }
