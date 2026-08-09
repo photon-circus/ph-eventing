@@ -11,9 +11,11 @@ body:
         output. Check features individually instead.
 
         Also known and documented: **Miri reports a data race in `SeqRing`.**
-        It is a seqlock; the race is real by the letter of the memory model and
-        cannot be resolved in stable Rust for an arbitrary `T: Copy`. See the
-        `seq_ring` module docs. `EventBuf` has no such caveat.
+        It is a seqlock; the race is real by the letter of the memory model.
+        This includes Miri runs in *your* project — a test that drives the ring
+        from two threads will report UB pointing into this crate. See the
+        `seq_ring` module docs for why, and for the alternatives. `EventBuf`
+        has no such caveat.
 
   - type: textarea
     id: what-happened

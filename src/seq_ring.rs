@@ -25,23 +25,56 @@
 //! invariants.
 //!
 //! # Known deviation: the seqlock data race
+//!
+//! ## What it is
 //! This is a seqlock, and seqlocks are formally racy. The consumer may copy a slot while the
 //! producer overwrites it; the sequence re-check then discards the copy. Miri's data-race
-//! detector reports that copy as undefined behaviour, and it is correct to: `read_volatile`
+//! detector reports that copy as undefined behaviour, and it is right to: `read_volatile`
 //! constrains the compiler but does not make the access atomic.
 //!
-//! This cannot be resolved in stable Rust for an arbitrary `T: Copy`. A race-free version needs
-//! an atomic per-word copy, which needs an array length computed from `size_of::<T>()`
-//! (unstable), and any `T` carrying padding cannot be copied byte-wise without reading
-//! uninitialised memory. Eliminating the race in the design instead would mean making the
-//! producer wait for the consumer, which contradicts the whole point of an overwrite ring.
+//! ## Why the design is this way
+//! It is a deliberate trade, not an oversight, and the alternatives were rejected for reasons
+//! worth stating plainly:
 //!
-//! What is guaranteed in practice: the volatile accesses stop the compiler from splitting,
-//! duplicating, or reordering the copy; the double sequence check stops a raced copy from ever
-//! being observed; and holding it as `MaybeUninit<T>` stops it from becoming an invalid value.
-//! `scripts/miri.*` verifies the rest of the crate with the race detector on, and this ring's
-//! logic with it off. If you need a buffer with no formal race at all, use [`crate::EventBuf`],
-//! which is race-free by construction — its producer and consumer never touch the same slot.
+//! - **Make the producer wait for the consumer.** This removes the race entirely, and removes the
+//!   only property the type exists to provide. A telemetry producer in an interrupt handler cannot
+//!   block on a consumer in a task loop.
+//! - **Copy the slot with atomic per-word operations.** Sound, and unavailable: the word count has
+//!   to be computed from `size_of::<T>()`, which needs `generic_const_exprs` (unstable). Falling
+//!   back to per-byte atomics does not work either — any `T` carrying padding has uninitialised
+//!   bytes even after a typed write, and an atomic load of uninitialised memory is itself UB.
+//! - **Narrow the API so payloads live in atomics.** A ring restricted to, say, a `u32` or `u64`
+//!   payload could store it in an `AtomicU32`/`AtomicU64` and would be **fully race-free**. This
+//!   is a real option that was passed over in favour of accepting any `T: Copy`. So the honest
+//!   framing is that generality was chosen over formal soundness — not that Rust makes soundness
+//!   impossible here.
+//!
+//! ## What this actually costs you
+//! - **Nothing is known to miscompile.** Volatile seqlocks are used widely — the Linux kernel's
+//!   `seqlock_t` is the same construct — and no compiler is known to break them. But "no known
+//!   failure" is not a guarantee: the compiler is *permitted* to assume the race cannot happen.
+//!   `read_volatile`/`write_volatile` block the optimisations that would plausibly exploit it
+//!   (splitting, duplicating, hoisting the copy); nothing blocks the ones nobody has thought of.
+//! - **Your own Miri runs will flag it.** If you run `cargo miri test` over a test that drives
+//!   this ring from two threads, you will get a UB report pointing into this crate. That is the
+//!   deviation, not a new bug. `scripts/miri.*` shows the split-pass approach: full checking
+//!   everywhere else, race detector off for this ring alone.
+//! - **A raced copy is never returned.** The double sequence check discards it, and it is held as
+//!   `MaybeUninit<T>` until validated, so it cannot even briefly exist as a `T` that violates the
+//!   type's validity invariants.
+//!
+//! ## If that is not acceptable
+//! - [`crate::EventBuf`] is race-free by construction — its producer and consumer never touch the
+//!   same slot, and it passes Miri with the detector on. Note it is **not a drop-in**: it applies
+//!   backpressure instead of overwriting, so a full buffer rejects the push rather than dropping
+//!   the oldest entry. That is a different contract, and the right one only if your producer can
+//!   handle failure.
+//! - If you need overwrite semantics *and* a clean Miri run, keep the payload out of the ring:
+//!   push a small index or handle into [`crate::EventBuf`], or into this ring accepting the
+//!   caveat, and own the data elsewhere.
+//! - Keeping `T` small and padding-free does not remove the formal race, but it does remove any
+//!   realistic tearing: a word-sized payload is copied by a single instruction on every target
+//!   this crate supports.
 //!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.

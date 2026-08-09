@@ -165,11 +165,19 @@ assert!(err.is_none());
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.
 - `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
-  the producer is overwriting, then discard the copy when the sequence re-check fails. In
-  practice the copy is never observed and never becomes an invalid value, but it is undefined
-  behaviour by the letter of the model and cannot be fixed in stable Rust for an arbitrary
-  `T: Copy`. See [Model checking](#model-checking) and the `seq_ring` module docs. If you need a
-  buffer with no such caveat, use `EventBuf`.
+  the producer is overwriting, then discard the copy when the sequence re-check fails. The copy is
+  never returned and never becomes an invalid value, but the access is undefined behaviour by the
+  letter of the memory model.
+  - **This affects your tooling, not just ours:** if you run `cargo miri test` over a test that
+    drives `SeqRing` from two threads, Miri will report UB pointing into this crate. That is the
+    known deviation, not a new bug.
+  - It is a deliberate trade. A ring restricted to a word-sized payload could store it in an
+    atomic and be fully race-free; accepting any `T: Copy` is what rules that out. Generality was
+    chosen over formal soundness.
+  - `EventBuf` has no such caveat and passes Miri with the detector on — but it is **not a
+    drop-in**, since it applies backpressure instead of overwriting.
+  - Full reasoning, including the alternatives and why each was rejected, is in the `seq_ring`
+    module docs.
 
 ## Testing
 

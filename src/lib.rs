@@ -100,11 +100,14 @@
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
 //! - [`SeqRing`] is a seqlock and carries a **known formal data race**. The
-//!   copy is never observed and never becomes an invalid value, but it is
-//!   undefined behaviour by the letter of the memory model, and it cannot be
-//!   fixed in stable Rust for an arbitrary `T: Copy`. The
-//!   [`seq_ring`] module docs explain why in full. Prefer [`EventBuf`] if that
-//!   caveat is unacceptable for your use.
+//!   copy is never returned and never becomes an invalid value, but the access
+//!   is undefined behaviour by the letter of the memory model. Practical
+//!   consequence: running Miri over a test that drives this ring from two
+//!   threads reports UB inside this crate — that is the deviation, not a new
+//!   bug. It is a deliberate trade of formal soundness for accepting any
+//!   `T: Copy`; the [`seq_ring`] module docs give the alternatives and why each
+//!   was rejected. [`EventBuf`] has no such caveat, but applies backpressure
+//!   rather than overwriting, so it is not a drop-in replacement.
 //!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
