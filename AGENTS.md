@@ -4,9 +4,23 @@ Guidance for coding agents working in the ph-eventing codebase. This is the
 canonical agent reference; tool-specific entry points (`CLAUDE.md` and friends)
 are thin pointers to this file.
 
-Everything here is meant to be verifiable. Where a claim depends on running
-something, the command is given — prefer running it over trusting the prose,
-and correct the prose when it disagrees.
+This file is written for machines, not humans. It is not a summary of the
+public API — that is on docs.rs, and duplicating it here wastes context. It
+exists to carry two things an LLM cannot recover from the source alone:
+
+1. **The internal model** — what the fields mean, which orderings are load
+   bearing, and which invariants no type check enforces.
+2. **Preventative guardrails** — the specific mistakes that have been made here
+   before, or that are cheap to make and expensive to detect.
+
+Length is therefore not a defect in this file. Detail that prevents one silent
+concurrency bug pays for itself many times over.
+
+Everything here is meant to be verifiable, and claims in it have been checked
+rather than assumed — one "load-bearing" claim about `idx_for` was written,
+tested, found false, and rewritten. Where a claim depends on running something,
+the command is given. Prefer running it over trusting the prose, and correct the
+prose when it disagrees.
 
 ## Project Overview
 
@@ -95,6 +109,85 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - The Release/Acquire on the cursor stores/loads act as the publication fence for slot data.
 - Producer and consumer never touch the same slot, so the slots themselves are race-free; only the cursors are shared.
 - `len()` is the one observer reading both cursors. It brackets its `head` load between two `tail` samples (Acquire load, then `fence(Acquire)`), retries a bounded number of times, then falls back to a clamped estimate so it is always wait-free.
+
+### Internal model (SeqRing)
+
+The public API is on docs.rs; this is the part you cannot infer from it. Three
+atomics with distinct jobs, easy to conflate:
+
+| Field | Role | Written by |
+|-------|------|-----------|
+| `next_seq` | Allocation counter. Holds the last sequence handed out. `push` claims the next one with `fetch_add`. | Producer only |
+| `slot_seq[i]` | Which sequence currently occupies slot `i`. **`0` means "invalid / being written"** — it is not a sequence number, it is the reserved sentinel. | Producer only |
+| `published_seq` | Visibility barrier. The newest sequence a consumer is allowed to look for. | Producer only |
+
+`push_inner` commits in a fixed order, and the order *is* the correctness
+argument — do not reorder it:
+
+```
+claim seq (fetch_add, skipping 0 on wrap)
+slot_seq[idx] = 0          // invalidate: readers of the old seq now fail
+fence(Release)             // keeps the invalidation ahead of the write
+write_volatile(slot, val)
+slot_seq[idx] = seq        // Release: slot is valid again, under a new seq
+published_seq = seq        // Release: consumers may now look for it
+```
+
+Invariants that hold across the whole type:
+
+- `published_seq` never runs ahead of `next_seq` — publication happens after
+  allocation. A consumer never looks past `published_seq`, so it cannot observe
+  a slot that is mid-claim. (Both wrap, so compare them with `seq_distance`,
+  not `<`.)
+- `idx_for` must be a bijection over any `N` consecutive sequences, and the
+  producer and consumer must use **the same one**. The current `(seq - 1) % N`
+  is convention, not correctness — it just lands sequence 1 in slot 0. Verified:
+  changing it to `seq % N` passes the whole suite, because a rotation is still a
+  bijection. The hazard is not the offset, it is inlining a *different* mapping
+  in one place and leaving `idx_for` in the other; the sequence check would then
+  reject every read and every item would count as dropped, with no compile
+  error and no panic.
+- In `poll_up_to`, `read + dropped` always equals the number of sequences the
+  cursor advanced past. Every branch must maintain that: a successful read
+  increments `read`, a missing slot increments `dropped`, and the lag-jump adds
+  the whole skipped span. Breaking it makes the drop counter silently wrong,
+  which no type check will catch.
+
+`RingBuf` requires `T: Default` while the other two do not: it initialises a
+real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
+front.
+
+### Conditional compilation map
+
+Five overlapping axes. Putting code under the wrong one is a common and quiet
+mistake:
+
+| Cfg | Active when | Purpose |
+|-----|-------------|---------|
+| `#[cfg(test)]` | `cargo test` | Unit tests, and the `TEST_AFTER_READ_*` hook |
+| `#[cfg(loom)]` | `RUSTFLAGS="--cfg loom"` | Swaps `crate::sync` to Loom's primitives |
+| `#[cfg(all(loom, test))]` | both | `src/loom_tests.rs` — the models |
+| `cfg!(miri)` (runtime) | under Miri | `test_support::iterations` scales stress loops down |
+| `target_has_atomic = "32"` / feature cfgs | per target | `core` vs `portable-atomic` |
+
+`TEST_AFTER_READ_TARGET` / `TEST_AFTER_READ_SEQ` are a deliberate injection
+point, not dead code: they let a single-threaded test force a slot's sequence to
+change *between* the consumer's copy and its re-check, which is the exact race
+the double-check exists to catch. They use `core` atomics directly because
+Loom's are not const-constructible in a `static`.
+
+### Coupled edits
+
+Changes that must land together, none of which the compiler enforces:
+
+| If you change | Also update |
+|---------------|-------------|
+| Any atomic, ordering, or fence | Run Miri **and** Loom; update the Memory Ordering section above |
+| Add or remove a test | Test counts in `README.md` and the Testing section below |
+| Add a file under `src/` | The `include` allowlist in `Cargo.toml` |
+| A public API or its behaviour | `README.md`, the module `//!` docs, and `CHANGELOG.md` |
+| A user-visible guarantee | Both user surfaces — `README.md` *and* the `//!` docs, since crates.io and docs.rs show different things |
+| MSRV | `Cargo.toml`, `rust-toolchain.toml`, the README badge, `CONTRIBUTING.md` — and it is a breaking change |
 
 ### Consumer Polling Modes (SeqRing)
 
@@ -457,16 +550,21 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 ### Common Tasks
 
 **Adding a new consumer method:**
-1. Add method to `Consumer` impl in `src/seq_ring.rs`
-2. Use existing `read_seq_inner` for safe slot reads
-3. Update `dropped_accum` if items are skipped
-4. Add test case in the `tests` module
-5. Run `cargo test`
+1. Add the method to the `Consumer` impl in `src/seq_ring.rs`
+2. Read slots through `read_seq_inner` — never touch `slots[i]` directly, or you
+   lose the double-sequence-check and the `MaybeUninit` discipline
+3. Compare sequences with `seq_distance`, never raw `wrapping_sub`
+4. If the method can skip items, update `dropped_accum` with `saturating_add`
+   and preserve the `read + dropped` invariant
+5. Add a test in the `tests` module, and update the counts in `README.md`
+6. `./scripts/ci.sh`, then `./scripts/miri.sh` and `./scripts/loom.sh` — a
+   passing `cargo test` is not evidence for a change in this file
 
 **Adding a new event type feature:**
-1. Ensure `T: Copy` constraint is preserved
-2. Consider if new constraints are needed
-3. Document any new requirements
+1. Preserve `T: Copy`; adding a bound is a breaking change
+2. If it needs a new atomic or cell, take it from `crate::sync`, never `core`
+3. Document the guarantee on *both* user surfaces — `README.md` and the `//!`
+   docs — since crates.io and docs.rs show different things
 
 ### What to Avoid
 
