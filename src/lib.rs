@@ -86,7 +86,9 @@
 //! `SeqRing` and `EventBuf` require 32-bit atomics. For targets that lack them
 //! (for example `thumbv6m-none-eabi`), enable
 //! `portable-atomic-unsafe-assume-single-core` or `portable-atomic-critical-section`.
-//! `RingBuf` has no atomics requirement.
+//! The crate always compiles those modules, so no-atomic targets need one of
+//! those features even when only [`RingBuf`] is used. `RingBuf` itself uses no
+//! atomics.
 //!
 //! # Safety and concurrency
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
@@ -94,12 +96,45 @@
 //!   consumer must be active. `producer()`/`consumer()` will panic if called
 //!   while another handle of the same kind is active. Using unsafe to bypass
 //!   these constraints is undefined behavior.
+//! - [`EventBuf`] is race-free by construction — its producer and consumer
+//!   never touch the same slot — and passes Miri with the data-race detector
+//!   enabled.
+//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. The
+//!   copy is never returned and never becomes an invalid value, but the access
+//!   is undefined behaviour by the letter of the memory model. Practical
+//!   consequence: running Miri over a test that drives this ring from two
+//!   threads reports UB inside this crate — that is the deviation, not a new
+//!   bug. It is a deliberate trade of formal soundness for accepting any
+//!   `T: Copy`; the [`seq_ring`] module docs give the alternatives and why each
+//!   was rejected. [`EventBuf`] has no such caveat, but applies backpressure
+//!   rather than overwriting, so it is not a drop-in replacement.
+//!
+//! # Using it across contexts
+//! The typical embedded shape is a producer in an interrupt handler and a
+//! consumer in a task loop.
+//!
+//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, so `&buf` can be
+//!   handed to both contexts. The `Producer` and `Consumer` handles are
+//!   `Send + !Sync`: move each into the context that owns it, never share one.
+//! - The handles borrow the buffer, so the buffer must outlive them.
+//! - **`new()` is not a `const fn`**, so
+//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` will not compile. Use a
+//!   `StaticCell`, a `OnceCell`, or a binding in `main` that outlives its
+//!   borrowers.
+//!
+//! `N` is fixed at compile time and the buffer lives inline —
+//! `N * size_of::<T>()` bytes, no allocation. For [`EventBuf`] it is the
+//! backpressure threshold; for [`SeqRing`] it is how far the consumer may lag
+//! before entries are lost. It need not be a power of two.
 //!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 //! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.
 //! - `latest` reads the newest value without advancing the consumer cursor.
 //! - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
+//! - `Consumer::dropped` saturates rather than wrapping; `usize` is 32 bits on
+//!   the targets this crate ships to, so a long-lived lagging consumer can
+//!   reach the top of the range.
 //!
 //! # EventBuf semantics
 //! - `push` returns `Err(val)` when the buffer is full — no data is silently lost.
@@ -113,9 +148,18 @@ compile_error!(
 enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-critical-section feature."
 );
 
+// NOTE: `portable-atomic-unsafe-assume-single-core` and
+// `portable-atomic-critical-section` select different portable-atomic backends
+// and cannot both be enabled — which makes `--all-features` unsupported for
+// this crate. The guard for it lives in build.rs, not here: both features
+// forward straight to portable-atomic, whose own `compile_error!` fires while
+// the dependency compiles, so a guard in this file would never be reached. A
+// build script does not depend on portable-atomic and runs regardless.
+
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
+pub(crate) mod sync;
 pub mod traits;
 
 pub use event_buf::EventBuf;
@@ -123,5 +167,22 @@ pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
 pub use traits::{Link, Sink, Source};
 
+#[cfg(all(loom, test))]
+mod loom_tests;
+
 #[cfg(test)]
 extern crate std;
+
+/// Helpers shared by the concurrency tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// Scale a stress-test loop count for the current interpreter.
+    ///
+    /// Miri executes MIR rather than machine code, so a native iteration count
+    /// would take hours. Miri's value is schedule exploration, not volume — a
+    /// few hundred interleavings under its weak-memory model catch far more
+    /// than millions of native iterations on a strongly-ordered x86 host.
+    pub(crate) fn iterations(native: u32) -> u32 {
+        if cfg!(miri) { 200 } else { native }
+    }
+}

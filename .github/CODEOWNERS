@@ -1,0 +1,16 @@
+# Default owner for everything.
+*       @swgiacomelli
+
+# Concurrency-critical. A change here needs Miri and Loom runs, not just a
+# passing `cargo test` -- see AGENTS.md.
+/src/seq_ring.rs    @swgiacomelli
+/src/event_buf.rs   @swgiacomelli
+/src/sync.rs        @swgiacomelli
+/src/loom_tests.rs  @swgiacomelli
+/build.rs           @swgiacomelli
+
+# Supply chain and release path.
+/deny.toml          @swgiacomelli
+/Cargo.toml         @swgiacomelli
+/RELEASING.md       @swgiacomelli
+/.github/           @swgiacomelli

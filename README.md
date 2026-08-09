@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/ph-eventing)](https://crates.io/crates/ph-eventing)
 [![docs.rs](https://img.shields.io/docsrs/ph-eventing)](https://docs.rs/ph-eventing)
-[![CI](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml/badge.svg)](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml) 
+[![CI: local](https://img.shields.io/badge/CI-local-blue)](scripts/ci.sh)
 [![License: MIT](https://img.shields.io/crates/l/ph-eventing)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.92.0-blue)](rust-toolchain.toml)
 [![no_std](https://img.shields.io/badge/no__std-yes-green)](src/lib.rs)
@@ -34,6 +34,11 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
+- Those two are **mutually exclusive** — they select different portable-atomic backends, and
+  enabling both fails inside portable-atomic. Cargo features are additive, so this cannot be
+  expressed in the manifest; `build.rs` detects the combination and explains it.
+- Consequently **`--all-features` does not work for this crate** and cannot be made to. Check
+  combinations individually; `scripts/ci.*` enumerates the supported set.
 
 ## Usage
 
@@ -142,6 +147,7 @@ assert!(err.is_none());
 - When the producer wraps the ring, old values are overwritten.
 - `poll_one` and `poll_up_to` drain in-order and return `PollStats` (`read`, `dropped`, `newest`).
 - `latest` reads the newest value without advancing the consumer cursor.
+- `skip_to_latest` discards the backlog so the next poll returns the newest item.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 
 ### EventBuf
@@ -157,38 +163,77 @@ assert!(err.is_none());
   is active. Using unsafe to bypass these constraints (or sharing handles concurrently) is
   undefined behavior.
 - `T: Copy` is required by all types to avoid allocation and return values by copy.
+- `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
+  and it passes Miri with the data-race detector enabled.
+- `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
+  the producer is overwriting, then discard the copy when the sequence re-check fails. The copy is
+  never returned and never becomes an invalid value, but the access is undefined behaviour by the
+  letter of the memory model.
+  - **This affects your tooling, not just ours:** if you run `cargo miri test` over a test that
+    drives `SeqRing` from two threads, Miri will report UB pointing into this crate. That is the
+    known deviation, not a new bug.
+  - It is a deliberate trade. A ring restricted to a word-sized payload could store it in an
+    atomic and be fully race-free; accepting any `T: Copy` is what rules that out. Generality was
+    chosen over formal soundness.
+  - `EventBuf` has no such caveat and passes Miri with the detector on — but it is **not a
+    drop-in**, since it applies backpressure instead of overwriting.
+  - Full reasoning, including the alternatives and why each was rejected, is in the `seq_ring`
+    module docs.
 
-## Testing
+## Using it across contexts
 
-46 unit tests and 7 doctests covering all three buffer types plus the trait
-system. Host tests require `std`:
+The typical embedded shape is a producer in an interrupt handler and a consumer
+in a task loop. That works, with three things to know:
 
-```
-cargo test
-```
+- **The buffer is shared; the handles are owned.** `SeqRing<T, N>` and
+  `EventBuf<T, N>` are `Sync` when `T: Send`, so `&buf` can be handed to both
+  contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
+  the context that owns it, and never share a single handle between contexts.
+  There is no way to get a second `Producer` while one is live: `producer()`
+  panics rather than handing out a duplicate.
+- **The buffer must outlive both handles.** The handles borrow it, so the usual
+  answer is to own the buffer where it lives longest.
+- **`new()` is not a `const fn`**, so you cannot write
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` directly. Use a
+  `StaticCell`, a `OnceCell`, or a binding in `main` that outlives the tasks
+  borrowing it. This is the one ergonomic wrinkle on embedded targets and it is
+  worth knowing before you design around it.
 
-| Module | Tests |
-|--------|------:|
-| `event_buf` | 12 |
-| `ring` | 10 |
-| `seq_ring` | 13 |
-| `traits` | 11 |
-| doctests | 7 |
-| **Total** | **53** |
+### Choosing `N`
 
-Coverage snapshot (2026-02-08, via `cargo llvm-cov`):
+`N` is the slot count, fixed at compile time, and the whole buffer lives inline
+— `N * size_of::<T>()` bytes of stack or static, with no allocation.
 
-| Metric | Covered | Total | % |
-|--------|--------:|------:|--:|
-| Lines | 784 | 857 | 91.5 |
-| Functions | 115 | 130 | 88.5 |
-| Regions | 1392 | 1490 | 93.4 |
-| Instantiations | 220 | 237 | 92.8 |
+- For `EventBuf`, `N` is your backpressure threshold: the point at which `push`
+  starts returning `Err`. Size it for the largest burst you are willing to
+  absorb between drains.
+- For `SeqRing`, `N` is how far the consumer may lag before it starts losing
+  entries. Size it for the worst-case gap between polls, not for the average.
+- `N` need not be a power of two. Nothing here requires it.
 
-To regenerate:
-```
-cargo llvm-cov --json --summary-only --output-path target/llvm-cov/summary.json
-```
+## Quality and verification
+
+`SeqRing` and `EventBuf` are lock-free, so a green test run on x86 is weak
+evidence — a strongly-ordered host cannot exhibit the ordering bugs that appear
+on ARM and RISC-V. What backs this crate, in descending order of strength:
+
+| Evidence | What it establishes |
+|----------|---------------------|
+| [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
+| [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
+| 54 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
+
+**One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
+see [Safety and Concurrency](#safety-and-concurrency) above. `EventBuf` is
+race-free by construction and passes Miri with the detector enabled.
+
+Coverage is around 93% of lines, though it is a weak signal here: what matters
+is ordering and interleaving, which line coverage cannot see.
+
+Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running
+all of the above locally. Note that **CI does not run automatically** on this
+repository — the local runs are the gate.
 
 ## License
 MIT. See `LICENSE`.

@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose an addition or a change to the API
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please open an issue before sending a PR for a new feature, so the
+        design can be discussed first.
+
+        Constraints any proposal has to live within:
+
+        - `#![no_std]`, zero heap allocation, and **zero runtime dependencies**.
+        - Fixed-size, `T: Copy`, stack-allocated.
+        - The buffers are SPSC by design. Multi-producer or multi-consumer is a
+          different data structure, not a flag on this one.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do that the crate does not support today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: A sketch is fine — signatures matter more than implementation.
+      render: rust
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >
+        Including whether an existing type already covers it — `RingBuf`,
+        `SeqRing`, and `EventBuf` deliberately trade off differently.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This does not require heap allocation or a runtime dependency
+        - label: This does not break the existing public API (or the breakage is stated above)

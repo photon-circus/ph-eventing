@@ -20,6 +20,12 @@
 //! - A slot is written before `head` is advanced and read before `tail` is
 //!   advanced, so the Release/Acquire pairs on the cursors act as the
 //!   publication fence.
+//! - The producer and consumer never touch the same slot: `push` writes at
+//!   `head` only while `head - tail < N`, so there is no data race on the
+//!   slots themselves, only on the cursors.
+//! - [`EventBuf::len`] is the one observer that reads both cursors, so it
+//!   brackets its `head` load between two `tail` samples to get a consistent
+//!   pair.
 //!
 //! # Example
 //! ```
@@ -36,18 +42,18 @@
 //! assert_eq!(consumer.pop(), None); // empty
 //! ```
 
-use core::cell::{Cell, UnsafeCell};
+use crate::sync::{AtomicBool, AtomicU32, Ordering, TrackedCell, fence};
+use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::sync::atomic::Ordering;
-#[cfg(target_has_atomic = "32")]
-use core::sync::atomic::{AtomicBool, AtomicU32};
-#[cfg(all(not(target_has_atomic = "32"), feature = "portable-atomic"))]
-use portable_atomic::{AtomicBool, AtomicU32};
 
-fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
-    core::array::from_fn(|_| UnsafeCell::new(MaybeUninit::uninit()))
+fn slot_array<T, const N: usize>() -> [TrackedCell<MaybeUninit<T>>; N] {
+    core::array::from_fn(|_| TrackedCell::new(MaybeUninit::uninit()))
 }
+
+/// How many times [`EventBuf::len`] retries its snapshot before falling back
+/// to a clamped estimate. Bounded so `len` is always wait-free.
+const RETRY_LIMIT: usize = 2;
 
 /// Bounded SPSC event buffer with backpressure.
 ///
@@ -62,7 +68,7 @@ fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
 pub struct EventBuf<T: Copy, const N: usize> {
     head: AtomicU32,
     tail: AtomicU32,
-    slots: [UnsafeCell<MaybeUninit<T>>; N],
+    slots: [TrackedCell<MaybeUninit<T>>; N],
     producer_taken: AtomicBool,
     consumer_taken: AtomicBool,
 }
@@ -83,7 +89,7 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
         Self {
             head: AtomicU32::new(0),
             tail: AtomicU32::new(0),
-            slots: unsafe_cell_array::<T, N>(),
+            slots: slot_array::<T, N>(),
             producer_taken: AtomicBool::new(false),
             consumer_taken: AtomicBool::new(false),
         }
@@ -102,13 +108,47 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Approximate number of items currently buffered.
     ///
-    /// This is a snapshot — by the time the caller acts on it the value may
-    /// already be stale.
+    /// Returns a consistent `(tail, head)` snapshot. The value may still be
+    /// stale by the time the caller acts on it, but it will never spuriously
+    /// exceed [`capacity`](Self::capacity).
+    ///
+    /// This never blocks: it makes a bounded number of attempts and then falls
+    /// back to a clamped estimate, so a busy consumer cannot stall the caller.
     #[inline]
     pub fn len(&self) -> usize {
+        // Seqlock-style read. Sampling `tail` on both sides of the `head` load
+        // and requiring the samples to match means `head` was observed while
+        // `tail` held still, so `head.wrapping_sub(tail)` cannot appear as a
+        // huge unsigned value after a concurrent consumer advance.
+        //
+        // The two barriers pin the `head` load between the samples. They also
+        // make equality a sound bound: if `h` observes a producer publication
+        // that reused consumer-freed space, the following Acquire fence
+        // synchronizes through that Relaxed load. The producer acquired the
+        // newer `tail` before publishing `h`, so `t2` cannot then observe an
+        // older tail. Thus `t1 == t2` implies `h - t1 <= N`.
+        //
+        // This depends on EventBuf's backpressure protocol: the producer reads
+        // `tail` with Acquire before advancing `head`. It is not a generic
+        // double-sampling property. See AGENTS.md for the full happens-before
+        // chain.
+        for _ in 0..RETRY_LIMIT {
+            let t1 = self.tail.load(Ordering::Acquire);
+            let h = self.head.load(Ordering::Relaxed);
+            fence(Ordering::Acquire);
+            let t2 = self.tail.load(Ordering::Relaxed);
+
+            if t1 == t2 {
+                return h.wrapping_sub(t1) as usize;
+            }
+        }
+
+        // The consumer moved during every attempt. Read `tail` first so a
+        // further advance can only make the count an over-estimate rather
+        // than an underflow, then clamp to preserve the capacity bound.
+        let t = self.tail.load(Ordering::Acquire);
         let h = self.head.load(Ordering::Relaxed);
-        let t = self.tail.load(Ordering::Relaxed);
-        h.wrapping_sub(t) as usize
+        (h.wrapping_sub(t) as usize).min(N)
     }
 
     /// Returns `true` if the buffer contains no items (approximate).
@@ -194,9 +234,7 @@ impl<T: Copy, const N: usize> Producer<'_, T, N> {
         let idx = EventBuf::<T, N>::slot_index(head);
         // SAFETY: producer is the only writer to this slot; the consumer
         // will not read it until head is advanced (Release below).
-        unsafe {
-            (*self.buf.slots[idx].get()).write(val);
-        }
+        self.buf.slots[idx].with_mut(|slot| unsafe { (*slot).write(val) });
         self.buf.head.store(head.wrapping_add(1), Ordering::Release);
         Ok(())
     }
@@ -238,7 +276,7 @@ impl<T: Copy, const N: usize> Consumer<'_, T, N> {
         let idx = EventBuf::<T, N>::slot_index(tail);
         // SAFETY: consumer is the only reader of this slot; the producer
         // will not overwrite it until tail is advanced (Release below).
-        let val = unsafe { (*self.buf.slots[idx].get()).assume_init_read() };
+        let val = self.buf.slots[idx].with(|slot| unsafe { (*slot).assume_init_read() });
         self.buf.tail.store(tail.wrapping_add(1), Ordering::Release);
         Some(val)
     }
@@ -450,6 +488,83 @@ mod tests {
         c.pop();
         assert_eq!(buf.len(), 2);
         assert!(!buf.is_full());
+    }
+
+    #[test]
+    fn len_stays_within_capacity_while_consumer_drains() {
+        let buf = EventBuf::<u32, 8>::new();
+        let done = AtomicBool::new(false);
+        let pushes = crate::test_support::iterations(200_000);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let p = buf.producer();
+                for i in 0..pushes {
+                    let _ = p.push(i);
+                }
+                done.store(true, Ordering::Release);
+            });
+
+            scope.spawn(|| {
+                let c = buf.consumer();
+                while !done.load(Ordering::Acquire) {
+                    c.pop();
+                }
+            });
+
+            // `len` races both handles; it may be stale, but it must never
+            // report more than the buffer can hold.
+            while !done.load(Ordering::Acquire) {
+                let observed = buf.len();
+                assert!(
+                    observed <= buf.capacity(),
+                    "len() reported {observed} for a capacity-{} buffer",
+                    buf.capacity()
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn concurrent_spsc_preserves_fifo_and_loses_nothing() {
+        let buf = EventBuf::<u32, 4>::new();
+        let total = crate::test_support::iterations(50_000);
+
+        let received = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let p = buf.producer();
+                // Backpressure means push can fail; retry so the stream is
+                // complete and any gap in the consumer's view is a real bug.
+                for i in 0..total {
+                    let mut val = i;
+                    while let Err(rejected) = p.push(val) {
+                        val = rejected;
+                        std::thread::yield_now();
+                    }
+                }
+            });
+
+            let consumer = scope.spawn(|| {
+                let c = buf.consumer();
+                let mut seen = 0u32;
+                while seen < total {
+                    match c.pop() {
+                        // Strict FIFO: the nth item popped must be n.
+                        Some(val) => {
+                            assert_eq!(val, seen, "out-of-order pop at index {seen}");
+                            seen += 1;
+                        }
+                        None => std::thread::yield_now(),
+                    }
+                }
+                seen
+            });
+
+            consumer.join().unwrap()
+        });
+
+        assert_eq!(received, total);
+        assert_eq!(buf.len(), 0);
     }
 
     #[test]

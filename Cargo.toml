@@ -1,33 +1,49 @@
 [package]
 name = "ph-eventing"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.92.0"
 description = "Stack-allocated ring buffers for no-std embedded targets"
 authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
 license = "MIT"
 repository = "https://github.com/photon-circus/ph-eventing"
+documentation = "https://docs.rs/ph-eventing"
+homepage = "https://github.com/photon-circus/ph-eventing"
 readme = "README.md"
 keywords = ["embedded", "no-std", "lock-free", "spsc", "ring-buffer"]
 categories = ["embedded", "no-std", "concurrency"]
 publish = true
-exclude = [
-    ".cargo/*",
-    ".github/*",
-    ".idea/*",
-    "Cargo.toml.orig",
-    "CHANGELOG.md",
-    "CLAUDE.md",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",    
+
+# An allowlist, not a denylist. `exclude` silently ships every new top-level
+# file nobody remembered to list -- deny.toml, scripts/, and AGENTS.md each had
+# to be added after the fact. With `include`, the default for anything new is
+# "not published", which is the safer way round.
+include = [
+    "src/**/*.rs",
+    # Loom models are cfg-gated to `--cfg loom` and reference a crate consumers
+    # do not have. They never compile for a consumer, so shipping them is dead
+    # weight; gitignore-style negation keeps them out.
+    "!src/loom_tests.rs",
+    "build.rs",
+    "Cargo.toml",
     "LICENSE",
     "README.md",
-    "SECURITY.md",
 ]
 
 [dependencies]
 portable-atomic = { version = "1.13", optional = true, default-features = false, features = ["require-cas"] }
 
+# The two backend features below are MUTUALLY EXCLUSIVE — they select different
+# portable-atomic backends, and enabling both fails inside portable-atomic.
+# Cargo features are additive, so there is no way to express that here.
+#
+# build.rs catches the combination and explains it. It has to be a build script:
+# a `compile_error!` in src/lib.rs would be unreachable, because the dependency
+# fails before this crate is compiled, whereas a build script does not depend on
+# portable-atomic and runs regardless.
+#
+# The practical consequence stands: `--all-features` does not work for this
+# crate. Test combinations individually — `scripts/ci.*` does.
 [features]
 default = []
 portable-atomic = ["dep:portable-atomic"]
@@ -39,3 +55,39 @@ portable-atomic-critical-section = [
     "portable-atomic",
     "portable-atomic/critical-section",
 ]
+
+# docs.rs builds default features unless told otherwise, which would leave the
+# optional portable-atomic path undocumented. `all-features = true` is the usual
+# answer and is NOT usable here -- the two backend features are mutually
+# exclusive (see above), so it would fail the docs build. Name the one optional
+# feature that is safe to enable instead.
+[package.metadata.docs.rs]
+features = ["portable-atomic"]
+
+# Loom is a dev-dependency gated on `--cfg loom`, so a normal `cargo build`,
+# `cargo test`, or `cargo package` never resolves or downloads it. The library
+# itself keeps zero runtime dependencies.
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"
+
+# Enforced at build time rather than left to review. Local CI runs clippy with
+# -D warnings, so each of these is effectively an error.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+# Every unsafe operation needs its own unsafe block, even inside an unsafe fn,
+# so the SAFETY comment sits next to the operation it justifies.
+unsafe_op_in_unsafe_fn = "deny"
+# This is a public API for embedded users reading docs.rs; undocumented items
+# are a defect.
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+# An unsafe block without a SAFETY comment is exactly the review slip that
+# produced the ordering bugs this crate has already had.
+undocumented_unsafe_blocks = "warn"
+# No allocation, and no hidden panics in a hot path on a device with no way to
+# report one.
+alloc_instead_of_core = "warn"
+std_instead_of_core = "warn"

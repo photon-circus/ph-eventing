@@ -1,0 +1,52 @@
+# cargo-deny policy for ph-eventing.
+#
+# Run with `./scripts/ci.ps1` / `./scripts/ci.sh`, or directly:
+#   cargo deny check
+#
+# This crate has zero runtime dependencies, so most of what follows is a
+# ratchet rather than a cleanup: it fails the moment a dependency appears that
+# nobody argued for. The one optional dependency is `portable-atomic`, needed
+# on targets without 32-bit atomics.
+#
+# `targets` is deliberately unset, so the whole dependency graph is checked for
+# every platform rather than just the host.
+
+[graph]
+# Check the optional portable-atomic paths too, not just the default build.
+all-features = true
+
+[advisories]
+version = 2
+# Fail on a yanked dependency rather than warning. With this few dependencies
+# there is no reason to tolerate one.
+yanked = "deny"
+# Advisories are never ignored silently. If one has to be accepted, add the
+# RUSTSEC id here with a comment explaining why it does not apply.
+ignore = []
+
+[licenses]
+version = 2
+# The crate is MIT. Permissive licences only: nothing copyleft can reach a
+# no-std embedded consumer through this crate without an explicit decision.
+# Kept minimal on purpose. `portable-atomic` and `critical-section` are
+# "MIT OR Apache-2.0", which these two satisfy. Anything else — ISC, BSD, Zlib,
+# Unicode — needs a deliberate edit here, which is the point.
+allow = ["MIT", "Apache-2.0"]
+confidence-threshold = 0.93
+
+[bans]
+# Two versions of the same crate in one graph is a smell here, not a fact of
+# life — the graph is small enough that it always has a cause worth finding.
+multiple-versions = "deny"
+# A wildcard version requirement gives no guarantee about what gets built.
+wildcards = "deny"
+allow-wildcard-paths = false
+deny = []
+
+[sources]
+# Everything must come from crates.io. A git or vendored source in a crate that
+# claims zero dependencies should be an explicit decision, not a surprise.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
