@@ -40,7 +40,29 @@ $checks = @(
     @{ Name = 'clippy'; Args = @('clippy', '--all-targets', '--', '-D', 'warnings') }
     @{ Name = 'test'; Args = @('test') }
     @{ Name = 'doc'; Args = @('doc', '--no-deps'); Env = @{ RUSTDOCFLAGS = '-D warnings' } }
+
+    # Feature combinations, one at a time. `--all-features` cannot work here:
+    # the two portable-atomic backend features are mutually exclusive, so the
+    # supported set has to be enumerated rather than swept.
+    @{ Name = 'features: default'; Args = @('check', '--quiet') }
+    @{ Name = 'features: portable-atomic'
+       Args = @('check', '--quiet', '--features', 'portable-atomic') }
+    @{ Name = 'features: critical-section'
+       Args = @('check', '--quiet', '--features', 'portable-atomic-critical-section') }
 )
+
+# Current stable. rust-toolchain.toml pins the MSRV, so every other check here
+# runs 1.92.0 -- without this, nothing would catch a new stable lint or a
+# regression that only appears on a newer compiler. `+stable` is explicit and
+# overrides the pin.
+$stableInstalled = [bool]((rustup toolchain list 2>$null) -match '^stable')
+if ($stableInstalled) {
+    $checks += @(
+        @{ Name = 'stable: test'; Args = @('+stable', 'test', '--quiet') }
+        @{ Name = 'stable: clippy'
+           Args = @('+stable', 'clippy', '--all-targets', '--quiet', '--', '-D', 'warnings') }
+    )
+}
 
 # Supply chain: advisories, licences, bans, sources. Only added when the tool
 # is present, since it is a separate install (`cargo install cargo-deny`).
@@ -104,6 +126,9 @@ if (-not $denyInstalled) {
 }
 if (-not $covInstalled) {
     Write-Host '  SKIP  coverage (not installed: cargo install cargo-llvm-cov)' -ForegroundColor Yellow
+}
+if (-not $stableInstalled) {
+    Write-Host '  SKIP  stable (not installed: rustup toolchain install stable)' -ForegroundColor Yellow
 }
 foreach ($result in $results) {
     if ($result.Ok) {

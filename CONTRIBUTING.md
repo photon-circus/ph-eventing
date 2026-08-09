@@ -42,6 +42,22 @@ cargo emb-thumbv6m       # thumbv6m, with portable-atomic
 cargo emb-riscv32imac    # riscv32imac
 ```
 
+### Feature combinations
+
+`portable-atomic-unsafe-assume-single-core` and `portable-atomic-critical-section`
+are mutually exclusive, so **`cargo test --all-features` fails** — that is
+expected, not a bug you introduced. `build.rs` will say so in the error output,
+alongside the noisier message from portable-atomic itself. Check the supported
+set individually:
+
+```bash
+cargo check
+cargo check --features portable-atomic
+cargo check --features portable-atomic-critical-section
+```
+
+`./scripts/ci.sh` runs all three for you.
+
 ### Formatting and lints
 
 ```bash

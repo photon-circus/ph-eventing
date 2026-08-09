@@ -34,6 +34,11 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
+- Those two are **mutually exclusive** — they select different portable-atomic backends, and
+  enabling both fails inside portable-atomic. Cargo features are additive, so this cannot be
+  expressed in the manifest; `build.rs` detects the combination and explains it.
+- Consequently **`--all-features` does not work for this crate** and cannot be made to. Check
+  combinations individually; `scripts/ci.*` enumerates the supported set.
 
 ## Usage
 

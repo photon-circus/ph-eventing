@@ -48,6 +48,26 @@ run_check 'clippy' cargo clippy --all-targets -- -D warnings
 run_check 'test' cargo test
 run_check 'doc' env RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 
+# Feature combinations, one at a time. `--all-features` cannot work here: the
+# two portable-atomic backend features are mutually exclusive, so the supported
+# set has to be enumerated rather than swept.
+run_check 'features: default' cargo check --quiet
+run_check 'features: portable-atomic' cargo check --quiet --features portable-atomic
+run_check 'features: critical-section' \
+    cargo check --quiet --features portable-atomic-critical-section
+
+# Current stable. rust-toolchain.toml pins the MSRV, so every other check here
+# runs 1.92.0 -- without this, nothing would catch a new stable lint or a
+# regression that only appears on a newer compiler. `+stable` is explicit and
+# overrides the pin.
+if rustup toolchain list 2>/dev/null | grep -q '^stable'; then
+    run_check 'stable: test' cargo +stable test --quiet
+    run_check 'stable: clippy' cargo +stable clippy --all-targets --quiet -- -D warnings
+else
+    printf '\n==> stable\nstable toolchain not installed; skipping (rustup toolchain install stable)\n'
+    summary="${summary}  SKIP  stable (not installed)\n"
+fi
+
 # Supply chain: advisories, licences, bans, sources. Skipped with a notice
 # rather than failing the run if the tool is absent, since it is a separate
 # install (`cargo install cargo-deny`).

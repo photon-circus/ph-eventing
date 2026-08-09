@@ -43,6 +43,7 @@ ph-eventing/
 │   ├── miri.sh             # Miri UB/concurrency checks (POSIX)
 │   ├── loom.ps1            # Loom model checking (Windows)
 │   └── loom.sh             # Loom model checking (POSIX)
+├── build.rs                # guards the mutually exclusive portable-atomic features
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
@@ -176,6 +177,29 @@ real `dropped_accum` overflow that the 64-bit host run could not.
 "fix" it by weakening the sequence guards, and do not silence it by disabling
 the race detector globally — the split-pass structure exists so everything else
 stays fully checked. See the `seq_ring` module docs.
+
+### Feature combinations and toolchains
+
+Two traps that look like bugs but are not:
+
+- **`--all-features` fails and cannot be made to pass.**
+  `portable-atomic-unsafe-assume-single-core` and
+  `portable-atomic-critical-section` select different portable-atomic backends.
+  Cargo features are additive, so the manifest cannot express the exclusion.
+  The guard lives in [build.rs](build.rs) — **not** a `compile_error!` in
+  `src/lib.rs`, which would be unreachable: the dependency's own guard fires
+  while portable-atomic compiles, before this crate is compiled at all
+  (verified on host and embedded targets). A build script does not depend on
+  portable-atomic, so it runs regardless and its message is actually seen.
+  It does not suppress the upstream error; it adds an explanation next to it.
+  Enumerate the supported set instead of sweeping; `scripts/ci.*` does.
+  `build.rs` is in the `include` allowlist — dropping it there would ship a
+  crate that cannot build.
+- **`rust-toolchain.toml` pins 1.92.0 and overrides whatever a CI action
+  installs.** A bare `cargo` always runs the MSRV, so a job labelled "stable"
+  that just runs `cargo test` is silently testing the MSRV. Use an explicit
+  `cargo +stable`, which does take precedence. Local CI has a `stable:` pass
+  for exactly this reason — without it nothing would catch a new stable lint.
 
 ### Releasing
 
@@ -452,6 +476,8 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Widening `deny.toml`'s licence allow-list or adding an `[advisories] ignore` entry to make a check pass, rather than to record a decision
 - Lowering the coverage floor in `scripts/ci.*` to make a run pass
 - Committing editor, IDE, or AI/agent settings. `.gitignore` covers the common ones; shared project config belongs at the repo root
+- Adding `--all-features` to any script or workflow — it cannot work here (see above)
+- Assuming a CI job labelled "stable" runs stable. Without an explicit `cargo +stable`, the pin in `rust-toolchain.toml` wins
 - Importing `core::sync::atomic` directly in `event_buf.rs` or `seq_ring.rs` instead of `crate::sync`
 - Breaking API compatibility without explicit request
 - Adding `std`-only features to the main library path

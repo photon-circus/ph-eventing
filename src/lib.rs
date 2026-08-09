@@ -127,6 +127,14 @@ compile_error!(
 enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-critical-section feature."
 );
 
+// NOTE: `portable-atomic-unsafe-assume-single-core` and
+// `portable-atomic-critical-section` select different portable-atomic backends
+// and cannot both be enabled — which makes `--all-features` unsupported for
+// this crate. The guard for it lives in build.rs, not here: both features
+// forward straight to portable-atomic, whose own `compile_error!` fires while
+// the dependency compiles, so a guard in this file would never be reached. A
+// build script does not depend on portable-atomic and runs regardless.
+
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;

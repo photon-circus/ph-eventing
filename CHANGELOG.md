@@ -50,6 +50,18 @@ All notable changes to this project will be documented in this file.
   `README.md` are included; everything not named is not published.
 - GitHub Actions runs on manual dispatch only. Local CI is the primary gate.
 
+### Fixed (repo hygiene)
+- Local CI and the workflow now exercise current stable. `rust-toolchain.toml` pins 1.92.0 and
+  overrides whatever a setup action installs, so every check silently ran the MSRV — including the
+  job labelled "stable". Jobs that need a different compiler now use an explicit `cargo +stable`.
+- Feature combinations are checked individually in CI, and a `build.rs` guard now explains the one
+  combination Cargo cannot express: `portable-atomic-unsafe-assume-single-core` and
+  `portable-atomic-critical-section` are mutually exclusive, so `--all-features` cannot work. The
+  guard has to be a build script — a `compile_error!` in `src/lib.rs` is unreachable, because
+  portable-atomic's own guard fires before this crate is compiled.
+- The GitHub Actions workflow declares `permissions: contents: read` instead of inheriting the
+  repository default token scope.
+
 ### Known issues
 - `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour. It
   cannot be resolved in stable Rust for an arbitrary `T: Copy`; see the `seq_ring` module docs.

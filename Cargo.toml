@@ -20,6 +20,7 @@ publish = true
 # "not published", which is the safer way round.
 include = [
     "src/**/*.rs",
+    "build.rs",
     "Cargo.toml",
     "LICENSE",
     "README.md",
@@ -28,6 +29,17 @@ include = [
 [dependencies]
 portable-atomic = { version = "1.13", optional = true, default-features = false, features = ["require-cas"] }
 
+# The two backend features below are MUTUALLY EXCLUSIVE — they select different
+# portable-atomic backends, and enabling both fails inside portable-atomic.
+# Cargo features are additive, so there is no way to express that here.
+#
+# build.rs catches the combination and explains it. It has to be a build script:
+# a `compile_error!` in src/lib.rs would be unreachable, because the dependency
+# fails before this crate is compiled, whereas a build script does not depend on
+# portable-atomic and runs regardless.
+#
+# The practical consequence stands: `--all-features` does not work for this
+# crate. Test combinations individually — `scripts/ci.*` does.
 [features]
 default = []
 portable-atomic = ["dep:portable-atomic"]
