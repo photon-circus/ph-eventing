@@ -20,6 +20,10 @@ publish = true
 # "not published", which is the safer way round.
 include = [
     "src/**/*.rs",
+    # Loom models are cfg-gated to `--cfg loom` and reference a crate consumers
+    # do not have. They never compile for a consumer, so shipping them is dead
+    # weight; gitignore-style negation keeps them out.
+    "!src/loom_tests.rs",
     "build.rs",
     "Cargo.toml",
     "LICENSE",
@@ -51,6 +55,14 @@ portable-atomic-critical-section = [
     "portable-atomic",
     "portable-atomic/critical-section",
 ]
+
+# docs.rs builds default features unless told otherwise, which would leave the
+# optional portable-atomic path undocumented. `all-features = true` is the usual
+# answer and is NOT usable here -- the two backend features are mutually
+# exclusive (see above), so it would fail the docs build. Name the one optional
+# feature that is safe to enable instead.
+[package.metadata.docs.rs]
+features = ["portable-atomic"]
 
 # Loom is a dev-dependency gated on `--cfg loom`, so a normal `cargo build`,
 # `cargo test`, or `cargo package` never resolves or downloads it. The library

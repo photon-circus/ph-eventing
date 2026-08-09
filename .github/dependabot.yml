@@ -1,0 +1,21 @@
+# Dependabot keeps the SHA-pinned actions in ci.yml current. Pinning to a SHA
+# is what makes a supply-chain compromise of an action's tag a non-event; this
+# is what stops that pinning turning into rot.
+#
+# Cargo is deliberately absent. The library has zero runtime dependencies, and
+# `loom` is a dev-dependency gated on `--cfg loom` that Dependabot cannot
+# resolve anyway. A dependency PR here would mean something changed that
+# deserves a human decision, not an automated bump -- deny.toml enforces that.
+#
+# Note that CI is manual-dispatch only, so nothing runs automatically on a
+# Dependabot PR. Run ./scripts/ci.sh locally before merging one.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies

@@ -1,0 +1,74 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, one known non-bug: **`cargo build --all-features` fails.**
+        The two `portable-atomic` backend features are mutually exclusive, so
+        that combination cannot work. `build.rs` explains it in the error
+        output. Check features individually instead.
+
+        Also known and documented: **Miri reports a data race in `SeqRing`.**
+        It is a seqlock; the race is real by the letter of the memory model and
+        cannot be resolved in stable Rust for an arbitrary `T: Copy`. See the
+        `seq_ring` module docs. `EventBuf` has no such caveat.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Smallest code that shows it. For a concurrency issue, say which thread
+        does what — an ordering bug is not reproducible without that.
+      render: rust
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ph-eventing version
+      placeholder: "0.1.3"
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target
+      description: >
+        The triple, plus which features are enabled. Ordering bugs are usually
+        target-specific — a report from ARM or RISC-V is far more informative
+        than one from x86.
+      placeholder: "thumbv7em-none-eabi, no features"
+    validations:
+      required: true
+
+  - type: input
+    id: toolchain
+    attributes:
+      label: Rust version
+      description: "Output of `rustc -V`. MSRV is 1.92.0."
+      placeholder: "rustc 1.92.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: checkers
+    attributes:
+      label: Checker output (optional)
+      description: >
+        If you ran `./scripts/miri.sh` or `./scripts/loom.sh`, paste the
+        relevant output. A failing Loom model is a near-complete bug report on
+        its own — it replays a deterministic interleaving.
+      render: text

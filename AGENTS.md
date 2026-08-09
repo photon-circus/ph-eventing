@@ -44,6 +44,7 @@ ph-eventing/
 │   ├── loom.ps1            # Loom model checking (Windows)
 │   └── loom.sh             # Loom model checking (POSIX)
 ├── build.rs                # guards the mutually exclusive portable-atomic features
+├── .github/                # dispatch-only workflow, issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
@@ -477,6 +478,8 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Lowering the coverage floor in `scripts/ci.*` to make a run pass
 - Committing editor, IDE, or AI/agent settings. `.gitignore` covers the common ones; shared project config belongs at the repo root
 - Adding `--all-features` to any script or workflow — it cannot work here (see above)
+- Replacing a SHA-pinned action in `.github/workflows/` with a tag. Tags are mutable; that pinning is the point. Dependabot proposes the bumps
+- Removing `!src/loom_tests.rs` from the `include` allowlist, or adding `build.rs` back out of it — the first ships dead weight, the second ships a crate that cannot build
 - Assuming a CI job labelled "stable" runs stable. Without an explicit `cargo +stable`, the pin in `rust-toolchain.toml` wins
 - Importing `core::sync::atomic` directly in `event_buf.rs` or `seq_ring.rs` instead of `crate::sync`
 - Breaking API compatibility without explicit request

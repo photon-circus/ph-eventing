@@ -61,6 +61,14 @@ All notable changes to this project will be documented in this file.
   portable-atomic's own guard fires before this crate is compiled.
 - The GitHub Actions workflow declares `permissions: contents: read` instead of inheriting the
   repository default token scope.
+- Workflow actions are pinned to commit SHAs rather than mutable tags, with Dependabot configured
+  for the `github-actions` ecosystem so pinning does not turn into rot.
+- `[package.metadata.docs.rs]` names `portable-atomic`, so docs.rs documents the optional path.
+  The usual `all-features = true` is unusable here — it would fail the docs build.
+- `src/loom_tests.rs` is excluded from the published crate. It is gated on `--cfg loom` and
+  references a dev-dependency consumers do not have, so it could never compile for them.
+- Added issue and pull-request templates, `CODEOWNERS`, and a Dependabot config. The PR template
+  states that a `SKIP` in a local CI run is not a pass.
 
 ### Known issues
 - `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour. It
