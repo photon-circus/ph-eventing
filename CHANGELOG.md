@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+### Fixed
+- `SeqRing`: the producer now invalidates a slot's sequence before overwriting it, so the consumer
+  can no longer observe a fresh value under a stale sequence number.
+- `SeqRing` and `EventBuf`: the consumer's value access is now bracketed by an `Acquire` **fence**
+  rather than an `Acquire` load. An acquire load is one-way and left the value access free to sink
+  below the guard that validates it.
+- `SeqRing`: drop accounting across the `u32` wrap was over-counted by one, because raw
+  `wrapping_sub` includes the reserved sequence `0` that `push` skips. Sequence arithmetic now
+  goes through `seq_distance`.
+- `SeqRing`: `Consumer::dropped` saturates instead of overflowing. `usize` is 32 bits on every
+  target this crate ships to, so the counter and the sequence space are the same width — overflow
+  panicked in debug and wrapped silently in release.
+- `EventBuf::len` returns a consistent `(tail, head)` snapshot and can no longer report a value
+  above `capacity()` when the consumer advances mid-read. It is also wait-free: bounded retries
+  followed by a clamped estimate, replacing an unbounded loop.
+- `SeqRing`: slot copies are volatile and held as `MaybeUninit<T>` until validated, so a copy that
+  raced with an overwrite is discarded as raw bytes rather than materialising as an invalid `T`.
+
+### Added
+- Threaded stress tests for both SPSC types, and Miri and Loom verification scripts
+  (`scripts/miri.*`, `scripts/loom.*`). Loom is a dev-dependency gated on `--cfg loom`; the
+  library keeps zero runtime dependencies.
+- Local CI runner (`scripts/ci.*`) covering fmt, clippy, tests, docs, and the `thumbv6m` /
+  `thumbv7em` / `riscv32imac` targets.
+- `AGENTS.md` as the canonical guidance for coding agents; `CLAUDE.md` is now a pointer to it.
+
+### Changed
+- `LICENSE` and `README.md` are included in the published crate; `scripts/` and the agent docs are
+  excluded.
+- GitHub Actions runs on manual dispatch only. Local CI is the primary gate.
+
+### Known issues
+- `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour. It
+  cannot be resolved in stable Rust for an arbitrary `T: Copy`; see the `seq_ring` module docs.
+  `EventBuf` is unaffected.
+
 ## 0.1.2 - 2026-02-08
 ### Added
 - `Sink<T>` trait for event producers, implemented by `RingBuf`, `seq_ring::Producer`, `event_buf::Producer`.

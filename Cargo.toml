@@ -16,6 +16,7 @@ exclude = [
     ".github/*",
     ".idea/*",
     "Cargo.toml.orig",
+    "AGENTS.md",
     "CHANGELOG.md",
     "CLAUDE.md",
     "CODE_OF_CONDUCT.md",

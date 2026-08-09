@@ -96,12 +96,24 @@
 //!   consumer must be active. `producer()`/`consumer()` will panic if called
 //!   while another handle of the same kind is active. Using unsafe to bypass
 //!   these constraints is undefined behavior.
+//! - [`EventBuf`] is race-free by construction — its producer and consumer
+//!   never touch the same slot — and passes Miri with the data-race detector
+//!   enabled.
+//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. The
+//!   copy is never observed and never becomes an invalid value, but it is
+//!   undefined behaviour by the letter of the memory model, and it cannot be
+//!   fixed in stable Rust for an arbitrary `T: Copy`. The
+//!   [`seq_ring`] module docs explain why in full. Prefer [`EventBuf`] if that
+//!   caveat is unacceptable for your use.
 //!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 //! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.
 //! - `latest` reads the newest value without advancing the consumer cursor.
 //! - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
+//! - `Consumer::dropped` saturates rather than wrapping; `usize` is 32 bits on
+//!   the targets this crate ships to, so a long-lived lagging consumer can
+//!   reach the top of the range.
 //!
 //! # EventBuf semantics
 //! - `push` returns `Err(val)` when the buffer is full — no data is silently lost.

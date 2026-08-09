@@ -88,11 +88,13 @@ preserve these invariants:
 - No `std` dependencies in library code (`std` is fine in `#[cfg(test)]`).
 - No heap allocation (`Box`, `Vec`, `String`, etc.) in library code.
 - `T: Copy` constraint on ring element types must be maintained.
-- Atomic orderings in `SeqRing` must not be weakened.
+- Atomic orderings in `SeqRing` and `EventBuf` must not be weakened. Loom will
+  catch it: downgrading the `EventBuf` publication store from `Release` to
+  `Relaxed` fails three models immediately.
 
 ## Pull Request Process
 
-1. Create a feature branch from `main`.
+1. Create a feature branch from `master` (the default branch).
 2. Make your changes in small, focused commits.
 3. Add or update tests as appropriate.
 4. Run the full check suite. **This project's CI runs locally** — the GitHub
@@ -105,12 +107,12 @@ preserve these invariants:
    That runs formatting, clippy, host tests, docs, and the `thumbv6m` /
    `thumbv7em` / `riscv32imac` cross-compilation checks, then prints a
    pass/fail summary.
-5. Open a pull request against `main`. Describe what the change does and why.
+5. Open a pull request against `master`. Describe what the change does and why.
 6. The maintainer will review and may request changes before merging.
 
 ## Code Style
 
-- Follow existing patterns (see [CLAUDE.md](CLAUDE.md) § Code Conventions).
+- Follow existing patterns (see [AGENTS.md](AGENTS.md) § Code Conventions).
 - Use `#[inline]` / `#[inline(always)]` on hot-path methods.
 - Use `#[must_use]` on types that should not be silently discarded.
 - Prefer `const fn` where possible.

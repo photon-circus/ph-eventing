@@ -157,6 +157,14 @@ assert!(err.is_none());
   is active. Using unsafe to bypass these constraints (or sharing handles concurrently) is
   undefined behavior.
 - `T: Copy` is required by all types to avoid allocation and return values by copy.
+- `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
+  and it passes Miri with the data-race detector enabled.
+- `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
+  the producer is overwriting, then discard the copy when the sequence re-check fails. In
+  practice the copy is never observed and never becomes an invalid value, but it is undefined
+  behaviour by the letter of the model and cannot be fixed in stable Rust for an arbitrary
+  `T: Copy`. See [Model checking](#model-checking) and the `seq_ring` module docs. If you need a
+  buffer with no such caveat, use `EventBuf`.
 
 ## Testing
 
@@ -243,19 +251,20 @@ end. Pass `-SkipEmbedded` / `SKIP_EMBEDDED=1` to skip the cross-compilation
 checks. The GitHub Actions workflow mirrors the same jobs but is
 manual-dispatch only.
 
-Coverage snapshot (2026-02-08, via `cargo llvm-cov`):
+### Coverage
 
-| Metric | Covered | Total | % |
-|--------|--------:|------:|--:|
-| Lines | 784 | 857 | 91.5 |
-| Functions | 115 | 130 | 88.5 |
-| Regions | 1392 | 1490 | 93.4 |
-| Instantiations | 220 | 237 | 92.8 |
+No snapshot is recorded here. A checked-in figure goes stale the moment the
+code moves and there is no automatic run to refresh it, so measure it yourself
+rather than trusting a number in a README:
 
-To regenerate:
 ```
-cargo llvm-cov --json --summary-only --output-path target/llvm-cov/summary.json
+cargo install cargo-llvm-cov
+cargo llvm-cov --summary-only
 ```
+
+Coverage is also a weak signal for this crate — the properties that matter are
+ordering and interleaving, which a line-coverage percentage cannot see. The
+Miri and Loom runs above are the real evidence.
 
 ## License
 MIT. See `LICENSE`.
