@@ -1,6 +1,6 @@
 [package]
 name = "ph-eventing"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 rust-version = "1.92.0"
 description = "Stack-allocated ring buffers for no-std embedded targets"
