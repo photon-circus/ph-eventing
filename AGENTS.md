@@ -51,14 +51,11 @@ ph-eventing/
 ├── README.md               # User documentation
 ├── LICENSE                 # MIT license
 ├── scripts/
-│   ├── ci.ps1              # Local CI matrix (Windows)
-│   ├── ci.sh               # Local CI matrix (POSIX)
-│   ├── miri.ps1            # Miri UB/concurrency checks (Windows)
-│   ├── miri.sh             # Miri UB/concurrency checks (POSIX)
-│   ├── loom.ps1            # Loom model checking (Windows)
-│   └── loom.sh             # Loom model checking (POSIX)
+│   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
+│   ├── miri.sh             # Miri UB/concurrency checks
+│   └── loom.sh             # Loom model checking
 ├── build.rs                # guards the mutually exclusive portable-atomic features
-├── .github/                # dispatch-only workflow, issue/PR templates, CODEOWNERS, dependabot
+├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
@@ -84,7 +81,7 @@ ph-eventing/
 | `PollStats` | Statistics returned from SeqRing poll operations |
 | `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
-| `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `drain()` |
+| `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
@@ -220,8 +217,9 @@ Changes that must land together, none of which the compiler enforces:
 ### Consumer Polling Modes (SeqRing)
 
 - `poll_one(hook)` - Drain one item in-order
+- `poll_one_value()` - Same, returning `Option<(u32, T)>`
 - `poll_up_to(max, hook)` - Drain up to N items in-order
-- `latest(hook)` - Read newest item (not in-order, doesn't advance cursor)
+- `latest(hook)` / `latest_value()` - Read newest item (not in-order, doesn't advance cursor)
 - `skip_to_latest()` - Fast-forward to newest, skip backlog
 
 ## Build Commands
@@ -243,19 +241,25 @@ cargo doc --open
 cargo check --target thumbv7em-none-eabi
 ```
 
-### Local CI
+### CI
 
-CI for this project runs locally; the GitHub Actions workflow mirrors the same
-jobs but is `workflow_dispatch` only, so nothing runs automatically on push or
-PR. Run the full matrix — fmt, clippy, test, doc, and the `thumbv6m` /
-`thumbv7em` / `riscv32imac` cross-compilation checks — before every commit:
+GitHub Actions runs on every push to `master` or a `release/**` branch and on
+every PR. It is deliberately **a subset** of the local matrix:
+
+| | Remote | Local |
+|---|---|---|
+| fmt, clippy, test (MSRV + stable), doc, deny, features, 3 embedded targets | yes | yes |
+| coverage (90% floor) | no | yes |
+| Miri | no | yes |
+| Loom | no | yes |
+
+The gap is not an oversight. Coverage is non-deterministic here, and Miri and
+Loom are slow and are the only real evidence for the lock-free types — treating
+a green x86 check as a substitute for them is the exact mistake this file exists
+to prevent. Run the full matrix locally before every commit:
 
 ```bash
-./scripts/ci.sh          # POSIX
-```
-
-```powershell
-./scripts/ci.ps1         # Windows
+./scripts/ci.sh
 ```
 
 Every check runs even if an earlier one fails; a pass/fail summary is printed
@@ -270,11 +274,7 @@ strongly-ordered host hides the ordering bugs that appear on ARM and RISC-V.
 Run Miri after **any** change to atomics, orderings, fences, or unsafe blocks:
 
 ```bash
-./scripts/miri.sh        # POSIX; SEEDS=64 for deeper schedule exploration
-```
-
-```powershell
-./scripts/miri.ps1       # Windows; -Seeds 64
+./scripts/miri.sh        # SEEDS=64 for deeper schedule exploration
 ```
 
 Requires the nightly toolchain and the `miri` component:
@@ -314,7 +314,7 @@ Two traps that look like bugs but are not:
   (verified on host and embedded targets). A build script does not depend on
   portable-atomic, so it runs regardless and its message is actually seen.
   It does not suppress the upstream error; it adds an explanation next to it.
-  Enumerate the supported set instead of sweeping; `scripts/ci.*` does.
+  Enumerate the supported set instead of sweeping; `scripts/ci.sh` does.
   `build.rs` is in the `include` allowlist — dropping it there would ship a
   crate that cannot build.
 - **`rust-toolchain.toml` pins 1.92.0 and overrides whatever a CI action
@@ -328,7 +328,8 @@ Two traps that look like bugs but are not:
 Follow [RELEASING.md](RELEASING.md). Two things it exists to stop:
 
 - Publishing on a run that reported `SKIP` for an uninstalled tool. A `SKIP` is
-  not a pass, and nothing checks the branch remotely.
+  not a pass, and remote CI does not cover the checks most likely to be skipped
+  — coverage, Miri, and Loom are local-only.
 - Treating a pre-1.0 breaking change as a patch bump. Under Cargo's semver
   rules the **minor** position is the breaking one below 1.0, so a behaviour
   change a caller could rely on means `0.1.x` → `0.2.0`.
@@ -395,12 +396,9 @@ of a model — every interleaving, and every value a relaxed load may return —
 so a clean run proves the absence of ordering bugs at the modelled size.
 
 ```bash
-./scripts/loom.sh                     # POSIX
+./scripts/loom.sh                     # all models
 ./scripts/loom.sh event_buf           # filter by name
-```
-
-```powershell
-./scripts/loom.ps1 -Filter event_buf -MaxPreemptions 3
+LOOM_MAX_PREEMPTIONS=3 ./scripts/loom.sh
 ```
 
 Models live in [src/loom_tests.rs](src/loom_tests.rs). **Keep them tiny** —
@@ -478,22 +476,35 @@ cargo test
 - `len_stays_within_capacity_while_consumer_drains` — `len()` bound under concurrency
 - `concurrent_spsc_preserves_fifo_and_loses_nothing` — threaded FIFO/no-loss stress
 - `handles_are_send` — Producer/Consumer are Send
+- `try_producer_and_try_consumer` — Fallible handle creation
+- `peek_copies_without_advancing` — `peek` vs `pop`
 - `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
+- `static_buf_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` buffer
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
 - `polls_in_order` — Sequential consumption
+- `poll_up_to_zero_returns_newest_only` — `max = 0` reads nothing, still reports `newest`
+- `poll_up_to_counts_dropped_when_slot_missing` — A published seq whose slot never landed counts as `dropped`, not `read`; the hook must not run
 - `drops_when_consumer_lags` — Overwrite/drop semantics
 - `latest_reads_newest` — Out-of-order read
+- `latest_empty_returns_false` — `latest` on an untouched ring reports no read
+- `latest_returns_false_when_slot_missing` — `latest` rejects a published seq with no matching slot
 - `skip_to_latest_makes_next_poll_latest` — Cursor fast-forward
 - `read_seq_inner_rejects_invalidated_slot` — Slot invalidated mid-overwrite reads as absent
+- `read_seq_inner_detects_overwrite_during_read` — The `TEST_AFTER_READ_*` hook changes the slot seq between the copy and the re-check; the read is discarded
 - `consumer_skips_reserved_seq_zero_on_wrap` — Sequence wrap skips reserved `0`
+- `push_wraps_seq_from_zero_to_one` — Producer side of the same wrap: `next_seq = u32::MAX` yields `1`, not `0`
 - `lag_across_wrap_counts_drops_exactly` — Drop accounting across the `u32` wrap
 - `seq_distance_skips_the_reserved_zero` — Sequence distance excludes reserved `0`
 - `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
+- `dropped_counter_can_reset` — `dropped()` matches `PollStats::dropped`; `reset_dropped()` clears it
 - `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
+- `try_producer_and_try_consumer` — Fallible handle creation
+- `poll_one_value_and_latest_value` — Value-returning poll APIs
 - `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
+- `static_ring_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` ring
 
 **`traits::tests`:**
 - `ringbuf_as_sink` — `RingBuf` implements `Sink`
@@ -508,7 +519,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 56 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 7 doctests.
 
 ## Code Conventions
 
@@ -552,7 +563,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 2. **Preserve no-std compatibility:** Never add std dependencies to library code
 3. **Maintain zero-allocation guarantee:** No heap allocations in the library
 4. **Test after changes:** Run `cargo test` to verify functionality
-5. **Run local CI before committing:** `./scripts/ci.sh` (or `./scripts/ci.ps1`) — nothing runs remotely on push, so this is the only gate
+5. **Run local CI before committing:** `./scripts/ci.sh` — remote CI runs too, but without coverage, Miri, or Loom, so it is not the whole gate
 6. **Run Miri after touching atomics or unsafe:** `./scripts/miri.sh` — native tests on x86 cannot see weak-memory or 32-bit bugs
 7. **Run Loom after changing any ordering:** `./scripts/loom.sh` — exhaustive proof for the modelled size, and it catches weakened orderings that Miri may miss
 
@@ -575,7 +586,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
-- `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.*` exists so everything else stays fully checked
+- `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision
 
 ### Common Tasks
@@ -604,7 +615,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Removing or weakening atomic ordering (Loom will catch it — a `Release` downgraded to `Relaxed` fails three models immediately)
 - Adding runtime dependencies, or moving `loom` out of `[target.'cfg(loom)'.dev-dependencies]`
 - Widening `deny.toml`'s licence allow-list or adding an `[advisories] ignore` entry to make a check pass, rather than to record a decision
-- Lowering the coverage floor in `scripts/ci.*` to make a run pass
+- Lowering the coverage floor in `scripts/ci.sh` to make a run pass
 - Committing editor, IDE, or AI/agent settings. `.gitignore` covers the common ones; shared project config belongs at the repo root
 - Adding `--all-features` to any script or workflow — it cannot work here (see above)
 - Replacing a SHA-pinned action in `.github/workflows/` with a tag. Tags are mutable; that pinning is the point. Dependabot proposes the bumps

@@ -1,6 +1,6 @@
 [package]
 name = "ph-eventing"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 rust-version = "1.92.0"
 description = "Stack-allocated ring buffers for no-std embedded targets"
@@ -43,7 +43,7 @@ portable-atomic = { version = "1.13", optional = true, default-features = false,
 # portable-atomic and runs regardless.
 #
 # The practical consequence stands: `--all-features` does not work for this
-# crate. Test combinations individually — `scripts/ci.*` does.
+# crate. Test combinations individually — `scripts/ci.sh` does.
 [features]
 default = []
 portable-atomic = ["dep:portable-atomic"]

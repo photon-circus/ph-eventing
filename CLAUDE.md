@@ -7,8 +7,9 @@ there is nothing here to drift out of sync.
 
 Two things worth knowing before you touch anything:
 
-- **CI runs locally.** The GitHub Actions workflow is manual-dispatch only, so
-  nothing checks a branch on push. Run `./scripts/ci.sh` (or `ci.ps1`).
+- **Remote CI is a subset, not the gate.** GitHub Actions runs on push and PR,
+  but it has no coverage, Miri, or Loom job. Run `./scripts/ci.sh` locally regardless
+  (Git Bash on Windows); a green check does not mean a clean matrix.
 - **`SeqRing` and `EventBuf` are lock-free.** A green `cargo test` on x86 is
   weak evidence for them. After changing any atomic, ordering, fence, or unsafe
   block, run `./scripts/miri.sh` and `./scripts/loom.sh` as well.

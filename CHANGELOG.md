@@ -6,8 +6,41 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
-  non-const because Loom's atomics are not const-constructible. Capacity `N == 0` is rejected with
-  a const assertion on the host path.
+  non-const because Loom's atomics are not const-constructible.
+
+### Changed
+- **Breaking:** `SeqRing::new` and `EventBuf::new` reject `N == 0` with a const assertion on the
+  host path instead of a runtime `assert!`. `SeqRing::<T, 0>::new()` no longer compiles where it
+  previously panicked.
+
+## 0.1.4 - 2026-08-10
+### Added
+- `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
+  that kind is already active. The panicking `producer` / `consumer` APIs are unchanged.
+- `SeqRing` value-returning poll helpers: `Consumer::poll_one_value() -> Option<(u32, T)>` and
+  `Consumer::latest_value() -> Option<(u32, T)>`. Hook-based `poll_*` / `latest` are unchanged and
+  still maintain the `read + dropped` invariant.
+- `EventBuf::Consumer::peek() -> Option<T>` — copy the oldest item without advancing the cursor.
+
+### Changed
+- GitHub Actions CI runs again on every push to `master` or a `release/**` branch and on every
+  pull request, rather than by manual dispatch only. Added `fmt` and `doc` jobs so the remote
+  matrix matches the cheap half of `scripts/ci.*`, and a `concurrency` group that cancels
+  superseded PR runs but never cancels a run on `master` or a release branch. Coverage, Miri, and
+  Loom stay local-only: coverage is non-deterministic here, and the other two are slow and are the
+  only real evidence for the lock-free types. Every document that described CI as manual-dispatch
+  was updated with it — a green check is now necessary but still not sufficient, and saying so in
+  one place while another claims nothing runs remotely would be worse than either alone.
+- The `scripts/*.ps1` twins are gone; `ci.sh`, `miri.sh`, and `loom.sh` are the only runners. On
+  Windows they run under the Git Bash that ships with Git for Windows. Keeping two
+  implementations of one gate in step is work that only ever gets done on the one you happen to be
+  running, so the other drifts silently — and it is the one the next contributor uses. The
+  PowerShell versions were at parity when removed (same checks, same `SKIP_EMBEDDED` / `FAIL_FAST`
+  / `COVERAGE_FLOOR` knobs), so nothing was lost with them.
+- All three scripts now set `CARGO_INCREMENTAL=0`. On Windows, rustc intermittently fails to
+  finalize `target/*/incremental` with "Access is denied (os error 5)", and the check it lands on
+  moves between runs, so a green matrix reads as a moving defect. A gate that goes red at random
+  teaches you to re-run it rather than read it. A fresh CI build gains nothing from incremental.
 
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
@@ -25,6 +58,18 @@ All notable changes to this project will be documented in this file.
   names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
   the workflow after merge.
 - README / crate docs: static-init guidance updated for SPSC `const fn new`.
+
+### Known issues
+- `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour.
+  **This affects downstream tooling:** running `cargo miri test` over a test that drives the ring
+  from two threads reports UB inside this crate. It is a deliberate trade — a ring restricted to a
+  word-sized payload could hold it in an atomic and be race-free; accepting any `T: Copy` is what
+  rules that out. The `seq_ring` module docs give the alternatives and why each was rejected.
+  `EventBuf` is unaffected and passes Miri with the detector on, but applies backpressure rather
+  than overwriting, so it is not a drop-in replacement.
+- `SeqRing` drops a bounded number of extra entries once per `u32` sequence wrap, newly documented
+  above. This is a data-loss bound, not a soundness issue, and it is unchanged from 0.1.3 — only
+  its documentation is new.
 
 ## 0.1.3 - 2026-08-09
 ### Fixed

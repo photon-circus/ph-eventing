@@ -252,19 +252,47 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         ((seq.wrapping_sub(1)) as usize) % N
     }
 
+    /// Try to create the producer handle.
+    ///
+    /// Returns `None` if a producer is already active. Prefer this over
+    /// [`producer`](Self::producer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Producer {
+                ring: self,
+                _not_sync: PhantomData,
+            })
+        }
+    }
+
     /// Create the producer handle. Only one producer may be active.
     ///
     /// # Panics
     /// Panics if a producer handle is already active.
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
-        assert!(
-            !self.producer_taken.swap(true, Ordering::AcqRel),
-            "SeqRing::producer() called while a producer is active"
-        );
-        Producer {
-            ring: self,
-            _not_sync: PhantomData,
+        self.try_producer()
+            .expect("SeqRing::producer() called while a producer is active")
+    }
+
+    /// Try to create the consumer handle.
+    ///
+    /// Returns `None` if a consumer is already active. Prefer this over
+    /// [`consumer`](Self::consumer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Consumer {
+                ring: self,
+                last_seq: 0,
+                dropped_accum: 0,
+                _not_sync: PhantomData,
+            })
         }
     }
 
@@ -274,16 +302,8 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
     /// Panics if a consumer handle is already active.
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
-        assert!(
-            !self.consumer_taken.swap(true, Ordering::AcqRel),
-            "SeqRing::consumer() called while a consumer is active"
-        );
-        Consumer {
-            ring: self,
-            last_seq: 0,
-            dropped_accum: 0,
-            _not_sync: PhantomData,
-        }
+        self.try_consumer()
+            .expect("SeqRing::consumer() called while a consumer is active")
     }
 
     #[inline]
@@ -481,6 +501,17 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         stats.read == 1
     }
 
+    /// Drain at most one item (in-order), returning `(seq, value)`.
+    ///
+    /// Equivalent to [`poll_one`](Self::poll_one) without a hook. Drop
+    /// accounting and the `read + dropped` invariant are unchanged.
+    #[inline]
+    pub fn poll_one_value(&mut self) -> Option<(u32, T)> {
+        let mut result = None;
+        self.poll_one(|seq, v| result = Some((seq, *v)));
+        result
+    }
+
     /// Drain up to `max` items (in-order).
     /// Hook sees `&T` but it is a reference to a **local copy** inside poll.
     ///
@@ -572,6 +603,17 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         }
     }
 
+    /// Read the newest item without a hook, returning `(seq, value)`.
+    ///
+    /// Equivalent to [`latest`](Self::latest). Does not advance the consumer
+    /// cursor.
+    #[inline]
+    pub fn latest_value(&self) -> Option<(u32, T)> {
+        let mut result = None;
+        self.latest(|seq, v| result = Some((seq, *v)));
+        result
+    }
+
     /// Fast-forward consumer so the *next* `poll_one()` yields the newest item
     /// (i.e. skip backlog).
     ///
@@ -614,9 +656,7 @@ impl<T: Copy, const N: usize> crate::traits::Sink<T> for Producer<'_, T, N> {
 impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
     #[inline]
     fn try_pop(&mut self) -> Option<T> {
-        let mut result = None;
-        self.poll_one(|_seq, v| result = Some(*v));
-        result
+        self.poll_one_value().map(|(_, v)| v)
     }
 }
 
@@ -997,6 +1037,43 @@ mod tests {
         assert_eq!(ring.capacity(), 8);
     }
 
+    #[test]
+    fn try_producer_and_try_consumer() {
+        let ring = SeqRing::<u32, 4>::new();
+        let p = ring.try_producer().expect("first producer");
+        assert!(ring.try_producer().is_none());
+        let mut c = ring.try_consumer().expect("first consumer");
+        assert!(ring.try_consumer().is_none());
+        p.push(7);
+        let mut got = None;
+        assert!(c.poll_one(|seq, v| got = Some((seq, *v))));
+        assert_eq!(got, Some((1, 7)));
+        drop(p);
+        drop(c);
+        assert!(ring.try_producer().is_some());
+        assert!(ring.try_consumer().is_some());
+    }
+
+    #[test]
+    fn poll_one_value_and_latest_value() {
+        let ring = SeqRing::<u32, 8>::new();
+        let producer = ring.producer();
+        let mut consumer = ring.consumer();
+
+        assert_eq!(consumer.poll_one_value(), None);
+        assert_eq!(consumer.latest_value(), None);
+
+        producer.push(10);
+        producer.push(20);
+
+        assert_eq!(consumer.latest_value(), Some((2, 20)));
+        assert_eq!(consumer.poll_one_value(), Some((1, 10)));
+        assert_eq!(consumer.poll_one_value(), Some((2, 20)));
+        assert_eq!(consumer.poll_one_value(), None);
+        // latest does not require an advanced cursor
+        assert_eq!(consumer.latest_value(), Some((2, 20)));
+    }
+
     // Loom's `new` is deliberately non-const, so a `static` init only exists
     // on the host path.
     #[cfg(not(loom))]
@@ -1004,5 +1081,30 @@ mod tests {
     fn const_new_works_in_const_context() {
         static RING: SeqRing<u32, 4> = SeqRing::new();
         assert_eq!(RING.capacity(), 4);
+    }
+
+    // See the matching test in `event_buf`: the value of the const `new` is
+    // `'static`, `Send` handles off a `static`, not merely that the `static`
+    // compiles. Pin the signatures so a lifetime regression fails the build.
+    #[cfg(not(loom))]
+    #[test]
+    fn static_ring_yields_static_sendable_handles() {
+        static RING: SeqRing<u32, 4> = SeqRing::new();
+
+        fn producer_for_isr() -> super::Producer<'static, u32, 4> {
+            RING.producer()
+        }
+        fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
+            RING.consumer()
+        }
+        fn assert_send<T: Send>(_: &T) {}
+
+        let p = producer_for_isr();
+        let mut c = consumer_for_task();
+        assert_send(&p);
+        assert_send(&c);
+
+        p.push(9);
+        assert_eq!(c.poll_one_value(), Some((1, 9)));
     }
 }

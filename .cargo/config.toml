@@ -1,7 +1,6 @@
 # Local CI is primary. Remote GitHub Actions are manual-dispatch only.
 #
 # Run the full matrix (fmt, clippy, test, doc, embedded targets):
-#   ./scripts/ci.ps1     (Windows)
 #   ./scripts/ci.sh      (POSIX)
 #
 # The aliases below cover the individual checks for inner-loop work. Cargo
@@ -16,7 +15,7 @@ docs = ["doc", "--no-deps"]
 supply = ["deny", "check"]   # needs: cargo install cargo-deny
 cov = ["llvm-cov", "--summary-only"]   # needs: cargo install cargo-llvm-cov
 
-# Embedded targets, mirroring the matrix in scripts/ci.*
+# Embedded targets, mirroring the matrix in scripts/ci.sh
 emb-thumbv6m = [
     "check",
     "--target",
