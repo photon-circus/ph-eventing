@@ -481,14 +481,21 @@ cargo test
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
 - `polls_in_order` — Sequential consumption
+- `poll_up_to_zero_returns_newest_only` — `max = 0` reads nothing, still reports `newest`
+- `poll_up_to_counts_dropped_when_slot_missing` — A published seq whose slot never landed counts as `dropped`, not `read`; the hook must not run
 - `drops_when_consumer_lags` — Overwrite/drop semantics
 - `latest_reads_newest` — Out-of-order read
+- `latest_empty_returns_false` — `latest` on an untouched ring reports no read
+- `latest_returns_false_when_slot_missing` — `latest` rejects a published seq with no matching slot
 - `skip_to_latest_makes_next_poll_latest` — Cursor fast-forward
 - `read_seq_inner_rejects_invalidated_slot` — Slot invalidated mid-overwrite reads as absent
+- `read_seq_inner_detects_overwrite_during_read` — The `TEST_AFTER_READ_*` hook changes the slot seq between the copy and the re-check; the read is discarded
 - `consumer_skips_reserved_seq_zero_on_wrap` — Sequence wrap skips reserved `0`
+- `push_wraps_seq_from_zero_to_one` — Producer side of the same wrap: `next_seq = u32::MAX` yields `1`, not `0`
 - `lag_across_wrap_counts_drops_exactly` — Drop accounting across the `u32` wrap
 - `seq_distance_skips_the_reserved_zero` — Sequence distance excludes reserved `0`
 - `dropped_accum_saturates_instead_of_overflowing` — 32-bit drop-counter saturation
+- `dropped_counter_can_reset` — `dropped()` matches `PollStats::dropped`; `reset_dropped()` clears it
 - `concurrent_overwrite_never_yields_a_mismatched_value` — Threaded overwrite stress; no stale or torn payload
 - `capacity_returns_n` — capacity() API
 - `try_producer_and_try_consumer` — Fallible handle creation
