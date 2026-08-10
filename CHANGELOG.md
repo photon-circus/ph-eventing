@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
 ## 0.1.4 - 2026-08-10
 ### Added
 - `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
