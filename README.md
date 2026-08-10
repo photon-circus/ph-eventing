@@ -196,7 +196,8 @@ in a task loop. That works, with three things to know:
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
   There is no way to get a second `Producer` while one is live: `producer()`
-  panics rather than handing out a duplicate.
+  panics rather than handing out a duplicate; `try_producer` /
+  `try_consumer` return `None` instead.
 - **The buffer must outlive both handles.** The handles borrow it, so the usual
   answer is to own the buffer where it lives longest.
 - **`new()` is not a `const fn`**, so you cannot write
@@ -241,7 +242,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 56 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 58 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
@@ -252,8 +253,9 @@ Coverage is around 93% of lines, though it is a weak signal here: what matters
 is ordering and interleaving, which line coverage cannot see.
 
 Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running
-all of the above locally. Note that **CI does not run automatically** on this
-repository — the local runs are the gate.
+all of the above locally. CI runs on every PR, but it covers only part of that
+list — **coverage, Miri, and Loom are local-only**, so a green check is not a
+clean matrix.
 
 ## License
 MIT. See `LICENSE`.

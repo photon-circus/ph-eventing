@@ -94,8 +94,9 @@
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
 //!   consumer must be active. `producer()`/`consumer()` will panic if called
-//!   while another handle of the same kind is active. Using unsafe to bypass
-//!   these constraints is undefined behavior.
+//!   while another handle of the same kind is active; `try_producer()` /
+//!   `try_consumer()` return `None` instead. Using unsafe to bypass these
+//!   constraints is undefined behavior.
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.

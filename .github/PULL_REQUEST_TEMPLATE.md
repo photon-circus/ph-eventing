@@ -4,9 +4,12 @@
 
 ## Verification
 
-**CI does not run automatically on this repository** — the workflow is
-manual-dispatch only. These local runs are the only gate, so please paste or
-confirm the results rather than assuming.
+**Remote CI runs on this PR, but it is not the whole gate.** It covers fmt,
+clippy, tests on the MSRV and stable, docs, cargo-deny, the feature
+combinations, and the three embedded targets. It does **not** run coverage,
+Miri, or Loom, and a green x86 run is weak evidence for the lock-free types
+regardless. Please paste or confirm the local results below rather than
+assuming a green check covers them.
 
 - [ ] `./scripts/ci.sh` (or `ci.ps1`) — all checks pass, **no `SKIP` lines**
       (a skipped check is not a passed check; install the tool and re-run)
