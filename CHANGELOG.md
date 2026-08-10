@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Added
+- `scripts/cycles.sh` — instruction-cost measurement under QEMU, covering the half of the
+  determinism claim that code size cannot reach. `push` costs **25 instructions into an empty
+  buffer and 25 into a nearly-full one**; the rejected push is 19, `pop` 20 and 14, `len()` 14.
+  Constant with respect to occupancy and `N`, which is the property the crate advertises and had
+  never actually measured. Requires `qemu-system-arm` (a system package, not supplied by
+  `rust-toolchain.toml`); skips cleanly without it.
+### Added
 - Code-size baseline gate. `scripts/codesize.sh` compares against a committed `baseline.tsv` and
   `ci.sh` runs it as a check, so flash cost is pinned rather than merely measurable. Growth beyond
   +16 bytes fails; shrinkage only reports; a toolchain mismatch `SKIP`s rather than failing, since

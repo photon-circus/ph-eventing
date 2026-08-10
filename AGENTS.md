@@ -452,6 +452,51 @@ The probe in `scripts/codesize/` is deliberately **its own workspace** (empty
 this package and the root stops reporting zero dependencies. It is not in the
 `include` allowlist, so it never ships.
 
+### Instruction cost (QEMU)
+
+Code size is a proxy; it says nothing about *time*. `./scripts/cycles.sh`
+measures the other half of the determinism claim — that the hot paths cost a
+**bounded, knowable number of instructions regardless of buffer state**:
+
+| Operation | Instructions |
+|---|---|
+| `push` into empty | 25 |
+| `push` into 7-of-8 full | 25 |
+| `push` into full (rejected) | 19 |
+| `pop` from full | 20 |
+| `pop` from empty | 14 |
+| `len()` | 14 |
+
+**The first two rows are the result.** `push` costs the same whether the buffer
+is empty or nearly full — the cost does not scale with `N` or with occupancy.
+The rejected push is *cheaper*, not more expensive, because backpressure is an
+early return. Nothing here is a loop over data.
+
+**How it measures, and why not a cycle counter.** QEMU models neither
+`DWT_CYCCNT` nor SysTick on `lm3s6965evb` or `mps2-an385` — both read zero,
+verified on QEMU 10.2 — and Ubuntu's `qemu-system-arm` ships no TCG plugins.
+What works without either is QEMU's own execution trace:
+`-accel tcg,one-insn-per-tb=on -d exec` emits one line per retired instruction.
+The probe calls a never-inlined `mark()` between operations; the script finds
+its address with `llvm-nm` and counts instructions between hits, subtracting the
+marker cost measured from two adjacent marks.
+
+`-icount shift=0` pins one instruction to one clock tick, so results do not
+depend on host speed. **Verified deterministic**: two consecutive runs are
+byte-identical.
+
+**This one needs a system package.** Unlike the rest of the tooling,
+`rust-toolchain.toml` does not supply QEMU — `sudo apt-get install
+qemu-system-arm`. The script `SKIP`s cleanly without it, and a SKIP is not a
+pass.
+
+Two traps if you edit the probe:
+- Build it **from inside `scripts/cycles/`**. Cargo resolves `.cargo/config.toml`
+  from the working directory, not from `--manifest-path`; building from the repo
+  root silently targets the host and fails to link against libc.
+- `mark()` must stay `#[inline(never)]` with a `nop` body, or it is folded away
+  and the segmentation collapses.
+
 ### Model checking (Loom)
 
 Miri samples schedules; Loom is exhaustive. It enumerates every legal execution
