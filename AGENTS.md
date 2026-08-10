@@ -721,6 +721,11 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
+  and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
+  reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because
+  the old API is still public and still needs coverage — do **not** move that allow to the crate
+  root, which would silence the warning where it should bite
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision
