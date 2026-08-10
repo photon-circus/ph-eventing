@@ -103,9 +103,20 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// Under `--cfg loom` it is deliberately non-const — Loom's atomics are
     /// not const-constructible.
     ///
+    /// # Capacity `0` is a build failure
+    /// The `N > 0` check is a *const* assertion, so a zero-capacity buffer
+    /// cannot be constructed at all -- there is no runtime panic left to
+    /// catch, and therefore no way to write the negative case as a `#[test]`.
+    /// This `compile_fail` doctest is that coverage, and pinning the error code
+    /// keeps it honest: without it the test would also pass on a typo.
+    ///
+    /// ```compile_fail,E0080
+    /// let _ = ph_eventing::EventBuf::<u32, 0>::new();
+    /// ```
+    ///
     /// # Panics
-    /// Fails to compile via a const assertion when `N == 0` on the host path;
-    /// panics at runtime under Loom.
+    /// Does not panic on the host path. Under Loom, where `new` is non-const,
+    /// `N == 0` is a runtime assertion instead.
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         const {

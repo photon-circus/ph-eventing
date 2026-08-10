@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
+  The check is a const assertion, so there is no runtime panic to catch and the case cannot be
+  written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.
+  The expected error code is pinned (`compile_fail,E0080`) so the test cannot pass for the wrong
+  reason. No dev-dependency was added; rustdoc does this natively.
 ### Deprecated
 - **`SeqRing::producer` / `consumer` and `EventBuf::producer` / `consumer`**, in favour of the
   `try_*` variants added in 0.1.4. Scheduled for removal in 0.3.0. On a microcontroller a panic is
