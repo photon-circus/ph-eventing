@@ -22,6 +22,12 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# See scripts/ci.sh: incremental compilation makes Windows runs flaky with
+# "Access is denied (os error 5)". There is no PowerShell twin of this script;
+# on Windows run it under Git Bash.
+CARGO_INCREMENTAL=0
+export CARGO_INCREMENTAL
+
 # Loom's default bound keeps the state space tractable. Raising it explores
 # more preemption points at exponential cost.
 LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}"

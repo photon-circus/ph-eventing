@@ -6,9 +6,9 @@
 # green check means "nothing obvious is broken", not "this is ready to release".
 # Before opening a PR, and always before a release, run the full local matrix:
 #
-#   ./scripts/ci.ps1     (Windows)      ./scripts/ci.sh      (POSIX)
-#   ./scripts/miri.ps1                  ./scripts/miri.sh
-#   ./scripts/loom.ps1                  ./scripts/loom.sh
+#   ./scripts/ci.sh    ./scripts/miri.sh    ./scripts/loom.sh
+#
+# On Windows those run under Git Bash; there is no PowerShell twin.
 #
 # Note on toolchains: rust-toolchain.toml pins 1.92.0 and overrides whatever
 # a setup action installs, so a bare `cargo` here runs the MSRV regardless of
@@ -71,7 +71,7 @@ jobs:
 
   # Cheap and deterministic, so there is no reason for these to be local-only.
   # Without them a green check would sit next to unformatted code or a broken
-  # doc link, both of which `scripts/ci.*` rejects.
+  # doc link, both of which `scripts/ci.sh` rejects.
   fmt:
     runs-on: ubuntu-latest
     steps:

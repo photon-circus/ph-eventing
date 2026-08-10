@@ -1,6 +1,6 @@
 # cargo-deny policy for ph-eventing.
 #
-# Run with `./scripts/ci.ps1` / `./scripts/ci.sh`, or directly:
+# Run with `./scripts/ci.sh`, or directly:
 #   cargo deny check
 #
 # This crate has zero runtime dependencies, so most of what follows is a

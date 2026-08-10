@@ -4,8 +4,13 @@
 # Runs the full check matrix locally: formatting, clippy, host tests, docs, and
 # the embedded target checks. The GitHub Actions workflow runs on push and PR
 # and covers most of this, but not the coverage gate below -- and not Miri or
-# Loom, which live in scripts/miri.* and scripts/loom.*. This remains the
+# Loom, which live in scripts/miri.sh and scripts/loom.sh. This remains the
 # authoritative run.
+#
+# There is deliberately no PowerShell twin. On Windows, run this under the Git
+# Bash that ships with Git for Windows. Two scripts that must be kept in step
+# is a standing invitation for them to drift, and the one that drifts is the
+# one you are not running today.
 #
 # Every check runs even if an earlier one fails, then a summary is printed.
 # Exit code is non-zero if any check failed.
@@ -18,6 +23,15 @@
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
+
+# Incremental compilation makes this gate flaky on Windows: rustc cannot
+# finalize target/*/incremental when a scanner or a previous run still holds a
+# handle, and prints "Access is denied (os error 5)". The check it lands on
+# varies between runs, so it reads as a real, moving defect. A gate that goes
+# red at random trains you to re-run it instead of read it. CI builds fresh and
+# gains nothing from incremental anyway.
+CARGO_INCREMENTAL=0
+export CARGO_INCREMENTAL
 
 failed=0
 summary=""

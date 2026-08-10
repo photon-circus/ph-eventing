@@ -11,7 +11,7 @@ Miri, or Loom, and a green x86 run is weak evidence for the lock-free types
 regardless. Please paste or confirm the local results below rather than
 assuming a green check covers them.
 
-- [ ] `./scripts/ci.sh` (or `ci.ps1`) — all checks pass, **no `SKIP` lines**
+- [ ] `./scripts/ci.sh` — all checks pass, **no `SKIP` lines**
       (a skipped check is not a passed check; install the tool and re-run)
 
 If this touches atomics, orderings, fences, `unsafe`, or anything in

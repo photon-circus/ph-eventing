@@ -51,14 +51,11 @@ ph-eventing/
 ├── README.md               # User documentation
 ├── LICENSE                 # MIT license
 ├── scripts/
-│   ├── ci.ps1              # Local CI matrix (Windows)
-│   ├── ci.sh               # Local CI matrix (POSIX)
-│   ├── miri.ps1            # Miri UB/concurrency checks (Windows)
-│   ├── miri.sh             # Miri UB/concurrency checks (POSIX)
-│   ├── loom.ps1            # Loom model checking (Windows)
-│   └── loom.sh             # Loom model checking (POSIX)
+│   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
+│   ├── miri.sh             # Miri UB/concurrency checks
+│   └── loom.sh             # Loom model checking
 ├── build.rs                # guards the mutually exclusive portable-atomic features
-├── .github/                # dispatch-only workflow, issue/PR templates, CODEOWNERS, dependabot
+├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
@@ -261,11 +258,7 @@ a green x86 check as a substitute for them is the exact mistake this file exists
 to prevent. Run the full matrix locally before every commit:
 
 ```bash
-./scripts/ci.sh          # POSIX
-```
-
-```powershell
-./scripts/ci.ps1         # Windows
+./scripts/ci.sh
 ```
 
 Every check runs even if an earlier one fails; a pass/fail summary is printed
@@ -280,11 +273,7 @@ strongly-ordered host hides the ordering bugs that appear on ARM and RISC-V.
 Run Miri after **any** change to atomics, orderings, fences, or unsafe blocks:
 
 ```bash
-./scripts/miri.sh        # POSIX; SEEDS=64 for deeper schedule exploration
-```
-
-```powershell
-./scripts/miri.ps1       # Windows; -Seeds 64
+./scripts/miri.sh        # SEEDS=64 for deeper schedule exploration
 ```
 
 Requires the nightly toolchain and the `miri` component:
@@ -324,7 +313,7 @@ Two traps that look like bugs but are not:
   (verified on host and embedded targets). A build script does not depend on
   portable-atomic, so it runs regardless and its message is actually seen.
   It does not suppress the upstream error; it adds an explanation next to it.
-  Enumerate the supported set instead of sweeping; `scripts/ci.*` does.
+  Enumerate the supported set instead of sweeping; `scripts/ci.sh` does.
   `build.rs` is in the `include` allowlist — dropping it there would ship a
   crate that cannot build.
 - **`rust-toolchain.toml` pins 1.92.0 and overrides whatever a CI action
@@ -406,12 +395,9 @@ of a model — every interleaving, and every value a relaxed load may return —
 so a clean run proves the absence of ordering bugs at the modelled size.
 
 ```bash
-./scripts/loom.sh                     # POSIX
+./scripts/loom.sh                     # all models
 ./scripts/loom.sh event_buf           # filter by name
-```
-
-```powershell
-./scripts/loom.ps1 -Filter event_buf -MaxPreemptions 3
+LOOM_MAX_PREEMPTIONS=3 ./scripts/loom.sh
 ```
 
 Models live in [src/loom_tests.rs](src/loom_tests.rs). **Keep them tiny** —
@@ -564,7 +550,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 2. **Preserve no-std compatibility:** Never add std dependencies to library code
 3. **Maintain zero-allocation guarantee:** No heap allocations in the library
 4. **Test after changes:** Run `cargo test` to verify functionality
-5. **Run local CI before committing:** `./scripts/ci.sh` (or `./scripts/ci.ps1`) — remote CI runs too, but without coverage, Miri, or Loom, so it is not the whole gate
+5. **Run local CI before committing:** `./scripts/ci.sh` — remote CI runs too, but without coverage, Miri, or Loom, so it is not the whole gate
 6. **Run Miri after touching atomics or unsafe:** `./scripts/miri.sh` — native tests on x86 cannot see weak-memory or 32-bit bugs
 7. **Run Loom after changing any ordering:** `./scripts/loom.sh` — exhaustive proof for the modelled size, and it catches weakened orderings that Miri may miss
 
@@ -587,7 +573,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
-- `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.*` exists so everything else stays fully checked
+- `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision
 
 ### Common Tasks
@@ -616,7 +602,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - Removing or weakening atomic ordering (Loom will catch it — a `Release` downgraded to `Relaxed` fails three models immediately)
 - Adding runtime dependencies, or moving `loom` out of `[target.'cfg(loom)'.dev-dependencies]`
 - Widening `deny.toml`'s licence allow-list or adding an `[advisories] ignore` entry to make a check pass, rather than to record a decision
-- Lowering the coverage floor in `scripts/ci.*` to make a run pass
+- Lowering the coverage floor in `scripts/ci.sh` to make a run pass
 - Committing editor, IDE, or AI/agent settings. `.gitignore` covers the common ones; shared project config belongs at the repo root
 - Adding `--all-features` to any script or workflow — it cannot work here (see above)
 - Replacing a SHA-pinned action in `.github/workflows/` with a tag. Tags are mutable; that pinning is the point. Dependabot proposes the bumps

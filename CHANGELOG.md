@@ -20,6 +20,16 @@ All notable changes to this project will be documented in this file.
   only real evidence for the lock-free types. Every document that described CI as manual-dispatch
   was updated with it — a green check is now necessary but still not sufficient, and saying so in
   one place while another claims nothing runs remotely would be worse than either alone.
+- The `scripts/*.ps1` twins are gone; `ci.sh`, `miri.sh`, and `loom.sh` are the only runners. On
+  Windows they run under the Git Bash that ships with Git for Windows. Keeping two
+  implementations of one gate in step is work that only ever gets done on the one you happen to be
+  running, so the other drifts silently — and it is the one the next contributor uses. The
+  PowerShell versions were at parity when removed (same checks, same `SKIP_EMBEDDED` / `FAIL_FAST`
+  / `COVERAGE_FLOOR` knobs), so nothing was lost with them.
+- All three scripts now set `CARGO_INCREMENTAL=0`. On Windows, rustc intermittently fails to
+  finalize `target/*/incremental` with "Access is denied (os error 5)", and the check it lands on
+  moves between runs, so a green matrix reads as a moving defect. A gate that goes red at random
+  teaches you to re-run it rather than read it. A fresh CI build gains nothing from incremental.
 
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
