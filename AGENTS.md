@@ -441,6 +441,12 @@ Re-bless deliberately, never reflexively — the diff is the review:
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
 ```
 
+All eight gated targets are pinned in `rust-toolchain.toml`, including
+`thumbv8m.main-none-eabi` and `thumbv8m.base-none-eabi`, which the embedded
+`cargo check` matrix does not use. Without them a fresh checkout silently skips
+two of the eight rows while still printing a table, which reads as a complete
+matrix.
+
 Tooling is what `rust-toolchain.toml` already pins: `llvm-size` comes from the
 `llvm-tools` component declared there, so nothing extra is installed. **Xtensa
 is the exception** — upstream rustc has no Xtensa backend, so those rows need
