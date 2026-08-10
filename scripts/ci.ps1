@@ -5,9 +5,10 @@
 
 .DESCRIPTION
     Runs the full check matrix locally: formatting, clippy, host tests, docs,
-    and the embedded target checks. This is the primary CI for this project --
-    the GitHub Actions workflow is manual-dispatch only and mirrors these same
-    checks.
+    and the embedded target checks. The GitHub Actions workflow runs on push
+    and PR and covers most of this, but not the coverage gate below -- and not
+    Miri or Loom, which live in scripts/miri.* and scripts/loom.*. This remains
+    the authoritative run.
 
     Every check runs even if an earlier one fails (matching the workflow's
     fail-fast: false), then a summary is printed. Exit code is non-zero if any

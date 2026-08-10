@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Changed
+- GitHub Actions CI runs again on every push to `master` or a `release/**` branch and on every
+  pull request, rather than by manual dispatch only. Added `fmt` and `doc` jobs so the remote
+  matrix matches the cheap half of `scripts/ci.*`, and a `concurrency` group that cancels
+  superseded PR runs but never cancels a run on `master` or a release branch. Coverage, Miri, and
+  Loom stay local-only: coverage is non-deterministic here, and the other two are slow and are the
+  only real evidence for the lock-free types. Every document that described CI as manual-dispatch
+  was updated with it — a green check is now necessary but still not sufficient, and saying so in
+  one place while another claims nothing runs remotely would be worse than either alone.
+
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`

@@ -5,18 +5,20 @@ is a command you can run, not a judgement call, except where marked.
 
 Three things about this repo shape the process:
 
-- **Nothing is checked remotely.** The GitHub Actions workflow is
-  manual-dispatch only, so no CI will catch a mistake after you push. The local
-  runs below are the only gate.
+- **Remote CI is a subset.** GitHub Actions runs on push and PR, but it has no
+  coverage, Miri, or Loom job. Those are exactly the checks a release needs
+  most, so a green check never stands in for the local runs in step 6.
 - **`cargo publish` is irreversible.** You can yank a version, but a yank does
   not delete it and does not free the version number. Everything that can be
   checked should be checked *before* the publish step.
-- **Releases are cut on a `release/X.Y.Z` branch, not on `master`.** Because
-  nothing runs remotely, the release branch is the only place the *combination*
-  of the release's changes gets verified before it reaches `master`. A PR that
-  passed `ci.sh` on its own branch is not evidence that it still passes
-  alongside the other PRs in the same release. `v0.1.2` and `v0.1.3` predate
-  this and were tagged directly on `master`.
+- **Releases are cut on a `release/X.Y.Z` branch, not on `master`.** A PR that
+  passed on its own branch is not evidence that it still passes alongside the
+  other PRs in the same release. The release branch is where that *combination*
+  is assembled and given the full local matrix — including the coverage, Miri,
+  and Loom runs that remote CI does not do — before any of it reaches `master`.
+  It also lets work aimed at a later version keep landing on `master`
+  meanwhile. `v0.1.2` and `v0.1.3` predate this and were tagged directly on
+  `master`.
 
 ---
 
@@ -124,7 +126,8 @@ cargo llvm-cov --summary-only              # README coverage figures
 
 ## 6. Verify
 
-All three must be clean. None of them run remotely.
+All three must be clean, locally. Remote CI overlaps the first one but skips its
+coverage gate, and does not run the other two at all.
 
 ```bash
 ./scripts/ci.sh          # fmt, clippy, tests, docs, cargo-deny, coverage floor, 3 embedded targets

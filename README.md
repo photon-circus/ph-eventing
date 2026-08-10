@@ -250,8 +250,9 @@ Coverage is around 93% of lines, though it is a weak signal here: what matters
 is ordering and interleaving, which line coverage cannot see.
 
 Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running
-all of the above locally. Note that **CI does not run automatically** on this
-repository — the local runs are the gate.
+all of the above locally. CI runs on every PR, but it covers only part of that
+list — **coverage, Miri, and Loom are local-only**, so a green check is not a
+clean matrix.
 
 ## License
 MIT. See `LICENSE`.

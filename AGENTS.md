@@ -242,12 +242,22 @@ cargo doc --open
 cargo check --target thumbv7em-none-eabi
 ```
 
-### Local CI
+### CI
 
-CI for this project runs locally; the GitHub Actions workflow mirrors the same
-jobs but is `workflow_dispatch` only, so nothing runs automatically on push or
-PR. Run the full matrix — fmt, clippy, test, doc, and the `thumbv6m` /
-`thumbv7em` / `riscv32imac` cross-compilation checks — before every commit:
+GitHub Actions runs on every push to `master` or a `release/**` branch and on
+every PR. It is deliberately **a subset** of the local matrix:
+
+| | Remote | Local |
+|---|---|---|
+| fmt, clippy, test (MSRV + stable), doc, deny, features, 3 embedded targets | yes | yes |
+| coverage (90% floor) | no | yes |
+| Miri | no | yes |
+| Loom | no | yes |
+
+The gap is not an oversight. Coverage is non-deterministic here, and Miri and
+Loom are slow and are the only real evidence for the lock-free types — treating
+a green x86 check as a substitute for them is the exact mistake this file exists
+to prevent. Run the full matrix locally before every commit:
 
 ```bash
 ./scripts/ci.sh          # POSIX
@@ -327,7 +337,8 @@ Two traps that look like bugs but are not:
 Follow [RELEASING.md](RELEASING.md). Two things it exists to stop:
 
 - Publishing on a run that reported `SKIP` for an uninstalled tool. A `SKIP` is
-  not a pass, and nothing checks the branch remotely.
+  not a pass, and remote CI does not cover the checks most likely to be skipped
+  — coverage, Miri, and Loom are local-only.
 - Treating a pre-1.0 breaking change as a patch bump. Under Cargo's semver
   rules the **minor** position is the breaking one below 1.0, so a behaviour
   change a caller could rely on means `0.1.x` → `0.2.0`.
@@ -548,7 +559,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 2. **Preserve no-std compatibility:** Never add std dependencies to library code
 3. **Maintain zero-allocation guarantee:** No heap allocations in the library
 4. **Test after changes:** Run `cargo test` to verify functionality
-5. **Run local CI before committing:** `./scripts/ci.sh` (or `./scripts/ci.ps1`) — nothing runs remotely on push, so this is the only gate
+5. **Run local CI before committing:** `./scripts/ci.sh` (or `./scripts/ci.ps1`) — remote CI runs too, but without coverage, Miri, or Loom, so it is not the whole gate
 6. **Run Miri after touching atomics or unsafe:** `./scripts/miri.sh` — native tests on x86 cannot see weak-memory or 32-bit bugs
 7. **Run Loom after changing any ordering:** `./scripts/loom.sh` — exhaustive proof for the modelled size, and it catches weakened orderings that Miri may miss
 
