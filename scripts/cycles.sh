@@ -87,11 +87,23 @@ fi
 
 printf '==> tracing under qemu\n'
 mkdir -p "$(dirname "$LOG")"
+# Remove any stale log first: a leftover trace from an earlier run would make
+# a failed QEMU invocation look like a successful one to the emptiness check.
+rm -f "$LOG"
 timeout 300 qemu-system-arm \
     -cpu cortex-m3 -machine lm3s6965evb -nographic \
     -semihosting-config enable=on,target=native \
     -accel tcg,one-insn-per-tb=on -icount shift=0 \
     -d exec -D "$LOG" -kernel "$ELF" >/dev/null 2>&1
+qemu_status=$?
+
+# A crash or timeout after some trace was already written leaves a non-empty
+# log, so the emptiness check alone would let a partial measurement through.
+if [ "$qemu_status" -ne 0 ]; then
+    printf 'error: qemu exited %s (124 = timeout)
+' "$qemu_status" >&2
+    exit 1
+fi
 
 if [ ! -s "$LOG" ]; then
     printf 'error: qemu produced no trace\n' >&2
@@ -100,10 +112,24 @@ fi
 
 printf '\n'
 awk -v mark_hex="$MARK_ADDR" '
+    # `strtonum` is a GNU extension; on a stock Debian/Ubuntu `awk` is mawk,
+    # where it is undefined -- verified. The parse then aborts and, without a
+    # status check, the script prints its footer and exits 0 having measured
+    # nothing. This is POSIX awk.
+    function hex2dec(h,   i, c, d, v) {
+        h = tolower(h); v = 0
+        for (i = 1; i <= length(h); i++) {
+            c = substr(h, i, 1)
+            d = index("0123456789abcdef", c) - 1
+            if (d < 0) return -1
+            v = v * 16 + d
+        }
+        return v
+    }
     BEGIN {
         # Strip the Thumb bit and normalise to a decimal address.
-        mark = strtonum("0x" mark_hex)
-        mark = int(mark / 2) * 2
+        mark = hex2dec(mark_hex)
+        mark = mark - (mark % 2)
         seg = -1; count = 0; overhead = 0
         split("marker-overhead push-into-empty (setup) push-into-nearly-full " \
               "push-into-full-rejected pop-from-full (drain) pop-from-empty len", \
@@ -112,7 +138,7 @@ awk -v mark_hex="$MARK_ADDR" '
     # Trace lines look like:  Trace 0: 0x... [flags/PC/...]
     /^Trace/ {
         if (match($0, /\/[0-9a-f]{16}\//)) {
-            pc = strtonum("0x" substr($0, RSTART + 1, 16))
+            pc = hex2dec(substr($0, RSTART + 1, 16))
             if (pc == mark) {
                 if (seg >= 0) {
                     n = count
