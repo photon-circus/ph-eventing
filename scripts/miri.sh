@@ -27,6 +27,12 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# See scripts/ci.sh: incremental compilation makes Windows runs flaky with
+# "Access is denied (os error 5)". There is no PowerShell twin of this script;
+# on Windows run it under Git Bash.
+CARGO_INCREMENTAL=0
+export CARGO_INCREMENTAL
+
 SEEDS="${SEEDS:-16}"
 BASE='-Zmiri-disable-isolation'
 SEQLOCK_TEST='concurrent_overwrite_never_yields_a_mismatched_value'

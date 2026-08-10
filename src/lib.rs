@@ -94,8 +94,9 @@
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
 //!   consumer must be active. `producer()`/`consumer()` will panic if called
-//!   while another handle of the same kind is active. Using unsafe to bypass
-//!   these constraints is undefined behavior.
+//!   while another handle of the same kind is active; `try_producer()` /
+//!   `try_consumer()` return `None` instead. Using unsafe to bypass these
+//!   constraints is undefined behavior.
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
@@ -129,8 +130,9 @@
 //!
 //! # SeqRing semantics
 //! - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
-//! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`.
-//! - `latest` reads the newest value without advancing the consumer cursor.
+//! - `poll_one`/`poll_up_to` drain in-order and return `PollStats`; `poll_one_value`
+//!   returns `(seq, T)` without a hook.
+//! - `latest` / `latest_value` read the newest value without advancing the consumer cursor.
 //! - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 //! - Once every `2^32 - 1` pushes the sequence counter wraps, and a few extra entries are dropped
 //!   there because `push` skips the reserved sequence `0`: exactly one for a power-of-two `N`,
@@ -143,6 +145,7 @@
 //! # EventBuf semantics
 //! - `push` returns `Err(val)` when the buffer is full — no data is silently lost.
 //! - `pop` returns the oldest item, or `None` when empty.
+//! - `peek` copies the oldest item without advancing the consumer cursor.
 //! - `drain(max, hook)` consumes up to `max` items through a callback.
 #![no_std]
 

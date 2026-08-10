@@ -38,7 +38,7 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
   enabling both fails inside portable-atomic. Cargo features are additive, so this cannot be
   expressed in the manifest; `build.rs` detects the combination and explains it.
 - Consequently **`--all-features` does not work for this crate** and cannot be made to. Check
-  combinations individually; `scripts/ci.*` enumerates the supported set.
+  combinations individually; `scripts/ci.sh` enumerates the supported set.
 
 ## Usage
 
@@ -77,10 +77,9 @@ let producer = ring.producer();
 let mut consumer = ring.consumer();
 
 producer.push(123);
-consumer.poll_one(|seq, v| {
-    assert_eq!(seq, 1);
-    assert_eq!(*v, 123);
-});
+assert_eq!(consumer.poll_one_value(), Some((1, 123)));
+// hook form still available:
+// consumer.poll_one(|seq, v| { ... });
 ```
 
 ### EventBuf
@@ -100,6 +99,7 @@ assert!(producer.push(1).is_ok());
 assert!(producer.push(2).is_ok());
 assert_eq!(producer.push(3), Err(3)); // full — value returned
 
+assert_eq!(consumer.peek(), Some(1));  // copy, no advance
 assert_eq!(consumer.pop(), Some(1));
 assert!(producer.push(3).is_ok());     // space freed
 ```
@@ -146,6 +146,7 @@ assert!(err.is_none());
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
 - When the producer wraps the ring, old values are overwritten.
 - `poll_one` and `poll_up_to` drain in-order and return `PollStats` (`read`, `dropped`, `newest`).
+- `poll_one_value` / `latest_value` return `(seq, T)` without a hook.
 - `latest` reads the newest value without advancing the consumer cursor.
 - `skip_to_latest` discards the backlog so the next poll returns the newest item.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
@@ -156,6 +157,7 @@ assert!(err.is_none());
 
 ### EventBuf
 - FIFO order: `pop` always returns the oldest item.
+- `peek` copies the oldest item without advancing the cursor.
 - `push` returns `Ok(())` on success or `Err(val)` when the buffer is full.
 - `drain(max, hook)` consumes up to `max` items through a callback and returns the count.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
@@ -194,7 +196,8 @@ in a task loop. That works, with three things to know:
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
   There is no way to get a second `Producer` while one is live: `producer()`
-  panics rather than handing out a duplicate.
+  panics rather than handing out a duplicate; `try_producer` /
+  `try_consumer` return `None` instead.
 - **The buffer must outlive both handles.** The handles borrow it, so the usual
   answer is to own the buffer where it lives longest.
 - **`new()` is not a `const fn`**, so you cannot write
@@ -239,7 +242,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 54 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 58 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
@@ -250,8 +253,9 @@ Coverage is around 93% of lines, though it is a weak signal here: what matters
 is ordering and interleaving, which line coverage cannot see.
 
 Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running
-all of the above locally. Note that **CI does not run automatically** on this
-repository — the local runs are the gate.
+all of the above locally. CI runs on every PR, but it covers only part of that
+list — **coverage, Miri, and Loom are local-only**, so a green check is not a
+clean matrix.
 
 ## License
 MIT. See `LICENSE`.

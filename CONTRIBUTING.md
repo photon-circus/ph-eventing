@@ -68,7 +68,7 @@ cargo lint               # cargo clippy --all-targets -- -D warnings
 ### Everything at once
 
 ```bash
-./scripts/ci.sh          # or ./scripts/ci.ps1 on Windows
+./scripts/ci.sh          # Git Bash on Windows
 ```
 
 ### Supply chain
@@ -152,13 +152,15 @@ preserve these invariants:
 1. Create a feature branch from `master` (the default branch).
 2. Make your changes in small, focused commits.
 3. Add or update tests as appropriate.
-4. Run the full check suite. **This project's CI runs locally** — the GitHub
-   Actions workflow is manual-dispatch only, so nothing will check your branch
-   for you:
+4. Run the full check suite locally. GitHub Actions will also run on your PR,
+   but it is **a subset** — no coverage, Miri, or Loom — so a green check is
+   not a substitute for this:
    ```bash
-   ./scripts/ci.sh      # POSIX
-   ./scripts/ci.ps1     # Windows
+   ./scripts/ci.sh
    ```
+   On Windows, run it under the Git Bash that ships with Git for Windows.
+   There is no PowerShell twin: two scripts that must be kept in step drift,
+   and the one that drifts is the one you are not running today.
    That runs formatting, clippy, host tests, docs, cargo-deny, a 90% coverage
    floor, and the `thumbv6m` / `thumbv7em` / `riscv32imac` cross-compilation
    checks, then prints a pass/fail summary. Checks needing a separately
