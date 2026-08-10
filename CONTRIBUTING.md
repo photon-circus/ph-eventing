@@ -135,6 +135,21 @@ loop while `fetch_or` is a single instruction. One target is not evidence.
 Nothing extra to install: `llvm-size` comes from the `llvm-tools` component
 that `rust-toolchain.toml` already declares.
 
+### Instruction cost
+
+If you change a hot path, measure the time cost as well as the size cost:
+
+```bash
+./scripts/cycles.sh
+```
+
+Needs `qemu-system-arm` (`sudo apt-get install qemu-system-arm`); it skips
+cleanly without it. It is deliberately **not** part of `./scripts/ci.sh` —
+every other check is satisfied by the pinned toolchain alone, and a check most
+contributors cannot run would make a green `ci.sh` mean less rather than more.
+
+Paste the numbers into your PR, as with `codesize.sh`.
+
 ### Coverage
 
 Local CI enforces a 90% line floor via `cargo llvm-cov`. Coverage is **not
