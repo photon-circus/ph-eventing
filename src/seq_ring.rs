@@ -296,6 +296,62 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         }
     }
 
+    /// Take both handles in one call.
+    ///
+    /// Returns `None` if either handle is already active, leaving both flags
+    /// untouched — so a failed `try_split` cannot strand a half-taken ring the
+    /// way two separate calls can.
+    ///
+    /// This is the intended bring-up. Paired with the const [`new`](Self::new),
+    /// the ring costs no flash and no startup code and the setup is one
+    /// fallible step:
+    ///
+    /// ```
+    /// use ph_eventing::SeqRing;
+    /// static RING: SeqRing<u32, 64> = SeqRing::new();
+    ///
+    /// let (tx, mut rx) = RING.try_split().expect("first split");
+    /// tx.push(1);
+    /// assert_eq!(rx.poll_one_value(), Some((1, 1)));
+    /// ```
+    ///
+    /// The handles are `Send + !Sync`: move one into each context. They cannot
+    /// live in a `static` — `!Sync` is what makes the split safe, and a
+    /// `static` requires `Sync`.
+    #[inline]
+    pub fn try_split(&self) -> Option<(Producer<'_, T, N>, Consumer<'_, T, N>)> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            // All-or-nothing: restore the producer flag rather than leaving the
+            // ring permanently half-taken.
+            self.producer_taken.store(false, Ordering::Release);
+            return None;
+        }
+        Some((
+            Producer { ring: self, _not_sync: PhantomData },
+            Consumer {
+                ring: self,
+                last_seq: 0,
+                dropped_accum: 0,
+                _not_sync: PhantomData,
+            },
+        ))
+    }
+
+    /// Take both handles in one call.
+    ///
+    /// # Panics
+    /// Panics if either handle is already active. Use
+    /// [`try_split`](Self::try_split) to avoid the panic — on embedded targets
+    /// a panic is a reset, and the panic machinery costs flash.
+    #[inline]
+    pub fn split(&self) -> (Producer<'_, T, N>, Consumer<'_, T, N>) {
+        self.try_split()
+            .expect("SeqRing: producer and consumer must both be free to split")
+    }
+
     /// Create the consumer handle. Only one consumer may be active.
     ///
     /// # Panics
@@ -1035,6 +1091,26 @@ mod tests {
     fn capacity_returns_n() {
         let ring = SeqRing::<u32, 8>::new();
         assert_eq!(ring.capacity(), 8);
+    }
+
+    #[test]
+    fn try_split_is_all_or_nothing() {
+        let ring = SeqRing::<u32, 4>::new();
+
+        let c = ring.try_consumer().expect("consumer");
+        assert!(ring.try_split().is_none());
+
+        // The failed split must not have stranded the producer flag.
+        let p = ring.try_producer().expect("producer still available");
+        p.push(1);
+        drop(p);
+        drop(c);
+
+        let (p, mut c) = ring.try_split().expect("split after both freed");
+        assert!(ring.try_split().is_none());
+        assert!(ring.try_producer().is_none());
+        p.push(2);
+        assert_eq!(c.poll_one_value().map(|(_, v)| v), Some(1));
     }
 
     #[test]

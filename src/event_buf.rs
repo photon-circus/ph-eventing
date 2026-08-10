@@ -246,6 +246,56 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
         }
     }
 
+    /// Take both handles in one call.
+    ///
+    /// Returns `None` if either handle is already active, leaving both flags
+    /// untouched — so a failed `try_split` cannot strand a half-taken buffer
+    /// the way two separate calls can.
+    ///
+    /// This is the intended bring-up for the SPSC types. Pairing it with the
+    /// const [`new`](Self::new) means the buffer itself costs no flash and no
+    /// startup code, and the whole setup is one fallible step:
+    ///
+    /// ```
+    /// use ph_eventing::EventBuf;
+    /// static BUF: EventBuf<u32, 64> = EventBuf::new();
+    ///
+    /// let (tx, rx) = BUF.try_split().expect("first split");
+    /// tx.push(1).unwrap();
+    /// assert_eq!(rx.pop(), Some(1));
+    /// ```
+    ///
+    /// The handles are `Send + !Sync`: move one into each context. They cannot
+    /// be placed in a `static` — `!Sync` is what makes the split safe, and a
+    /// `static` requires `Sync` — so an ISR/task split still stores them behind
+    /// whatever interior-mutability wrapper the target provides.
+    #[inline]
+    pub fn try_split(&self) -> Option<(Producer<'_, T, N>, Consumer<'_, T, N>)> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            self.producer_taken.store(false, Ordering::Release);
+            return None;
+        }
+        Some((
+            Producer { buf: self, _not_sync: PhantomData },
+            Consumer { buf: self, _not_sync: PhantomData },
+        ))
+    }
+
+    /// Take both handles in one call.
+    ///
+    /// # Panics
+    /// Panics if either handle is already active. Use
+    /// [`try_split`](Self::try_split) to avoid the panic — on embedded targets
+    /// a panic is a reset, and the panic machinery costs flash.
+    #[inline]
+    pub fn split(&self) -> (Producer<'_, T, N>, Consumer<'_, T, N>) {
+        self.try_split()
+            .expect("EventBuf: producer and consumer must both be free to split")
+    }
+
     /// Create the consumer handle. Only one consumer may be active.
     ///
     /// # Panics
@@ -651,6 +701,31 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<super::Producer<'_, u32, 4>>();
         assert_send::<super::Consumer<'_, u32, 4>>();
+    }
+
+    #[test]
+    fn try_split_is_all_or_nothing() {
+        let buf = EventBuf::<u32, 4>::new();
+
+        // A lone consumer makes a split impossible...
+        let c = buf.try_consumer().expect("consumer");
+        assert!(buf.try_split().is_none());
+
+        // ...and the failed split must not have stranded the producer flag.
+        // Two separate calls cannot offer this: try_producer would have
+        // succeeded and left the buffer half-taken with no way back.
+        let p = buf.try_producer().expect("producer still available");
+        p.push(1).unwrap();
+        assert_eq!(c.pop(), Some(1));
+        drop(p);
+        drop(c);
+
+        let (p, c) = buf.try_split().expect("split after both freed");
+        assert!(buf.try_split().is_none());
+        assert!(buf.try_producer().is_none());
+        assert!(buf.try_consumer().is_none());
+        p.push(2).unwrap();
+        assert_eq!(c.pop(), Some(2));
     }
 
     #[test]
