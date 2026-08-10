@@ -24,13 +24,13 @@
 //! below.
 
 #[cfg(loom)]
-pub(crate) use loom::sync::atomic::{AtomicBool, AtomicU32, fence};
+pub(crate) use loom::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, fence};
 
 #[cfg(all(not(loom), target_has_atomic = "32"))]
-pub(crate) use core::sync::atomic::{AtomicBool, AtomicU32, fence};
+pub(crate) use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, fence};
 
 #[cfg(all(not(loom), not(target_has_atomic = "32"), feature = "portable-atomic"))]
-pub(crate) use portable_atomic::{AtomicBool, AtomicU32, fence};
+pub(crate) use portable_atomic::{AtomicBool, AtomicU8, AtomicU32, fence};
 
 pub(crate) use core::sync::atomic::Ordering;
 

@@ -43,7 +43,7 @@
 //! assert_eq!(consumer.pop(), None); // empty
 //! ```
 
-use crate::sync::{AtomicBool, AtomicU32, Ordering, TrackedCell, fence};
+use crate::sync::{AtomicU8, AtomicU32, Ordering, TrackedCell, fence};
 use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -84,9 +84,18 @@ pub struct EventBuf<T: Copy, const N: usize> {
     head: AtomicU32,
     tail: AtomicU32,
     slots: [TrackedCell<MaybeUninit<T>>; N],
-    producer_taken: AtomicBool,
-    consumer_taken: AtomicBool,
+    /// Handle-ownership bits: `PRODUCER_BIT` and `CONSUMER_BIT`.
+    ///
+    /// One atomic rather than two booleans so that `try_split` can claim both
+    /// handles with a single compare-exchange. With separate flags a split has
+    /// to take them one at a time and roll the first back on failure, which
+    /// measured 20 bytes larger on thumbv7em than two independent calls --
+    /// i.e. the convenience API cost more flash than the thing it replaced.
+    taken: AtomicU8,
 }
+
+const PRODUCER_BIT: u8 = 0b01;
+const CONSUMER_BIT: u8 = 0b10;
 
 // SAFETY: EventBuf is Sync because the producer/consumer handles enforce
 // SPSC usage, and the head/tail cursors are accessed via atomics with
@@ -115,8 +124,7 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
             head: AtomicU32::new(0),
             tail: AtomicU32::new(0),
             slots: slot_array::<T, N>(),
-            producer_taken: AtomicBool::new(false),
-            consumer_taken: AtomicBool::new(false),
+            taken: AtomicU8::new(0),
         }
     }
 
@@ -131,8 +139,7 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
             head: AtomicU32::new(0),
             tail: AtomicU32::new(0),
             slots: slot_array::<T, N>(),
-            producer_taken: AtomicBool::new(false),
-            consumer_taken: AtomicBool::new(false),
+            taken: AtomicU8::new(0),
         }
     }
 
@@ -210,7 +217,7 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// [`producer`](Self::producer) when fallible bring-up is needed.
     #[inline]
     pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
-        if self.producer_taken.swap(true, Ordering::AcqRel) {
+        if self.taken.fetch_or(PRODUCER_BIT, Ordering::AcqRel) & PRODUCER_BIT != 0 {
             None
         } else {
             Some(Producer {
@@ -236,7 +243,7 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// [`consumer`](Self::consumer) when fallible bring-up is needed.
     #[inline]
     pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
-        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+        if self.taken.fetch_or(CONSUMER_BIT, Ordering::AcqRel) & CONSUMER_BIT != 0 {
             None
         } else {
             Some(Consumer {
@@ -244,6 +251,63 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
                 _not_sync: PhantomData,
             })
         }
+    }
+
+    /// Take both handles in one call.
+    ///
+    /// Returns `None` if either handle is already active, leaving both flags
+    /// untouched — so a failed `try_split` cannot strand a half-taken buffer
+    /// the way two separate calls can.
+    ///
+    /// This is the intended bring-up for the SPSC types. Pairing it with the
+    /// const [`new`](Self::new) means the buffer itself costs no flash and no
+    /// startup code, and the whole setup is one fallible step:
+    ///
+    /// ```
+    /// use ph_eventing::EventBuf;
+    /// static BUF: EventBuf<u32, 64> = EventBuf::new();
+    ///
+    /// let (tx, rx) = BUF.try_split().expect("first split");
+    /// tx.push(1).unwrap();
+    /// assert_eq!(rx.pop(), Some(1));
+    /// ```
+    ///
+    /// The handles are `Send + !Sync`: move one into each context. They cannot
+    /// be placed in a `static` — `!Sync` is what makes the split safe, and a
+    /// `static` requires `Sync` — so an ISR/task split still stores them behind
+    /// whatever interior-mutability wrapper the target provides.
+    #[inline]
+    pub fn try_split(&self) -> Option<(Producer<'_, T, N>, Consumer<'_, T, N>)> {
+        // Single RMW: either both bits were clear and are now set, or nothing
+        // changed. No rollback path, so no way to strand a half-taken buffer.
+        if self
+            .taken
+            .compare_exchange(
+                0,
+                PRODUCER_BIT | CONSUMER_BIT,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            return None;
+        }
+        Some((
+            Producer { buf: self, _not_sync: PhantomData },
+            Consumer { buf: self, _not_sync: PhantomData },
+        ))
+    }
+
+    /// Take both handles in one call.
+    ///
+    /// # Panics
+    /// Panics if either handle is already active. Use
+    /// [`try_split`](Self::try_split) to avoid the panic — on embedded targets
+    /// a panic is a reset, and the panic machinery costs flash.
+    #[inline]
+    pub fn split(&self) -> (Producer<'_, T, N>, Consumer<'_, T, N>) {
+        self.try_split()
+            .expect("EventBuf: producer and consumer must both be free to split")
     }
 
     /// Create the consumer handle. Only one consumer may be active.
@@ -303,7 +367,7 @@ impl<T: Copy, const N: usize> Producer<'_, T, N> {
 
 impl<T: Copy, const N: usize> Drop for Producer<'_, T, N> {
     fn drop(&mut self) {
-        self.buf.producer_taken.store(false, Ordering::Release);
+        self.buf.taken.fetch_and(!PRODUCER_BIT, Ordering::Release);
     }
 }
 
@@ -381,7 +445,7 @@ impl<T: Copy, const N: usize> Consumer<'_, T, N> {
 
 impl<T: Copy, const N: usize> Drop for Consumer<'_, T, N> {
     fn drop(&mut self) {
-        self.buf.consumer_taken.store(false, Ordering::Release);
+        self.buf.taken.fetch_and(!CONSUMER_BIT, Ordering::Release);
     }
 }
 
@@ -572,7 +636,7 @@ mod tests {
     #[test]
     fn len_stays_within_capacity_while_consumer_drains() {
         let buf = EventBuf::<u32, 8>::new();
-        let done = AtomicBool::new(false);
+        let done = crate::sync::AtomicBool::new(false);
         let pushes = crate::test_support::iterations(200_000);
 
         std::thread::scope(|scope| {
@@ -651,6 +715,31 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<super::Producer<'_, u32, 4>>();
         assert_send::<super::Consumer<'_, u32, 4>>();
+    }
+
+    #[test]
+    fn try_split_is_all_or_nothing() {
+        let buf = EventBuf::<u32, 4>::new();
+
+        // A lone consumer makes a split impossible...
+        let c = buf.try_consumer().expect("consumer");
+        assert!(buf.try_split().is_none());
+
+        // ...and the failed split must not have stranded the producer flag.
+        // Two separate calls cannot offer this: try_producer would have
+        // succeeded and left the buffer half-taken with no way back.
+        let p = buf.try_producer().expect("producer still available");
+        p.push(1).unwrap();
+        assert_eq!(c.pop(), Some(1));
+        drop(p);
+        drop(c);
+
+        let (p, c) = buf.try_split().expect("split after both freed");
+        assert!(buf.try_split().is_none());
+        assert!(buf.try_producer().is_none());
+        assert!(buf.try_consumer().is_none());
+        p.push(2).unwrap();
+        assert_eq!(c.pop(), Some(2));
     }
 
     #[test]
