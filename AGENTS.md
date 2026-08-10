@@ -461,6 +461,7 @@ cargo test
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
 - `works_without_default_bound` — `T: Copy` only, no `Default`
+- `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
 - `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
@@ -519,7 +520,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 59 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 60 unit tests + 7 doctests.
 
 ## Code Conventions
 

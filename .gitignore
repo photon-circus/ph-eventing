@@ -1,5 +1,9 @@
 # Build output
 /target
+# The measurement probes are their own workspaces, so they build into their own
+# target dirs that the root-anchored rule above misses.
+/scripts/codesize/target
+/scripts/cycles/target
 **/*.rs.bk
 *.profraw
 
