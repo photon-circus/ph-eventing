@@ -34,6 +34,7 @@ CARGO_INCREMENTAL=0
 export CARGO_INCREMENTAL
 
 failed=0
+skipped=0
 summary=""
 
 run_check() {
@@ -42,7 +43,20 @@ run_check() {
 
     printf '\n==> %s\n' "$name"
 
-    if "$@"; then
+    "$@"
+    status=$?
+
+    # Exit 2 means the check could not run -- a missing baseline, or a toolchain
+    # it cannot compare against. That is a SKIP, and a SKIP is not a pass:
+    # reporting it as PASS is exactly how a gate stops gating without anyone
+    # noticing.
+    if [ "$status" -eq 2 ]; then
+        summary="${summary}  SKIP  ${name}\n"
+        skipped=$((skipped + 1))
+        return 0
+    fi
+
+    if [ "$status" -eq 0 ]; then
         summary="${summary}  PASS  ${name}\n"
     else
         summary="${summary}  FAIL  ${name}\n"
@@ -57,6 +71,10 @@ run_check() {
 report() {
     printf '\nSummary\n'
     printf '%b' "$summary"
+    if [ "$skipped" -gt 0 ]; then
+        printf '\n%s check(s) SKIPPED. A skipped check is not a passed check --\n' "$skipped"
+        printf 'see RELEASING.md before treating this run as verified.\n'
+    fi
 }
 
 run_check 'fmt' cargo fmt --all -- --check

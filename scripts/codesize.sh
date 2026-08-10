@@ -50,8 +50,9 @@ for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
         --bless) BLESS=1 ;;
+        # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
         *) printf 'unknown argument: %s
-' "$arg" >&2; exit 2 ;;
+' "$arg" >&2; exit 64 ;;
     esac
 done
 
@@ -182,69 +183,140 @@ if [ "$skipped" -gt 0 ]; then
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
 # ---------------------------------------------------------------------------
-# Baseline gate
 # ---------------------------------------------------------------------------
+# Baseline gate
+#
+# Exit codes: 0 pass, 1 fail, 2 could-not-run. ci.sh maps 2 to SKIP -- and a
+# SKIP is not a pass, so it must never be reported as one.
+# ---------------------------------------------------------------------------
+
+# A partial run must never become a baseline: blessing after a skipped or failed
+# target silently deletes those rows, and the gate then cannot regress on them
+# because it no longer knows they exist.
 if [ "$BLESS" = "1" ]; then
+    if [ "$failed" -gt 0 ] || [ "$skipped" -gt 0 ]; then
+        printf 'refusing to bless: %s target(s) failed, %s skipped.
+'             "$failed" "$skipped" >&2
+        printf 'A baseline written from a partial run drops those rows, and a
+' >&2
+        printf 'dropped row cannot regress. Install the missing targets first.
+' >&2
+        exit 1
+    fi
     {
-        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless\n'
-        printf '# rustc-commit: %s\n' "$RUSTC_ID"
-        printf '#\n'
-        printf '# Host-independent: byte-identical on x86_64-pc-windows-msvc and\n'
-        printf '# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all\n'
-        printf '# eight gated targets. That is what makes committing it sound.\n'
-        printf '#\n'
-        printf '# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it\n'
-        printf '# would make that fork mandatory for every contributor.\n'
+        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless
+'
+        printf '# rustc-commit: %s
+' "$RUSTC_ID"
+        printf '#
+'
+        printf '# Host-independent: byte-identical on x86_64-pc-windows-msvc and
+'
+        printf '# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all
+'
+        printf '# eight gated targets. That is what makes committing it sound.
+'
+        printf '#
+'
+        printf '# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it
+'
+        printf '# would make that fork mandatory for every contributor.
+'
         sort "$RESULTS"
     } > "$BASELINE"
-    printf 'Wrote %s for rustc %s\n' "$BASELINE" "$RUSTC_ID"
+    printf 'Wrote %s for rustc %s
+' "$BASELINE" "$RUSTC_ID"
     exit 0
 fi
 
+if [ "$failed" -gt 0 ]; then
+    printf '
+%s target(s) failed to build; not comparing against the baseline.
+' "$failed"
+    exit 1
+fi
+
 if [ ! -f "$BASELINE" ]; then
-    printf 'SKIP baseline gate: %s does not exist yet.\n' "$BASELINE"
-    printf 'Create it with: ./scripts/codesize.sh --bless\n'
-    exit "$([ "$failed" -gt 0 ] && echo 1 || echo 0)"
+    printf '
+SKIP baseline gate: %s does not exist yet.
+' "$BASELINE"
+    printf 'Create it with: ./scripts/codesize.sh --bless
+'
+    exit 2
 fi
 
 BASE_ID="$(sed -n 's/^# rustc-commit: //p' "$BASELINE")"
 if [ "$BASE_ID" != "$RUSTC_ID" ]; then
-    printf 'SKIP baseline gate: baseline was recorded with rustc %s, this is %s.\n' \
-        "$BASE_ID" "$RUSTC_ID"
-    printf 'Codegen differs between compilers, so comparing them would be noise, not\n'
-    printf 'signal. Re-bless deliberately after reviewing the diff:\n'
-    printf '  ./scripts/codesize.sh --bless\n'
-    printf 'A SKIP is not a pass -- see RELEASING.md.\n'
-    exit "$([ "$failed" -gt 0 ] && echo 1 || echo 0)"
+    printf '
+SKIP baseline gate: baseline was recorded with rustc %s, this is %s.
+'         "$BASE_ID" "$RUSTC_ID"
+    printf 'Codegen differs between compilers, so comparing them would be noise, not
+'
+    printf 'signal. Re-bless deliberately after reviewing the diff:
+'
+    printf '  ./scripts/codesize.sh --bless
+'
+    exit 2
 fi
 
-printf '\nBaseline gate (tolerance +%s bytes, growth only)\n' "$TOLERANCE"
-regressions=0
-grep -v '^#' "$BASELINE" | while IFS="$(printf '\t')" read -r bt bm bv; do
+printf '
+Baseline gate (tolerance +%s bytes, growth only)
+' "$TOLERANCE"
+
+# The comparison runs in a subshell (pipeline), so counts travel back via files
+# next to $RESULTS -- which is a mktemp path, not the repo.
+BAD="$RESULTS.bad"
+MISSING="$RESULTS.missing"
+rm -f "$BAD" "$MISSING"
+
+grep -v '^#' "$BASELINE" | while IFS="$(printf '	')" read -r bt bm bv; do
     [ -z "$bt" ] && continue
-    cur="$(awk -F'\t' -v t="$bt" -v m="$bm" '$1==t && $2==m {print $3; exit}' "$RESULTS")"
+    cur="$(awk -F'	' -v t="$bt" -v m="$bm" '$1==t && $2==m {print $3; exit}' "$RESULTS")"
     if [ -z "$cur" ]; then
-        printf '  MISSING  %-30s %-10s (baseline %s) -- target skipped?\n' "$bt" "$bm" "$bv"
+        printf '  MISSING    %-28s %-10s (baseline %s)
+' "$bt" "$bm" "$bv"
+        echo x >> "$MISSING"
         continue
     fi
     delta=$((cur - bv))
     if [ "$delta" -gt "$TOLERANCE" ]; then
-        printf '  REGRESSION %-28s %-10s %s -> %s (+%s)\n' "$bt" "$bm" "$bv" "$cur" "$delta"
-        echo x >> "$RESULTS.bad"
+        printf '  REGRESSION %-28s %-10s %s -> %s (+%s)
+' "$bt" "$bm" "$bv" "$cur" "$delta"
+        echo x >> "$BAD"
     elif [ "$delta" -lt 0 ]; then
-        printf '  improved   %-28s %-10s %s -> %s (%s) -- re-bless to lock it in\n' \
-            "$bt" "$bm" "$bv" "$cur" "$delta"
+        printf '  improved   %-28s %-10s %s -> %s (%s) -- re-bless to lock it in
+'             "$bt" "$bm" "$bv" "$cur" "$delta"
     fi
 done
-# The while loop runs in a subshell, so the counter travels via a file.
-[ -f "$RESULTS.bad" ] && regressions=$(wc -l < "$RESULTS.bad")
-rm -f "$RESULTS.bad"
 
-if [ "${regressions:-0}" -gt 0 ]; then
-    printf '\n%s row(s) grew by more than %s bytes.\n' "$regressions" "$TOLERANCE"
-    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless\n'
+regressions=0
+missing=0
+[ -f "$BAD" ] && regressions=$(wc -l < "$BAD")
+[ -f "$MISSING" ] && missing=$(wc -l < "$MISSING")
+rm -f "$BAD" "$MISSING"
+
+if [ "${missing:-0}" -gt 0 ]; then
+    printf '
+%s baseline row(s) had no measurement.
+' "$missing"
+    printf 'A row that is not measured cannot regress, so this is a hole in the
+'
+    printf 'gate rather than a pass. Install the missing targets and re-run.
+'
     exit 1
 fi
+
+if [ "${regressions:-0}" -gt 0 ]; then
+    printf '
+%s row(s) grew by more than %s bytes.
+' "$regressions" "$TOLERANCE"
+    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless
+'
+    exit 1
+fi
+printf '  ok -- no row grew by more than %s bytes
+' "$TOLERANCE"
+
 printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"
 
 printf 'split column is "-" unless run as: ./scripts/codesize.sh split\n'

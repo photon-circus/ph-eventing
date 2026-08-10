@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Fixed
+- The code-size gate could report a pass without gating anything. Three defects found by automated
+  review, all now demonstrated fixed: a skipped gate exited 0 and `ci.sh` recorded **PASS** despite
+  printing SKIP; a baseline row with no matching measurement printed `MISSING` and still passed;
+  and `--bless` would overwrite the baseline after a partial run, silently deleting the rows it
+  could not measure. The script now exits `2` for "could not run", `ci.sh` maps that to a real
+  `SKIP` row with a summary warning, missing rows fail, and `--bless` refuses after any skip or
+  failure.
 ### Added
 - `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
   The check is a const assertion, so there is no runtime panic to catch and the case cannot be
