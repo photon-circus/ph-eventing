@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
   that kind is already active. The panicking `producer` / `consumer` APIs are unchanged.
+- `SeqRing` value-returning poll helpers: `Consumer::poll_one_value() -> Option<(u32, T)>` and
+  `Consumer::latest_value() -> Option<(u32, T)>`. Hook-based `poll_*` / `latest` are unchanged and
+  still maintain the `read + dropped` invariant.
+- `EventBuf::Consumer::peek() -> Option<T>` — copy the oldest item without advancing the cursor.
 
 ### Changed
 - GitHub Actions CI runs again on every push to `master` or a `release/**` branch and on every
