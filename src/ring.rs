@@ -65,9 +65,20 @@ impl<T: Copy, const N: usize> RingBuf<T, N> {
     /// Without a const `new` that initialiser is impossible and you need a
     /// `StaticCell` or a `OnceCell` and a runtime init step.
     ///
+    /// # Capacity `0` is a build failure
+    /// The `N > 0` check is a *const* assertion, so a zero-capacity ring cannot
+    /// be constructed at all -- there is no runtime panic left to catch, and
+    /// therefore no way to write the negative case as a `#[test]`
+    /// (`zero_capacity_panics` was deleted for exactly this reason). This
+    /// `compile_fail` doctest is that coverage, and pinning the error code
+    /// keeps it honest: a bare `compile_fail` would also pass on a typo.
+    ///
+    /// ```compile_fail,E0080
+    /// let _ = ph_eventing::RingBuf::<u32, 0>::new();
+    /// ```
+    ///
     /// # Panics
-    /// Does not panic. `N == 0` fails the build via a const assertion, so a
-    /// zero-capacity ring cannot be constructed at all.
+    /// Does not panic.
     pub const fn new() -> Self {
         const {
             assert!(N > 0, "RingBuf capacity N must be > 0");

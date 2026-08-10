@@ -9,6 +9,11 @@ All notable changes to this project will be documented in this file.
   — which previously needed a `StaticCell` and a runtime init step. A bare `static RingBuf` is of
   little use on its own, since every mutator takes `&mut self`.
 
+### Added
+- `compile_fail` doctest covering `RingBuf`'s `N == 0` rejection, restoring the coverage that
+  `zero_capacity_panics` provided before the check moved to compile time. The expected error code
+  is pinned (`compile_fail,E0080`) so it cannot pass for the wrong reason.
+
 ### Changed
 - **Breaking:** `RingBuf::new()` rejects `N == 0` with a const assertion instead of a runtime
   `assert!`. `RingBuf::<u32, 0>::new()` no longer compiles where it previously panicked, and the
