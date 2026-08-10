@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
+  that kind is already active. The panicking `producer` / `consumer` APIs are unchanged.
+
 ### Changed
 - GitHub Actions CI runs again on every push to `master` or a `release/**` branch and on every
   pull request, rather than by manual dispatch only. Added `fmt` and `doc` jobs so the remote

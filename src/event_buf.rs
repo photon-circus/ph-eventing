@@ -64,7 +64,8 @@ const RETRY_LIMIT: usize = 2;
 /// # Panics
 /// - `EventBuf::new()` panics if `N == 0`.
 /// - `producer()` / `consumer()` panic if called while another handle of
-///   the same kind is already active.
+///   the same kind is already active. Use [`EventBuf::try_producer`] /
+///   [`EventBuf::try_consumer`] for a fallible alternative.
 pub struct EventBuf<T: Copy, const N: usize> {
     head: AtomicU32,
     tail: AtomicU32,
@@ -163,19 +164,45 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
         self.len() >= N
     }
 
+    /// Try to create the producer handle.
+    ///
+    /// Returns `None` if a producer is already active. Prefer this over
+    /// [`producer`](Self::producer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Producer {
+                buf: self,
+                _not_sync: PhantomData,
+            })
+        }
+    }
+
     /// Create the producer handle. Only one producer may be active.
     ///
     /// # Panics
     /// Panics if a producer handle is already active.
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
-        assert!(
-            !self.producer_taken.swap(true, Ordering::AcqRel),
-            "EventBuf: only one Producer may be active at a time"
-        );
-        Producer {
-            buf: self,
-            _not_sync: PhantomData,
+        self.try_producer()
+            .expect("EventBuf: only one Producer may be active at a time")
+    }
+
+    /// Try to create the consumer handle.
+    ///
+    /// Returns `None` if a consumer is already active. Prefer this over
+    /// [`consumer`](Self::consumer) when fallible bring-up is needed.
+    #[inline]
+    pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Consumer {
+                buf: self,
+                _not_sync: PhantomData,
+            })
         }
     }
 
@@ -185,14 +212,8 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// Panics if a consumer handle is already active.
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
-        assert!(
-            !self.consumer_taken.swap(true, Ordering::AcqRel),
-            "EventBuf: only one Consumer may be active at a time"
-        );
-        Consumer {
-            buf: self,
-            _not_sync: PhantomData,
-        }
+        self.try_consumer()
+            .expect("EventBuf: only one Consumer may be active at a time")
     }
 }
 
@@ -572,5 +593,20 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<super::Producer<'_, u32, 4>>();
         assert_send::<super::Consumer<'_, u32, 4>>();
+    }
+
+    #[test]
+    fn try_producer_and_try_consumer() {
+        let buf = EventBuf::<u32, 4>::new();
+        let p = buf.try_producer().expect("first producer");
+        assert!(buf.try_producer().is_none());
+        let c = buf.try_consumer().expect("first consumer");
+        assert!(buf.try_consumer().is_none());
+        p.push(1).unwrap();
+        assert_eq!(c.pop(), Some(1));
+        drop(p);
+        drop(c);
+        assert!(buf.try_producer().is_some());
+        assert!(buf.try_consumer().is_some());
     }
 }
