@@ -461,7 +461,7 @@ cargo test
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
 - `works_without_default_bound` — `T: Copy` only, no `Default`
-- `zero_capacity_panics` — N=0 assertion
+- `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
 
@@ -536,7 +536,10 @@ cargo test
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
-- No panics in hot paths; only assertions are in `::new()` for `N > 0`
+- No panics in hot paths. `RingBuf::new` rejects `N == 0` with a **const**
+  assertion, so a zero-capacity ring fails the build rather than panicking —
+  which also means no test can cover the rejection, and the const assertion is
+  the only thing enforcing it
 
 ### Documentation Style
 

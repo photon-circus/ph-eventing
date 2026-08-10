@@ -3,7 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `RingBuf::new()` is a `const fn`, so a ring can be const-initialised inside an interior-mutability
+  wrapper — `static LOG: Mutex<RefCell<RingBuf<u32, 64>>> = Mutex::new(RefCell::new(RingBuf::new()));`
+  — which previously needed a `StaticCell` and a runtime init step. A bare `static RingBuf` is of
+  little use on its own, since every mutator takes `&mut self`.
+
 ### Changed
+- **Breaking:** `RingBuf::new()` rejects `N == 0` with a const assertion instead of a runtime
+  `assert!`. `RingBuf::<u32, 0>::new()` no longer compiles where it previously panicked, and the
+  `zero_capacity_panics` test is gone because the case can no longer be written.
 - **Breaking:** `RingBuf` no longer requires `T: Default`. Slots are stored as `MaybeUninit<T>`
   and only live entries are read. Relaxing a bound is compatible for callers, but `RingBuf` is no
   longer free of `unsafe`, which was a documented property of the type — so it is recorded as
