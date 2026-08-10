@@ -409,6 +409,32 @@ than two separate calls on Cortex-M3/M4/M7, 28 cheaper on M33, 8 bytes *more
 expensive* on RISC-V, and made the existing two-call path 60 bytes worse on
 Cortex-M0+. It was rejected on that evidence. Measure before concluding.
 
+`ci.sh` runs this as a gate. The baseline lives in
+`scripts/codesize/baseline.tsv` and the rules are deliberately asymmetric:
+
+- **Growth beyond +16 bytes on any row fails.** Absolute, not a percentage — at
+  100-200 bytes a percentage is noise, and the regression this exists to catch
+  was +60 bytes on Cortex-M0+ and +78 on ESP32-S2.
+- **Shrinkage never fails.** It is reported, with a nudge to re-bless.
+- **A toolchain mismatch `SKIP`s rather than fails.** The baseline records the
+  rustc commit hash; comparing codegen across compilers is noise, not signal.
+  A `SKIP` is not a pass — see RELEASING.md.
+- **Xtensa is measured but never gated.** Gating it would make the esp-rs fork
+  mandatory for every contributor.
+
+The baseline is committed because it is **host-independent**: verified
+byte-identical on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` for
+the same pinned rustc, across all eight gated targets. That is what
+`rust-toolchain.toml` pinning 1.92.0 buys, and it is why this gate is workable
+here when it would be flaky in a crate that floats its toolchain. **Re-verify
+that property if the pin ever moves.**
+
+Re-bless deliberately, never reflexively — the diff is the review:
+
+```bash
+./scripts/codesize.sh --bless
+```
+
 ```bash
 ./scripts/codesize.sh              # baseline, 8 upstream targets
 ./scripts/codesize.sh split        # include try_split, on branches that have it

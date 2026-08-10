@@ -45,7 +45,28 @@ CARGO_INCREMENTAL=0
 export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
-[ "${1:-}" = "split" ] && PROBE_FEATURES="split"
+BLESS=0
+for arg in "$@"; do
+    case "$arg" in
+        split)   PROBE_FEATURES="split" ;;
+        --bless) BLESS=1 ;;
+        *) printf 'unknown argument: %s
+' "$arg" >&2; exit 2 ;;
+    esac
+done
+
+BASELINE="scripts/codesize/baseline.tsv"
+# Growth beyond this many bytes on any row fails the gate. Absolute, not a
+# percentage: at 100-200 bytes a percentage is noise, and the regression this
+# exists to catch was +60 on Cortex-M0+ and +78 on ESP32-S2. Shrinkage never
+# fails -- it is reported and prompts a re-bless.
+TOLERANCE=16
+
+# The baseline is only meaningful for the toolchain that produced it, which is
+# why rust-toolchain.toml pinning 1.92.0 makes this workable at all. Verified
+# byte-identical on x86_64-pc-windows-msvc and x86_64-unknown-linux-gnu for the
+# same pinned rustc, so the baseline is host-independent and can be committed.
+RUSTC_ID="$(rustc -vV | sed -n 's/^commit-hash: //p')"
 
 # llvm-size is not on PATH. Resolve it from the pinned toolchain's sysroot
 # rather than hardcoding a path or assuming a channel -- the point is that
@@ -88,6 +109,9 @@ fn_size() {
         $1 == ".text." f || $1 == ".literal." f { total += $2; found = 1 }
         END { if (found) print total }'
 }
+
+RESULTS="$(mktemp)"
+trap 'rm -f "$RESULTS"' EXIT
 
 printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
 printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
@@ -142,6 +166,13 @@ for entry in $TARGETS; do
 
     printf '%-30s %10s %8s %8s %6s\n' \
         "$target" "${two:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
+
+    # Xtensa is never gated: it needs a toolchain fork, so making it a hard gate
+    # would make that fork mandatory for every contributor.
+    case "$target" in xtensa-*) continue ;; esac
+    [ -n "$two" ] && printf '%s\ttwo_calls\t%s\n' "$target" "$two" >> "$RESULTS"
+    [ -n "$bss" ] && printf '%s\tbss\t%s\n' "$target" "$bss" >> "$RESULTS"
+    printf '%s\tdata\t%s\n' "$target" "${dat:-0}" >> "$RESULTS"
 done
 
 printf '\n'
@@ -150,6 +181,72 @@ if [ "$skipped" -gt 0 ]; then
     printf 'per-architecture differences this script exists to find.\n\n'
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
+# ---------------------------------------------------------------------------
+# Baseline gate
+# ---------------------------------------------------------------------------
+if [ "$BLESS" = "1" ]; then
+    {
+        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless\n'
+        printf '# rustc-commit: %s\n' "$RUSTC_ID"
+        printf '#\n'
+        printf '# Host-independent: byte-identical on x86_64-pc-windows-msvc and\n'
+        printf '# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all\n'
+        printf '# eight gated targets. That is what makes committing it sound.\n'
+        printf '#\n'
+        printf '# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it\n'
+        printf '# would make that fork mandatory for every contributor.\n'
+        sort "$RESULTS"
+    } > "$BASELINE"
+    printf 'Wrote %s for rustc %s\n' "$BASELINE" "$RUSTC_ID"
+    exit 0
+fi
+
+if [ ! -f "$BASELINE" ]; then
+    printf 'SKIP baseline gate: %s does not exist yet.\n' "$BASELINE"
+    printf 'Create it with: ./scripts/codesize.sh --bless\n'
+    exit "$([ "$failed" -gt 0 ] && echo 1 || echo 0)"
+fi
+
+BASE_ID="$(sed -n 's/^# rustc-commit: //p' "$BASELINE")"
+if [ "$BASE_ID" != "$RUSTC_ID" ]; then
+    printf 'SKIP baseline gate: baseline was recorded with rustc %s, this is %s.\n' \
+        "$BASE_ID" "$RUSTC_ID"
+    printf 'Codegen differs between compilers, so comparing them would be noise, not\n'
+    printf 'signal. Re-bless deliberately after reviewing the diff:\n'
+    printf '  ./scripts/codesize.sh --bless\n'
+    printf 'A SKIP is not a pass -- see RELEASING.md.\n'
+    exit "$([ "$failed" -gt 0 ] && echo 1 || echo 0)"
+fi
+
+printf '\nBaseline gate (tolerance +%s bytes, growth only)\n' "$TOLERANCE"
+regressions=0
+grep -v '^#' "$BASELINE" | while IFS="$(printf '\t')" read -r bt bm bv; do
+    [ -z "$bt" ] && continue
+    cur="$(awk -F'\t' -v t="$bt" -v m="$bm" '$1==t && $2==m {print $3; exit}' "$RESULTS")"
+    if [ -z "$cur" ]; then
+        printf '  MISSING  %-30s %-10s (baseline %s) -- target skipped?\n' "$bt" "$bm" "$bv"
+        continue
+    fi
+    delta=$((cur - bv))
+    if [ "$delta" -gt "$TOLERANCE" ]; then
+        printf '  REGRESSION %-28s %-10s %s -> %s (+%s)\n' "$bt" "$bm" "$bv" "$cur" "$delta"
+        echo x >> "$RESULTS.bad"
+    elif [ "$delta" -lt 0 ]; then
+        printf '  improved   %-28s %-10s %s -> %s (%s) -- re-bless to lock it in\n' \
+            "$bt" "$bm" "$bv" "$cur" "$delta"
+    fi
+done
+# The while loop runs in a subshell, so the counter travels via a file.
+[ -f "$RESULTS.bad" ] && regressions=$(wc -l < "$RESULTS.bad")
+rm -f "$RESULTS.bad"
+
+if [ "${regressions:-0}" -gt 0 ]; then
+    printf '\n%s row(s) grew by more than %s bytes.\n' "$regressions" "$TOLERANCE"
+    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless\n'
+    exit 1
+fi
+printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"
+
 printf 'split column is "-" unless run as: ./scripts/codesize.sh split\n'
 printf 'Xtensa rows need: XTENSA=1 and the esp-rs toolchain.\n'
 

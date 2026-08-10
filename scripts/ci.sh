@@ -106,6 +106,11 @@ else
     summary="${summary}  SKIP  coverage (not installed)\n"
 fi
 
+# Code size is a guarantee like any other: unpinned, it drifts. The gate is
+# presence-gated on the baseline and skips loudly when the toolchain differs
+# from the one that produced it, so it cannot become a source of noise.
+run_check 'codesize (baseline gate)' ./scripts/codesize.sh
+
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \

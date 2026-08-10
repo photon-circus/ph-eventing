@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Added
+- Code-size baseline gate. `scripts/codesize.sh` compares against a committed `baseline.tsv` and
+  `ci.sh` runs it as a check, so flash cost is pinned rather than merely measurable. Growth beyond
+  +16 bytes fails; shrinkage only reports; a toolchain mismatch `SKIP`s rather than failing, since
+  comparing codegen across compilers is noise. Xtensa is measured but never gated, because gating
+  it would make the esp-rs fork mandatory. The baseline is committable because it is
+  host-independent — verified byte-identical on Windows and Linux for the same pinned rustc across
+  all eight gated targets.
+### Added
 - `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
   non-const because Loom's atomics are not const-constructible.
