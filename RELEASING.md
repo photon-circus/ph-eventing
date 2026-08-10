@@ -29,17 +29,27 @@ git switch master && git pull
 git status --short          # must be empty before you branch
 git switch -c release/X.Y.Z
 git push -u origin release/X.Y.Z
-gh pr create --base master --head release/X.Y.Z --draft --title "release: X.Y.Z"
 ```
 
 A dirty tree risks publishing files that are not in any commit —
 `--allow-dirty` exists but should not be used for a real release.
 
-Open the merge-back PR now, as a draft, rather than at the end. It is where the
-release's verification output goes as you accumulate it, it makes the release
-visible to anyone looking at the PR list, and creating it early means step 10
-cannot forget it. Draft is load-bearing: this PR must not merge until the tag
-exists.
+Then open the merge-back PR as a draft:
+
+```bash
+gh pr create --base master --head release/X.Y.Z --draft --title "release: X.Y.Z"
+```
+
+**This fails with "No commits between master and release/X.Y.Z" until the
+branch has at least one commit of its own.** A freshly cut branch is identical
+to `master`, and GitHub will not open a PR on an empty diff. Either open it
+after the first change lands on the branch, or make the version bump in step 4
+the branch's first commit and open it immediately after.
+
+Open it early rather than at the end. It is where the release's verification
+output goes as you accumulate it, it makes the release visible to anyone looking
+at the PR list, and creating it early means step 10 cannot forget it. Draft is
+load-bearing: this PR must not merge until the tag exists.
 
 ## 2. Route the PRs — judgement call
 
