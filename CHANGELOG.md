@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Changed
+- **Breaking:** `RingBuf` no longer requires `T: Default`. Slots are stored as `MaybeUninit<T>`
+  and only live entries are read. Relaxing a bound is compatible for callers, but `RingBuf` is no
+  longer free of `unsafe`, which was a documented property of the type — so it is recorded as
+  breaking rather than as a quiet improvement.
 
 ## 0.1.4 - 2026-08-10
 ### Added
