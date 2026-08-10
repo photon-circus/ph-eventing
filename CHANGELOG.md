@@ -7,6 +7,16 @@ All notable changes to this project will be documented in this file.
 - `try_producer` / `try_consumer` on `SeqRing` and `EventBuf`, returning `Option` when a handle of
   that kind is already active. The panicking `producer` / `consumer` APIs are unchanged.
 
+### Changed
+- GitHub Actions CI runs again on every push to `master` or a `release/**` branch and on every
+  pull request, rather than by manual dispatch only. Added `fmt` and `doc` jobs so the remote
+  matrix matches the cheap half of `scripts/ci.*`, and a `concurrency` group that cancels
+  superseded PR runs but never cancels a run on `master` or a release branch. Coverage, Miri, and
+  Loom stay local-only: coverage is non-deterministic here, and the other two are slow and are the
+  only real evidence for the lock-free types. Every document that described CI as manual-dispatch
+  was updated with it — a green check is now necessary but still not sufficient, and saying so in
+  one place while another claims nothing runs remotely would be worse than either alone.
+
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`
@@ -22,6 +32,18 @@ All notable changes to this project will be documented in this file.
   `./scripts/ci.sh`, which never invokes an action and so cannot validate an actions bump. It now
   names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
   the workflow after merge.
+
+### Known issues
+- `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour.
+  **This affects downstream tooling:** running `cargo miri test` over a test that drives the ring
+  from two threads reports UB inside this crate. It is a deliberate trade — a ring restricted to a
+  word-sized payload could hold it in an atomic and be race-free; accepting any `T: Copy` is what
+  rules that out. The `seq_ring` module docs give the alternatives and why each was rejected.
+  `EventBuf` is unaffected and passes Miri with the detector on, but applies backpressure rather
+  than overwriting, so it is not a drop-in replacement.
+- `SeqRing` drops a bounded number of extra entries once per `u32` sequence wrap, newly documented
+  above. This is a data-loss bound, not a soundness issue, and it is unchanged from 0.1.3 — only
+  its documentation is new.
 
 ## 0.1.3 - 2026-08-09
 ### Fixed

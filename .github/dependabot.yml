@@ -7,15 +7,17 @@
 # resolve anyway. A dependency PR here would mean something changed that
 # deserves a human decision, not an automated bump -- deny.toml enforces that.
 #
-# Note that CI is manual-dispatch only, so nothing runs automatically on a
-# Dependabot PR. `./scripts/ci.sh` is NOT the check to run here -- it never
-# invokes an action, so it cannot tell you whether a bump works. Two things
-# actually validate one:
+# CI now runs on pull_request, so a Dependabot PR does exercise the bumped
+# action -- that is the check, and `./scripts/ci.sh` is still NOT it, because it
+# never invokes an action and so cannot tell you whether a bump works. Two
+# things validate one:
 #
 #   1. Verify the SHA resolves to the tag named in the comment, rather than
 #      trusting the comment. Pinning is only worth anything if someone checks:
 #        gh api repos/<owner>/<action>/git/ref/tags/<tag> --jq .object.sha
-#   2. Merge, then dispatch the workflow and confirm it is green:
+#   2. Confirm the PR's own CI run is green before merging. A workflow-file
+#      change from a fork runs against the base repository's workflow, so for
+#      a bump proposed from a fork, dispatch it again after merge:
 #        gh workflow run ci.yml --ref master
 #
 # Read the release notes for a major bump before merging it. actions/checkout
