@@ -110,6 +110,15 @@ timeout 300 qemu-system-arm \
     -semihosting-config enable=on,target=native \
     -accel tcg,one-insn-per-tb=on -icount shift=0 \
     -d exec -D "$LOG" -kernel "$ELF" >/dev/null 2>&1
+qemu_status=$?
+
+# A crash or timeout after some trace was already written leaves a non-empty
+# log, so the emptiness check alone would let a partial run through.
+if [ "$qemu_status" -ne 0 ]; then
+    printf 'error: qemu exited %s (124 = timeout)
+' "$qemu_status" >&2
+    exit 1
+fi
 
 if [ ! -s "$LOG" ]; then
     printf 'error: qemu produced no trace\n' >&2
@@ -118,15 +127,29 @@ fi
 
 printf '\n'
 awk '
+    # GNU awk has a strtonum builtin; mawk, the default awk on a stock
+    # Debian/Ubuntu, does not -- verified. The parse then aborts and, with no
+    # status check, the script printed its footer and exited 0 having measured
+    # nothing. This is POSIX awk.
+    function hex2dec(h,   i, c, d, v) {
+        h = tolower(h); v = 0
+        for (i = 1; i <= length(h); i++) {
+            c = substr(h, i, 1)
+            d = index("0123456789abcdef", c) - 1
+            if (d < 0) return -1
+            v = v * 16 + d
+        }
+        return v
+    }
     NR == FNR {
-        addr = strtonum("0x" $1)
-        addr = int(addr / 2) * 2      # clear the Thumb bit
+        addr = hex2dec($1)
+        addr = addr - (addr % 2)      # clear the Thumb bit
         label[addr] = $2
         next
     }
     /^Trace/ {
         if (!match($0, /\/[0-9a-f]{16}\//)) next
-        pc = strtonum("0x" substr($0, RSTART + 1, 16))
+        pc = hex2dec(substr($0, RSTART + 1, 16))
         if (pc in label) {
             name = label[pc]
             if (name == "m_end") {
