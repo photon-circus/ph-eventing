@@ -69,14 +69,14 @@ impl<In, Out, L> Link<In, Out> for L where L: Sink<In> + Source<Out> {}
 /// use ph_eventing::traits::{Sink, Source, forward};
 ///
 /// let seq = SeqRing::<u32, 8>::new();
-/// let sp = seq.producer();
-/// let mut sc = seq.consumer();
+/// let sp = seq.try_producer().expect("producer");
+/// let mut sc = seq.try_consumer().expect("consumer");
 ///
 /// sp.push(1);
 /// sp.push(2);
 ///
 /// let eb = EventBuf::<u32, 8>::new();
-/// let mut ep = eb.producer();
+/// let mut ep = eb.try_producer().expect("producer");
 ///
 /// let (n, err) = forward(&mut sc, &mut ep, 10);
 /// assert_eq!(n, 2);
@@ -103,6 +103,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
+    // so these tests are their coverage -- including the two that assert the
+    // panic message. Allowing the lint here rather than at the crate root keeps
+    // the warning live for library code, which is where it should bite.
+    #![allow(deprecated)]
+
     use super::*;
     use crate::{EventBuf, RingBuf, SeqRing};
 

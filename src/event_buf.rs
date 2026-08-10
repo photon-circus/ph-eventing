@@ -32,8 +32,8 @@
 //! use ph_eventing::EventBuf;
 //!
 //! let buf = EventBuf::<u32, 4>::new();
-//! let producer = buf.producer();
-//! let consumer = buf.consumer();
+//! let producer = buf.try_producer().expect("producer");
+//! let consumer = buf.try_consumer().expect("consumer");
 //!
 //! assert!(producer.push(1).is_ok());
 //! assert!(producer.push(2).is_ok());
@@ -222,8 +222,22 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Create the producer handle. Only one producer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_producer`](Self::try_producer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a producer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_producer() and handle None"
+    )]
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
         self.try_producer()
@@ -248,8 +262,22 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Create the consumer handle. Only one consumer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_consumer`](Self::try_consumer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a consumer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_consumer() and handle None"
+    )]
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
         self.try_consumer()
@@ -411,6 +439,12 @@ impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
 
 #[cfg(test)]
 mod tests {
+    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
+    // so these tests are their coverage -- including the two that assert the
+    // panic message. Allowing the lint here rather than at the crate root keeps
+    // the warning live for library code, which is where it should bite.
+    #![allow(deprecated)]
+
     use super::*;
 
     #[test]

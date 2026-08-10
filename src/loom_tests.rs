@@ -15,6 +15,10 @@
 //!
 //! [Loom]: https://github.com/tokio-rs/loom
 
+// The models drive the deprecated `producer()` / `consumer()` deliberately:
+// they remain public API until 0.3.0, so their orderings still need proving.
+#![allow(deprecated)]
+
 use crate::{EventBuf, SeqRing};
 use loom::sync::Arc;
 use loom::thread;

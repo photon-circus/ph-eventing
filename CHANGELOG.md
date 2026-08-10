@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Deprecated
+- **`SeqRing::producer` / `consumer` and `EventBuf::producer` / `consumer`**, in favour of the
+  `try_*` variants added in 0.1.4. Scheduled for removal in 0.3.0. On a microcontroller a panic is
+  a reset, and the panic machinery costs flash: a code-size probe shows no panic strings reach the
+  binary when only the `try_*` constructors are used. The shorter, more discoverable name being
+  the hazardous one is the inversion this corrects. The deprecated methods are unchanged and still
+  tested; only the recommendation moves.
 ### Added
 - `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
