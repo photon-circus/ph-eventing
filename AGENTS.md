@@ -417,6 +417,13 @@ Cortex-M0+. It was rejected on that evidence. Measure before concluding.
   100-200 bytes a percentage is noise, and the regression this exists to catch
   was +60 bytes on Cortex-M0+ and +78 on ESP32-S2.
 - **Shrinkage never fails.** It is reported, with a nudge to re-bless.
+- **A `SKIP` is reported as `SKIP`, never as `PASS`.** The script exits `2` for
+  "could not run" and `ci.sh` maps that to a `SKIP` row plus a warning in the
+  summary. Exiting 0 on a skip is how a gate silently stops gating.
+- **A baseline row with no measurement fails the gate.** A row that is not
+  measured cannot regress, so treating it as a pass is a hole, not a success.
+- **`--bless` refuses to write after any skipped or failed target.** A partial
+  baseline silently drops rows, and a dropped row can never regress again.
 - **A toolchain mismatch `SKIP`s rather than fails.** The baseline records the
   rustc commit hash; comparing codegen across compilers is noise, not signal.
   A `SKIP` is not a pass — see RELEASING.md.
@@ -441,6 +448,12 @@ Re-bless deliberately, never reflexively — the diff is the review:
 ./scripts/codesize.sh split        # include try_split, on branches that have it
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
 ```
+
+All eight gated targets are pinned in `rust-toolchain.toml`, including
+`thumbv8m.main-none-eabi` and `thumbv8m.base-none-eabi`, which the embedded
+`cargo check` matrix does not use. Without them a fresh checkout silently skips
+two of the eight rows while still printing a table, which reads as a complete
+matrix.
 
 Tooling is what `rust-toolchain.toml` already pins: `llvm-size` comes from the
 `llvm-tools` component declared there, so nothing extra is installed. **Xtensa

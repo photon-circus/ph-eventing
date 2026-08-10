@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Fixed
+- The code-size gate could report a pass without gating anything. Three defects found by automated
+  review, all now demonstrated fixed: a skipped gate exited 0 and `ci.sh` recorded **PASS** despite
+  printing SKIP; a baseline row with no matching measurement printed `MISSING` and still passed;
+  and `--bless` would overwrite the baseline after a partial run, silently deleting the rows it
+  could not measure. The script now exits `2` for "could not run", `ci.sh` maps that to a real
+  `SKIP` row with a summary warning, missing rows fail, and `--bless` refuses after any skip or
+  failure.
 ### Added
 - `static_spsc!` — declarative bring-up for a `static` SPSC buffer. Expands to a `static`, two
   handle type aliases, and an all-or-nothing `take()`. This is the crate's one concession to
