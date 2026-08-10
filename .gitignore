@@ -1,5 +1,8 @@
 # Build output
 /target
+# The code-size probe is its own workspace (see scripts/codesize/Cargo.toml),
+# so it builds into its own target dir that the root-anchored rule above misses.
+/scripts/codesize/target
 **/*.rs.bk
 *.profraw
 

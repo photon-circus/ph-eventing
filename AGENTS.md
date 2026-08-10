@@ -41,6 +41,79 @@ It ships three primitives:
 - Common `Sink`/`Source`/`Link` traits unify producers and consumers across buffer types
 - `forward()` utility bridges any `Source` into any `Sink`
 
+## What this crate optimises for — read before proposing an API
+
+`no_std` and `no_alloc` are the entry fee, not the value. Plenty of crates
+clear that bar. What this one offers beyond it is **behaviour you can predict
+and cost you can measure**, backed by tooling that stops both from regressing.
+
+The developer reaching for this crate is writing firmware where a missed
+deadline or an unexplained reset is the failure. They will trade ergonomics for
+predictability without hesitating. **Assume that trade in every design
+decision.**
+
+### The priority order
+
+When two of these conflict, the higher one wins. This is the whole decision
+procedure:
+
+1. **Predictability.** Bounded, knowable behaviour. No unbounded loops, no
+   hidden allocation, no panics reachable from a hot path (a panic is a reset),
+   bounded interrupt latency, and — just as important — **behaviour the caller
+   can observe**. Data loss that cannot be reported is a predictability
+   failure even when execution time is perfectly bounded.
+2. **Efficiency.** Flash, RAM, and cycles, on *every* supported target.
+   Measured with `scripts/codesize.sh`, never assumed from one build.
+3. **Regression resistance.** A property that is not pinned by `ci.sh`, Miri,
+   Loom, or a code-size row will drift. If a change adds a guarantee, it must
+   also add the thing that keeps it true.
+4. **Ergonomics.** Last. Never bought with any of the above.
+
+### When the right design is ergonomically bad
+
+Do not fix it by compromising 1–3. Reach for **compile-time** tooling instead —
+macros, type-state, `const fn`, builders that vanish after monomorphisation.
+Ergonomics recovered at compile time costs nothing at runtime, which is the
+only currency that matters here. A `macro_rules!` wrapper that makes an awkward
+but optimal API pleasant is strictly better than a pleasant API that allocates,
+panics, or hides a cost.
+
+Ask in this order: *can a macro fix the ergonomics?* → *can documentation fix
+it?* → *is the awkwardness actually load-bearing?* Only then consider changing
+the runtime design.
+
+### Worked examples — the rule applied
+
+These are real decisions, kept because the reasoning is the guidance:
+
+- **`RingBuf::pop` + `Source` was rejected.** Execution is O(1) and bounded, so
+  it passes a naive determinism test. It fails rule 1 anyway: `push` still
+  overwrites, so the type would advertise `Source` while losing data that
+  `forward` structurally cannot report — no drop counter like `SeqRing`, no
+  backpressure like `EventBuf`. Unreportable loss is unpredictable behaviour.
+- **`try_split()` was rejected on measurement, not taste.** It is unambiguously
+  better ergonomics: one call, one error path. It cost flash on the targets
+  least able to spare it — ESP32-S2 +59% and Cortex-M0+ +43% on the *existing*
+  bring-up path — to save 4–16 bytes on well-provisioned cores. Rule 4 lost to
+  rule 2. Note this was invisible on Cortex-M4, where it looked like a clean
+  win; one target is not evidence.
+- **`const fn new` was accepted** even though its original justification was
+  wrong (`static mut` is a hard error under edition 2024). The feature stands on
+  measurement: the buffer lands in `.bss` on all 11 targets, so it costs no
+  flash, no startup copy, and no init code.
+
+### Known ergonomic debt, and why it is not a design failure
+
+Handles are `Send + !Sync`, and `!Sync` is exactly what makes it sound to move a
+producer into an ISR and a consumer into a task loop. A `static` requires
+`Sync`, so **handles can never live in a `static`** — no constructor design
+changes that. The buffer reaches `.bss` with zero init; the handle setup stays a
+runtime step, permanently.
+
+That is the strongest current candidate for the macro escape hatch above: a
+declarative bring-up macro could hide the boilerplate without adding a single
+runtime instruction. It has not been built.
+
 ## Codebase Structure
 
 ```

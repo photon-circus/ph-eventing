@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Changed
+- **Crate metadata now states what the crate is actually for.** The description led with
+  "stack-allocated ring buffers for no-std embedded targets", which is the entry fee rather than
+  the value — many crates clear that bar. It now leads with determinism and measured cost.
+  `realtime` replaces `embedded` in the keywords (`embedded` is already a category and appears in
+  the description, while nothing signalled the determinism guarantee), and `data-structures` is
+  added to the categories.
+
+### Documentation
+- `AGENTS.md` and `CONTRIBUTING.md` record the design priority order — predictability, then
+  efficiency, then regression resistance, then ergonomics — and the rule that follows from it:
+  when the correct design is awkward, recover the ergonomics at **compile time** (macros,
+  type-state, `const fn`) rather than paying for them at runtime. Includes the worked rejections
+  of `RingBuf::pop`/`Source` and `try_split`, since the reasoning is the guidance.
+
 
 ## 0.1.4 - 2026-08-10
 ### Added

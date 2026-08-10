@@ -19,6 +19,28 @@ Stack-allocated ring buffers for no-std embedded targets.
 
 All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
+## What this optimises for
+
+`no_std` and no-alloc are the entry fee. What this crate offers past that is
+**behaviour you can predict and cost you can measure**:
+
+- **Predictability first.** No unbounded loops, no hidden allocation, no panic
+  reachable from a hot path, and no data loss that cannot be observed — every
+  drop is either reported (`SeqRing`) or prevented (`EventBuf`).
+- **Cost measured on every target, not one.** `scripts/codesize.sh` reports the
+  flash cost of each API shape across 11 targets and 4 ISA families, because a
+  design that wins on Cortex-M4 can cost 40–60% more on Cortex-M0+ or ESP32-S2,
+  where every atomic becomes an interrupt-disable critical section.
+- **Guarantees pinned by tooling.** Loom proves the orderings exhaustively at
+  the modelled size, Miri checks UB on 32-bit and big-endian, and a code-size
+  row keeps a cheap API from quietly becoming expensive.
+
+**Ergonomics is ranked last, deliberately.** If an API here feels more awkward
+than an equivalent `std` type, that is usually a cost being made visible rather
+than hidden. Where the awkwardness is not load-bearing, the fix is compile-time
+tooling that costs nothing at runtime — not a friendlier API that allocates,
+panics, or hides a cost.
+
 ## Features
 - Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
