@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.1.4 - 2026-08-10
+## Unreleased
 ### Documentation
 - `SeqRing`: documented the extra drops that occur at the `u32` sequence wrap. Slots are addressed
   by `(seq - 1) % N` while `push` skips the reserved sequence `0`, so a cycle is `2^32 - 1`
