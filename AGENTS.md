@@ -53,7 +53,9 @@ ph-eventing/
 ├── scripts/
 │   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
 │   ├── miri.sh             # Miri UB/concurrency checks
-│   └── loom.sh             # Loom model checking
+│   ├── loom.sh             # Loom model checking
+│   ├── codesize.sh         # Per-target flash cost across 11 embedded targets
+│   └── codesize/           # no_std probe crate it measures (own workspace)
 ├── build.rs                # guards the mutually exclusive portable-atomic features
 ├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
@@ -388,6 +390,41 @@ regression alarm for untested branches, not evidence of concurrency
 correctness. Miri and Loom are that evidence. Some uncovered lines are
 deliberately hard to reach single-threaded, such as the `EventBuf::len` clamp
 fallback, which needs the consumer to move during every retry.
+
+### Code size across targets
+
+`./scripts/codesize.sh` measures what an API shape costs in flash on every
+target this crate claims to support. It exists because **a design that wins on
+one MCU can lose badly on another**, and measuring one target hides that:
+
+| Architecture | Why it differs |
+|--------------|----------------|
+| Cortex-M0+ / M23 (`thumbv6m`, `thumbv8m.base`) | No native 32-bit atomics. Under portable-atomic every RMW is an interrupt-disable critical section, so an extra RMW costs flash *and* interrupt latency |
+| RISC-V (`riscv32imac`) | `fetch_or`/`swap` are single AMO instructions but `compare_exchange` is an LR/SC retry loop — the opposite cost ordering from ARM, where both are ldrex/strex |
+| Xtensa (ESP32) | Splits code between `.text.<fn>` and `.literal.<fn>`. Counting only `.text` undercounts it — 212 vs 220 bytes for the same function |
+| ESP32-S2 / S3 | Single-core Xtensa **without** the `S32C1I` compare-and-swap, so they need portable-atomic exactly like Cortex-M0+ |
+
+This is not hypothetical. A `try_split` prototype measured 32 bytes *cheaper*
+than two separate calls on Cortex-M3/M4/M7, 28 cheaper on M33, 8 bytes *more
+expensive* on RISC-V, and made the existing two-call path 60 bytes worse on
+Cortex-M0+. It was rejected on that evidence. Measure before concluding.
+
+```bash
+./scripts/codesize.sh              # baseline, 8 upstream targets
+./scripts/codesize.sh split        # include try_split, on branches that have it
+XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
+```
+
+Tooling is what `rust-toolchain.toml` already pins: `llvm-size` comes from the
+`llvm-tools` component declared there, so nothing extra is installed. **Xtensa
+is the exception** — upstream rustc has no Xtensa backend, so those rows need
+the esp-rs fork and `-Zbuild-std=core` (no precompiled `core` ships for them).
+They skip cleanly when it is absent.
+
+The probe in `scripts/codesize/` is deliberately **its own workspace** (empty
+`[workspace]` table in its manifest). Without that, cargo treats it as part of
+this package and the root stops reporting zero dependencies. It is not in the
+`include` allowlist, so it never ships.
 
 ### Model checking (Loom)
 
