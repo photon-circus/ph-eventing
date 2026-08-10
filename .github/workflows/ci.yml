@@ -44,6 +44,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The single job branch protection should require. Everything else is a
+  # dependency of it.
+  #
+  # Requiring the individual jobs instead would mean naming matrix legs like
+  # `embedded (thumbv6m-none-eabi, portable-atomic-unsafe-assume-single-core)`
+  # in repository settings. Change the matrix and the required name no longer
+  # matches anything, so the check never reports and every PR waits forever on
+  # a job that will never run -- a failure mode that looks like GitHub being
+  # broken rather than like a stale setting.
+  #
+  # `if: always()` is load-bearing. Without it this job is skipped when a
+  # dependency fails, a skipped required check never reports, and the PR hangs
+  # instead of showing red.
+  ci:
+    if: always()
+    needs: [fmt, doc, test-msrv, test-stable, clippy, deny, features, embedded]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "One or more CI jobs did not succeed:"
+          echo '${{ toJSON(needs) }}'
+          exit 1
+
   # Cheap and deterministic, so there is no reason for these to be local-only.
   # Without them a green check would sit next to unformatted code or a broken
   # doc link, both of which `scripts/ci.*` rejects.
