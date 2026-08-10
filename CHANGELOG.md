@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Added
+- `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
+  The check is a const assertion, so there is no runtime panic to catch and the case cannot be
+  written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.
+  The expected error code is pinned (`compile_fail,E0080`) so the test cannot pass for the wrong
+  reason. No dev-dependency was added; rustdoc does this natively.
 - `scripts/cycles.sh` now covers all three types, and measures the claim rather than restating it.
   Every `push` is constant with respect to occupancy — `EventBuf` 25/25, `SeqRing` 34/33,
   `RingBuf` 19/20 for empty vs loaded. `SeqRing` lag recovery is **O(1) in the lag**: a consumer
@@ -25,6 +30,14 @@ All notable changes to this project will be documented in this file.
   it would make the esp-rs fork mandatory. The baseline is committable because it is
   host-independent — verified byte-identical on Windows and Linux for the same pinned rustc across
   all eight gated targets.
+
+### Deprecated
+- **`SeqRing::producer` / `consumer` and `EventBuf::producer` / `consumer`**, in favour of the
+  `try_*` variants added in 0.1.4. Scheduled for removal in 0.3.0. On a microcontroller a panic is
+  a reset, and the panic machinery costs flash: a code-size probe shows no panic strings reach the
+  binary when only the `try_*` constructors are used. The shorter, more discoverable name being
+  the hazardous one is the inversion this corrects. The deprecated methods are unchanged and still
+  tested; only the recommendation moves.
 ### Added
 - `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
