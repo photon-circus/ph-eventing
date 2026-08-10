@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
   — which previously needed a `StaticCell` and a runtime init step. A bare `static RingBuf` is of
   little use on its own, since every mutator takes `&mut self`.
 
+- `RingBuf::pop() -> Option<T>` and a `Source` implementation, so `RingBuf` can sit on either side
+  of `forward`. **`push` still overwrites when full**, so this is a drainable window, not a queue:
+  entries lost to overwrite are unreportable — `pop` has no drop counter (unlike `SeqRing`) and no
+  backpressure (unlike `EventBuf`). Prefer it for draining a log you have finished collecting, not
+  for moving data between two live contexts.
+
 ### Changed
 - **Breaking:** `RingBuf::new()` rejects `N == 0` with a const assertion instead of a runtime
   `assert!`. `RingBuf::<u32, 0>::new()` no longer compiles where it previously panicked, and the

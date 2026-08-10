@@ -91,6 +91,30 @@ impl<T: Copy, const N: usize> RingBuf<T, N> {
         }
     }
 
+    /// Remove and return the oldest element, or `None` if empty.
+    ///
+    /// # This does not make `RingBuf` a queue
+    /// [`push`](Self::push) still **overwrites** when the ring is full. Adding
+    /// `pop` gives you a window you can also drain from the front; it does not
+    /// give you delivery. If a producer outruns whoever is popping, entries are
+    /// discarded silently and `pop` has no way to report it — there is no drop
+    /// counter here, unlike [`crate::SeqRing`], and no backpressure, unlike
+    /// [`crate::EventBuf`].
+    ///
+    /// Reach for this to drain a log you have finished collecting. Do not
+    /// reach for it to move data between two contexts that are both live.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == 0 {
+            return None;
+        }
+        let idx = self.index(0);
+        // SAFETY: `len > 0`, so `index(0)` addresses the oldest of the `len`
+        // slots written by `push`.
+        let val = unsafe { self.buf[idx].assume_init() };
+        self.len -= 1;
+        Some(val)
+    }
+
     /// Number of elements currently stored, always in `0..=N`.
     pub fn len(&self) -> usize {
         self.len
@@ -213,6 +237,23 @@ impl<'a, T: Copy, const N: usize> IntoIterator for &'a RingBuf<T, N> {
     }
 }
 
+/// Yields the oldest entry via [`RingBuf::pop`].
+///
+/// # Caution
+/// This makes `RingBuf` satisfy [`Link`](crate::traits::Link), so it can sit on
+/// either side of [`forward`](crate::traits::forward). Be deliberate about the
+/// `Source` side: `RingBuf` overwrites on `push`, so anything a live producer
+/// dropped before `forward` ran is simply gone, and `forward` will report a
+/// clean transfer of whatever survived. Neither the count it returns nor its
+/// `Err` slot can express "and 40 more were lost". Use `SeqRing` when you need
+/// that reported, or `EventBuf` when you need it not to happen.
+impl<T: Copy, const N: usize> crate::traits::Source<T> for RingBuf<T, N> {
+    #[inline]
+    fn try_pop(&mut self) -> Option<T> {
+        self.pop()
+    }
+}
+
 impl<T: Copy, const N: usize> crate::traits::Sink<T> for RingBuf<T, N> {
     type Error = core::convert::Infallible;
 
@@ -317,6 +358,43 @@ mod tests {
     // `#[test]`. The rejection is now enforced by the compiler instead, which
     // is stronger -- but it means nothing in this suite covers it, so the
     // const assertion itself is the only thing keeping N > 0 true.
+
+    #[test]
+    fn pop_returns_oldest_and_survives_wrap() {
+        let mut r = RingBuf::<u32, 3>::new();
+        r.push(1);
+        r.push(2);
+        r.push(3);
+        r.push(4); // overwrites 1; window is 2,3,4
+        assert_eq!(r.pop(), Some(2));
+        assert_eq!(r.len(), 2);
+        assert_eq!(r.get(0), Some(3));
+        assert_eq!(r.latest(), Some(4));
+        assert_eq!(r.pop(), Some(3));
+
+        // push after a pop must resume from the right slot
+        r.push(5);
+        assert_eq!(r.get(0), Some(4));
+        assert_eq!(r.get(1), Some(5));
+        assert_eq!(r.pop(), Some(4));
+        assert_eq!(r.pop(), Some(5));
+        assert_eq!(r.pop(), None);
+        assert!(r.is_empty());
+    }
+
+    /// The documented hazard, pinned as behaviour rather than left as prose:
+    /// overwritten entries are gone and `pop` cannot report them.
+    #[test]
+    fn pop_cannot_report_overwritten_entries() {
+        let mut r = RingBuf::<u32, 2>::new();
+        for i in 0..6 {
+            r.push(i);
+        }
+        // Four entries were discarded; nothing in the API says so.
+        assert_eq!(r.pop(), Some(4));
+        assert_eq!(r.pop(), Some(5));
+        assert_eq!(r.pop(), None);
+    }
 
     #[test]
     fn const_new_works_in_const_context() {

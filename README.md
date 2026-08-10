@@ -131,8 +131,15 @@ assert!(err.is_none());
 | Trait | Role | Implementors |
 |-------|------|--------------|
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
-| `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
+| `Source<T>` | Yield events | `RingBuf`\*, `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+
+\* `RingBuf` is a `Source` via `pop`, but it **overwrites on `push`**. Anything a
+live producer dropped before you drained it is gone, and `forward` will report a
+clean transfer of whatever survived — neither its count nor its `Err` slot can
+say "and 40 more were lost". Use it to drain a log you have finished collecting.
+Use `SeqRing` when drops must be reported, or `EventBuf` when they must not
+happen.
 
 ## Semantics
 
@@ -140,6 +147,7 @@ assert!(err.is_none());
 - Single-owner (`&mut self` to push).
 - `get(i)` returns the `i`-th element where `0` is the oldest.
 - `latest()` returns the most recently pushed element.
+- `pop()` removes and returns the oldest element.
 - `iter()` yields elements oldest → newest.
 - `new()` is a `const fn`; `N == 0` fails at compile time.
 
@@ -243,7 +251,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 59 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 61 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

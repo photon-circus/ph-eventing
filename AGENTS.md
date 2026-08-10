@@ -83,7 +83,7 @@ ph-eventing/
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
-| `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
+| `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` (`RingBuf` too, with a caveat — see below) |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
 
 ### Memory Ordering Strategy (SeqRing)
@@ -462,6 +462,8 @@ cargo test
 - `default_is_new` — Default impl
 - `works_without_default_bound` — `T: Copy` only, no `Default`
 - `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
+- `pop_returns_oldest_and_survives_wrap` — `pop` FIFO, including push-after-pop
+- `pop_cannot_report_overwritten_entries` — pins the documented hazard: overwritten entries are unreportable
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
 
@@ -519,7 +521,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 59 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 61 unit tests + 7 doctests.
 
 ## Code Conventions
 
