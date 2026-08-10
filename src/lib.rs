@@ -165,6 +165,9 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 // the dependency compiles, so a guard in this file would never be reached. A
 // build script does not depend on portable-atomic and runs regardless.
 
+#[macro_use]
+mod macros;
+
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
