@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Documentation (engineering records)
+- Engineering records for the 0.2.0 types touched by the constructor removal:
+  [`records/seq-ring.md`](docs/records/seq-ring.md) — with the seqlock deviation, the wrap
+  extra-drop limitation, and the 115-instruction constant-recovery claim stated in the
+  briefing layer — and [`records/event-buf.md`](docs/records/event-buf.md) — the fully
+  race-free backpressure arm, now also the queued transport of the D3 block composition.
+  `RingBuf` (doc-touched only this cycle) receives its record at its next material touch.
+
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.
