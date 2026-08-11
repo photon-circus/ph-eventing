@@ -3,6 +3,42 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Fixed
+- The code-size gate could report a pass without gating anything. Three defects found by automated
+  review, all now demonstrated fixed: a skipped gate exited 0 and `ci.sh` recorded **PASS** despite
+  printing SKIP; a baseline row with no matching measurement printed `MISSING` and still passed;
+  and `--bless` would overwrite the baseline after a partial run, silently deleting the rows it
+  could not measure. The script now exits `2` for "could not run", `ci.sh` maps that to a real
+  `SKIP` row with a summary warning, missing rows fail, and `--bless` refuses after any skip or
+  failure.
+### Added
+- `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
+  The check is a const assertion, so there is no runtime panic to catch and the case cannot be
+  written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.
+  The expected error code is pinned (`compile_fail,E0080`) so the test cannot pass for the wrong
+  reason. No dev-dependency was added; rustdoc does this natively.
+- `scripts/cycles.sh` — instruction-cost measurement under QEMU, covering the half of the
+  determinism claim that code size cannot reach. `push` costs **25 instructions into an empty
+  buffer and 25 into a nearly-full one**; the rejected push is 19, `pop` 20 and 14, `len()` 14.
+  Constant with respect to occupancy and `N`, which is the property the crate advertises and had
+  never actually measured. Requires `qemu-system-arm` (a system package, not supplied by
+  `rust-toolchain.toml`); skips cleanly without it.
+### Added
+- Code-size baseline gate. `scripts/codesize.sh` compares against a committed `baseline.tsv` and
+  `ci.sh` runs it as a check, so flash cost is pinned rather than merely measurable. Growth beyond
+  +16 bytes fails; shrinkage only reports; a toolchain mismatch `SKIP`s rather than failing, since
+  comparing codegen across compilers is noise. Xtensa is measured but never gated, because gating
+  it would make the esp-rs fork mandatory. The baseline is committable because it is
+  host-independent — verified byte-identical on Windows and Linux for the same pinned rustc across
+  all eight gated targets.
+
+### Deprecated
+- **`SeqRing::producer` / `consumer` and `EventBuf::producer` / `consumer`**, in favour of the
+  `try_*` variants added in 0.1.4. Scheduled for removal in 0.3.0. On a microcontroller a panic is
+  a reset, and the panic machinery costs flash: a code-size probe shows no panic strings reach the
+  binary when only the `try_*` constructors are used. The shorter, more discoverable name being
+  the hazardous one is the inversion this corrects. The deprecated methods are unchanged and still
+  tested; only the recommendation moves.
 ### Added
 - `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain

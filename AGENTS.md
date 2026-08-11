@@ -53,7 +53,9 @@ ph-eventing/
 ├── scripts/
 │   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
 │   ├── miri.sh             # Miri UB/concurrency checks
-│   └── loom.sh             # Loom model checking
+│   ├── loom.sh             # Loom model checking
+│   ├── codesize.sh         # Per-target flash cost across 11 embedded targets
+│   └── codesize/           # no_std probe crate it measures (own workspace)
 ├── build.rs                # guards the mutually exclusive portable-atomic features
 ├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
@@ -477,6 +479,125 @@ correctness. Miri and Loom are that evidence. Some uncovered lines are
 deliberately hard to reach single-threaded, such as the `EventBuf::len` clamp
 fallback, which needs the consumer to move during every retry.
 
+### Code size across targets
+
+`./scripts/codesize.sh` measures what an API shape costs in flash on every
+target this crate claims to support. It exists because **a design that wins on
+one MCU can lose badly on another**, and measuring one target hides that:
+
+| Architecture | Why it differs |
+|--------------|----------------|
+| Cortex-M0+ / M23 (`thumbv6m`, `thumbv8m.base`) | No native 32-bit atomics. Under portable-atomic every RMW is an interrupt-disable critical section, so an extra RMW costs flash *and* interrupt latency |
+| RISC-V (`riscv32imac`) | `fetch_or`/`swap` are single AMO instructions but `compare_exchange` is an LR/SC retry loop — the opposite cost ordering from ARM, where both are ldrex/strex |
+| Xtensa (ESP32) | Splits code between `.text.<fn>` and `.literal.<fn>`. Counting only `.text` undercounts it — 212 vs 220 bytes for the same function |
+| ESP32-S2 / S3 | Single-core Xtensa **without** the `S32C1I` compare-and-swap, so they need portable-atomic exactly like Cortex-M0+ |
+
+This is not hypothetical. A `try_split` prototype measured 32 bytes *cheaper*
+than two separate calls on Cortex-M3/M4/M7, 28 cheaper on M33, 8 bytes *more
+expensive* on RISC-V, and made the existing two-call path 60 bytes worse on
+Cortex-M0+. It was rejected on that evidence. Measure before concluding.
+
+`ci.sh` runs this as a gate. The baseline lives in
+`scripts/codesize/baseline.tsv` and the rules are deliberately asymmetric:
+
+- **Growth beyond +16 bytes on any row fails.** Absolute, not a percentage — at
+  100-200 bytes a percentage is noise, and the regression this exists to catch
+  was +60 bytes on Cortex-M0+ and +78 on ESP32-S2.
+- **Shrinkage never fails.** It is reported, with a nudge to re-bless.
+- **A `SKIP` is reported as `SKIP`, never as `PASS`.** The script exits `2` for
+  "could not run" and `ci.sh` maps that to a `SKIP` row plus a warning in the
+  summary. Exiting 0 on a skip is how a gate silently stops gating.
+- **A baseline row with no measurement fails the gate.** A row that is not
+  measured cannot regress, so treating it as a pass is a hole, not a success.
+- **`--bless` refuses to write after any skipped or failed target.** A partial
+  baseline silently drops rows, and a dropped row can never regress again.
+- **A toolchain mismatch `SKIP`s rather than fails.** The baseline records the
+  rustc commit hash; comparing codegen across compilers is noise, not signal.
+  A `SKIP` is not a pass — see RELEASING.md.
+- **Xtensa is measured but never gated.** Gating it would make the esp-rs fork
+  mandatory for every contributor.
+
+The baseline is committed because it is **host-independent**: verified
+byte-identical on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` for
+the same pinned rustc, across all eight gated targets. That is what
+`rust-toolchain.toml` pinning 1.92.0 buys, and it is why this gate is workable
+here when it would be flaky in a crate that floats its toolchain. **Re-verify
+that property if the pin ever moves.**
+
+Re-bless deliberately, never reflexively — the diff is the review:
+
+```bash
+./scripts/codesize.sh --bless
+```
+
+```bash
+./scripts/codesize.sh              # baseline, 8 upstream targets
+./scripts/codesize.sh split        # include try_split, on branches that have it
+XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
+```
+
+All eight gated targets are pinned in `rust-toolchain.toml`, including
+`thumbv8m.main-none-eabi` and `thumbv8m.base-none-eabi`, which the embedded
+`cargo check` matrix does not use. Without them a fresh checkout silently skips
+two of the eight rows while still printing a table, which reads as a complete
+matrix.
+
+Tooling is what `rust-toolchain.toml` already pins: `llvm-size` comes from the
+`llvm-tools` component declared there, so nothing extra is installed. **Xtensa
+is the exception** — upstream rustc has no Xtensa backend, so those rows need
+the esp-rs fork and `-Zbuild-std=core` (no precompiled `core` ships for them).
+They skip cleanly when it is absent.
+
+The probe in `scripts/codesize/` is deliberately **its own workspace** (empty
+`[workspace]` table in its manifest). Without that, cargo treats it as part of
+this package and the root stops reporting zero dependencies. It is not in the
+`include` allowlist, so it never ships.
+
+### Instruction cost (QEMU)
+
+Code size is a proxy; it says nothing about *time*. `./scripts/cycles.sh`
+measures the other half of the determinism claim — that the hot paths cost a
+**bounded, knowable number of instructions regardless of buffer state**:
+
+| Operation | Instructions |
+|---|---|
+| `push` into empty | 25 |
+| `push` into 7-of-8 full | 25 |
+| `push` into full (rejected) | 19 |
+| `pop` from full | 20 |
+| `pop` from empty | 14 |
+| `len()` | 14 |
+
+**The first two rows are the result.** `push` costs the same whether the buffer
+is empty or nearly full — the cost does not scale with `N` or with occupancy.
+The rejected push is *cheaper*, not more expensive, because backpressure is an
+early return. Nothing here is a loop over data.
+
+**How it measures, and why not a cycle counter.** QEMU models neither
+`DWT_CYCCNT` nor SysTick on `lm3s6965evb` or `mps2-an385` — both read zero,
+verified on QEMU 10.2 — and Ubuntu's `qemu-system-arm` ships no TCG plugins.
+What works without either is QEMU's own execution trace:
+`-accel tcg,one-insn-per-tb=on -d exec` emits one line per retired instruction.
+The probe calls a never-inlined `mark()` between operations; the script finds
+its address with `llvm-nm` and counts instructions between hits, subtracting the
+marker cost measured from two adjacent marks.
+
+`-icount shift=0` pins one instruction to one clock tick, so results do not
+depend on host speed. **Verified deterministic**: two consecutive runs are
+byte-identical.
+
+**This one needs a system package.** Unlike the rest of the tooling,
+`rust-toolchain.toml` does not supply QEMU — `sudo apt-get install
+qemu-system-arm`. The script `SKIP`s cleanly without it, and a SKIP is not a
+pass.
+
+Two traps if you edit the probe:
+- Build it **from inside `scripts/cycles/`**. Cargo resolves `.cargo/config.toml`
+  from the working directory, not from `--manifest-path`; building from the repo
+  root silently targets the host and fails to link against libc.
+- `mark()` must stay `#[inline(never)]` with a `nop` body, or it is folded away
+  and the segmentation collapses.
+
 ### Model checking (Loom)
 
 Miri samples schedules; Loom is exhaustive. It enumerates every legal execution
@@ -607,7 +728,18 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 7 doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 8 doctests, plus 2 `compile_fail` doctests.
+
+**Compile-fail coverage.** `N == 0` is a *const* assertion on all three types,
+so there is no runtime panic to catch and no way to write the negative case as
+a `#[test]` — `zero_capacity_panics` had to be deleted when the assertion moved
+to compile time. The gap is closed with `compile_fail` doctests on each `new`,
+**with the error code pinned** (`compile_fail,E0080`). The code matters: a bare
+`compile_fail` also passes when the snippet fails for an unrelated reason, such
+as a typo in the type name, so it would silently stop testing what it claims to.
+This needs no dev-dependency — `trybuild` was considered and rejected, since
+rustdoc already does it and the crate's dependency budget is worth more than
+the nicer output.
 
 ## Code Conventions
 
@@ -673,6 +805,11 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
+  and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
+  reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because
+  the old API is still public and still needs coverage — do **not** move that allow to the crate
+  root, which would silence the warning where it should bite
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision

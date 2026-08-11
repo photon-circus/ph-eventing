@@ -73,8 +73,8 @@ the consumer reports drops when it lags behind by more than `N`.
 use ph_eventing::SeqRing;
 
 let ring = SeqRing::<u32, 64>::new();
-let producer = ring.producer();
-let mut consumer = ring.consumer();
+let producer = ring.try_producer().expect("no producer taken yet");
+let mut consumer = ring.try_consumer().expect("no consumer taken yet");
 
 producer.push(123);
 assert_eq!(consumer.poll_one_value(), Some((1, 123)));
@@ -92,8 +92,8 @@ silently lost.
 use ph_eventing::EventBuf;
 
 let buf = EventBuf::<u32, 2>::new();
-let producer = buf.producer();
-let consumer = buf.consumer();
+let producer = buf.try_producer().expect("no producer taken yet");
+let consumer = buf.try_consumer().expect("no consumer taken yet");
 
 assert!(producer.push(1).is_ok());
 assert!(producer.push(2).is_ok());
@@ -115,13 +115,13 @@ use ph_eventing::traits::{Source, Sink, forward};
 
 // bridge a SeqRing producer → EventBuf consumer
 let seq = SeqRing::<u32, 8>::new();
-let sp = seq.producer();
-let mut sc = seq.consumer();
+let sp = seq.try_producer().expect("no producer taken yet");
+let mut sc = seq.try_consumer().expect("no consumer taken yet");
 
 sp.push(1); sp.push(2);
 
 let eb = EventBuf::<u32, 8>::new();
-let mut ep = eb.producer();
+let mut ep = eb.try_producer().expect("no producer taken yet");
 
 let (n, err) = forward(&mut sc, &mut ep, 10);
 assert_eq!(n, 2);
@@ -165,8 +165,10 @@ assert!(err.is_none());
 ## Safety and Concurrency
 - `RingBuf` is a plain struct with no interior mutability — standard Rust borrow rules apply.
 - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
-  active. `producer()`/`consumer()` will panic if called while another handle of the same kind
-  is active. Using unsafe to bypass these constraints (or sharing handles concurrently) is
+  active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
+  on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
+  The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
+  0.3.0. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
   undefined behavior.
 - `T: Copy` is required by all types to avoid allocation and return values by copy.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
@@ -242,7 +244,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 62 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 62 unit + 10 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

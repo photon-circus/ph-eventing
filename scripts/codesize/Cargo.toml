@@ -1,0 +1,36 @@
+# Code-size probe for the embedded targets. Not part of the published crate and
+# not a workspace member of it.
+#
+# The empty `[workspace]` table below is load-bearing: without it, cargo treats
+# this manifest as belonging to the parent package's directory tree and errors
+# with "current package believes it's in a workspace when it's not". It also
+# keeps `cargo test` / `cargo tree` at the repo root from ever seeing this
+# crate, which matters because the root must keep reporting zero dependencies.
+[workspace]
+
+[package]
+name = "ph-eventing-codesize"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+# staticlib, not bin: the bare-metal targets have no entry point or linker
+# script here, and section sizes are what we are measuring anyway.
+crate-type = ["staticlib"]
+
+[dependencies]
+ph-eventing = { path = "../.." }
+
+[features]
+# Cortex-M0/M0+ and other targets without native 32-bit atomics.
+cm0 = ["ph-eventing/portable-atomic-unsafe-assume-single-core"]
+# Enable on a branch that has `try_split`; absent on release branches.
+split = []
+
+[profile.release]
+# Match what an embedded consumer would realistically ship.
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
