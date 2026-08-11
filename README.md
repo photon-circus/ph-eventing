@@ -116,8 +116,14 @@ assert_eq!(consumer.poll_one_value(), Some((1, 123)));
 A three-slot SPSC snapshot channel for state where freshness dominates FIFO
 delivery. Publishing never rejects; it reports whether an unread value was
 replaced. Taking returns the newest complete value with generation and skipped
-counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap;
-beyond a full cycle the wrapped `u32` count is only an approximation. The
+counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap
+span; beyond it the count **under-counts, and a gap of exactly one or more
+whole cycles reports `skipped = 0`** — silence there is not evidence that
+nothing was lost. The boundary is a rate × take-interval property (~49.7
+days between takes at 1 kHz publishing, ~72 minutes at 1 MHz); if the
+count itself is your requirement, carry a wider producer-assigned sequence
+in `T`, and if consumer liveness is, use a watchdog — the
+`LatestItem::skipped` docs carry the full disclosure. The
 consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
 is not silently discarded. `T` may be one sample or a complete block. Empty
 polls use an Acquire load rather than an atomic RMW; pending polls transfer
