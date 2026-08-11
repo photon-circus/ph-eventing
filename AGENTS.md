@@ -698,7 +698,7 @@ Cross-environment diffs of ±1 are noise; compare inside the image.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
-| `CountedSignal::increment` / `take_count` | 8 / 7 (pre-CAS; re-measure) | | |
+| `CountedSignal::increment` / `take_count` | 8 / 7 | | |
 
 Three results carry the argument:
 

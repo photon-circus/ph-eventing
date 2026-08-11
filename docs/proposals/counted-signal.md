@@ -151,20 +151,21 @@ The M0/M23 rows use the existing portable-atomic single-core probe backend.
 Versus the pre-fix load-and-skip path this is a deliberate +16…+36 B growth
 on gated rows: exactness after a completed take requires the confirming CAS.
 
-The cycle probe was previously measured in the pinned reference environment via
-`./scripts/verify.sh cycles` for the load-and-skip path:
+Re-measured in the pinned reference environment via `./scripts/verify.sh cycles`
+after the sentinel-CAS fix. The probe brackets the common below-`MAX` path
+(`load` + `fetch_add`) and a `swap(0)` take — the confirming CAS only runs when
+the producer observes `MAX`, so these rows stay the hot-path cost:
 
 | Cortex-M3 hot path | Retired guest instructions |
 |---|---:|
-| `increment` | 8 (pre-fix; re-measure after sentinel CAS) |
+| `increment` | 8 |
 | `take_count` | 7 |
 
 Environment stamp: rustc 1.92.0 (`ded5c06cf`), LLVM 21.1.3, QEMU 10.0.11
 (Debian trixie), release `opt-level = "z"` with LTO. The runner subtracts its
 marker overhead and uses one guest instruction per translation block with
 `-icount shift=0`; these are deterministic instruction/tick counts for that
-environment, not a universal microarchitectural cycle claim. Re-run cycles in
-the reference image before treating the 8/7 cells as current.
+environment, not a universal microarchitectural cycle claim.
 
 ## 3.2 Shared handle decision
 

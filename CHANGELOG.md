@@ -11,7 +11,9 @@ All notable changes to this project will be documented in this file.
   longer lose the occurrence under Relaxed observation (contract T3/A1). Loom
   litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
 ### Documentation
-- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (re-measure after CAS), and the H closure record.
+- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 post-CAS), and the H closure record.
+- CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-CAS
+  fix (`./scripts/verify.sh cycles`, QEMU 10.0.11); pending-remeasure markers cleared.
 - CountedSignal contract B1: at most one contention retry from the sole
   consumer reset; proposal §3.1 linearization claim corrected; README Sink/Source
   claim qualified to payload-buffer handles.
@@ -22,7 +24,8 @@ All notable changes to this project will be documented in this file.
   interleaving, and the post-take stale-`MAX` litmus; its frozen contract maps
   citable clauses to unit, threaded, Loom, Miri, code-size, and QEMU evidence.
   Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
-  handle. Cortex-M3 instruction counts require re-measure after the CAS path.
+  handle. Cortex-M3 instruction counts remain 8 / 7 after the CAS path
+  (`./scripts/verify.sh cycles`).
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.

@@ -7,7 +7,7 @@
 - **Normative sources:** [contract](../proposals/counted-signal-contract.md)
   (clause IDs cited below) · [proposal](../proposals/counted-signal.md) ·
   measurements inline in proposal §3.1 (eight-target code size; pinned
-  Cortex-M3 cycles via `./scripts/verify.sh cycles` — re-measure after CAS).
+  Cortex-M3 cycles via `./scripts/verify.sh cycles`, confirmed 8 / 7 post-CAS).
 
 ## 1. Value statement
 
@@ -72,7 +72,7 @@ IDs in parentheses; the clauses are the normative statements.
 | Saturates at `u32::MAX`, never wraps; sticky until take (I2–I3, T2, A2–A3) | `saturates_instead_of_wrapping`; Loom `counted_signal_saturation_boundary_is_linearizable` | Proven |
 | Concurrent increment belongs to exactly one take interval (T1–T3, A1) | Loom `counted_signal_take_partitions_increments`; threaded take stress | Proven |
 | Post-take increment after saturated take is not dropped by a stale MAX observe (T3, A1) | Loom `counted_signal_post_take_increment_observes_reset_epoch` (Relaxed gate only) | Proven |
-| Wait-free bounded hot paths: load + `fetch_add`, sentinel CAS + ≤1 follow-up `fetch_add`; `swap(0)` take (B1–B2) | Source review; eight-target code size blessed after intentional +16…+36 B growth; Cortex-M3 cycles pending re-measure (was 8 / 7 pre-fix) | Measured (cycles pending) |
+| Wait-free bounded hot paths: load + `fetch_add`, sentinel CAS + ≤1 follow-up `fetch_add`; `swap(0)` take (B1–B2) | Source review; eight-target code size blessed after intentional +16…+36 B growth; Cortex-M3 cycles re-measured post-CAS at 8 / 7 (`./scripts/verify.sh cycles`) | Measured |
 | No panic reachable from hot paths (B3) | Source review; normal, Miri, Loom, and embedded-target executions | Proven |
 | Sole-role exclusive handles; reacquisition continues state (H1, H3) | `handles_are_exclusive_and_reusable_after_drop` | Proven |
 | Handles are `Send + !Sync` (H2) | `handles_are_send`; compile-fail doctests pin `!Sync` on both roles | Pinned |
@@ -83,7 +83,8 @@ Full CI for the lane (`0a22ada` admission package; `f26d4c3` H
 finalization): complete pinned `./scripts/verify.sh` matrix with zero
 skips — unit tests, 11 doctests, 5 compile-fail, coverage, Miri host
 and proxy targets, Loom models, eight-target code size, embedded
-checks, QEMU cycles. Re-run after the MAX short-circuit fix.
+checks, QEMU cycles. Cycles alone re-confirmed post-fix at 8 / 7;
+full matrix not re-run for this cycles-doc follow-up.
 
 ## 4. The record
 
@@ -131,7 +132,7 @@ Contract clause IDs (I/T/A/B/H/X) are load-bearing for tests and models
 
 **Where the numbers live:** proposal §3.1 (eight-target `increment` /
 `take_count` code-size table; pinned Cortex-M3 instruction regions under
-rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — re-measure after
-CAS); contract §9 evidence map; tracking: issue #30, PR #33; completion
+rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — confirmed 8 / 7
+post-CAS); contract §9 evidence map; tracking: issue #30, PR #33; completion
 commits `0a22ada` (clause-numbered contract + pinned costs) and
 `f26d4c3` (H closed, promotion finalized).
