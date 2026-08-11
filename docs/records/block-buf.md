@@ -1,10 +1,12 @@
 # BlockBuf — engineering record
 
-- **Status:** candidate, EVALUATION READY — complete development package on
-  `candidate/block-buf` (draft PR #34); D3 type-identity confirmed
-  (composition, no `LatestBlockBuf`); **promotion waits on cycle decision
-  P** (named instruction/time budget and RAM envelope); SlotPool path
-  (S) gated behind P.
+- **Status:** candidate, DECISION-COMPLETE — complete development package
+  on `candidate/block-buf` (draft PR #34); D3 type-identity confirmed
+  (composition, no `LatestBlockBuf`); **cycle decision P closed as Copy
+  composition** (2026-08-11, planning-record P/S closure) with the
+  per-shape measured rows as the budget statement; **S closed as
+  deferred** (SlotPool evidence banked, adopter-gated trigger).
+  Promotion to PROPOSED awaits the #34 acceptance review.
 - **Normative sources:** [proposal](../proposals/block-buf.md)
   (§5–§9 cited below) · LatestBuf
   [contract §9 D3](../proposals/latest-buf-contract.md) ·
@@ -26,8 +28,9 @@ preserve the partial builder and return the rejected sample; teardown of
 an incomplete builder publishes nothing. It refuses to be: a separate
 `LatestBlockBuf`/`QueuedBlockBuf`/`DropBlockBuf` type family, a
 timestamp authority (stamps live inside `T`), a free constant-cost
-publication path across block shapes, or a SlotPool grant transport until
-cycle decision P authorizes that branch.
+publication path across block shapes, or a SlotPool grant transport —
+cycle decision P closed as Copy composition, and the grant branch is
+deferred behind S's adopter-gated trigger.
 
 ## 2. Risks and integration concerns
 
@@ -64,13 +67,21 @@ section and contract IDs in parentheses; those texts are normative.
   unobtainable by design. A discontinuity returns the rejected sample
   without mutating the partial builder; the caller must `clear` or
   retry explicitly (F3).
-- **Copy composition vs SlotPool is undecided (P open; S gated).** The
-  publication matrix (`bc54a9a`) supplies the numbers but does **not**
-  close P: no named ISR/task instruction/time budget or RAM envelope
-  exists in the record. S (representative BlockBuf-over-SlotPool
-  integration) remains unauthorized until P chooses. Treating Copy as
-  selected, or SlotPool as selected, would invent a decision the
-  maintainer deferred.
+- **Copy is the closed publication foundation (P, 2026-08-11); the one
+  unserved corner is registered, not hidden.** The budget posture is
+  deliberate: no library-wide threshold — the per-shape rows above *are*
+  the budget statement, and adopters own the arithmetic for their shape.
+  The measured context where the copy plausibly breaks a real budget —
+  large blocks × slow core × ISR-context publication × high window rate
+  (~180 µs per 2 KB publication on a 48 MHz M0-class part) — has no
+  named adopter and exits through S's trigger: a measured budget breach
+  at a supported shape, or a direct-to-granted-slot (DMA-class)
+  requirement, reopens the SlotPool branch from its banked evidence.
+- **The double-copy hazard is real for DMA integrations (P
+  obligation).** DMA already wrote the bytes once; builder-then-publish
+  crosses them twice unless the builder is the DMA target or publication
+  moves to task context. The block-payload docs owe this guidance at
+  promotion — integrators must not discover the second copy.
 - **Drop-new is an action, not a type (§5.1).** There is no
   `DropBlockBuf`; discarding a newly completed block is what the caller
   does with `Err(block)`. Loss after completion is reported by the
@@ -97,8 +108,8 @@ models.
 
 ## 4. The record
 
-**Decision history (D3 closed 2026-08-11; P deferred — canonical text in
-contract §9 and proposal §5–§9):**
+**Decision history (D3, P, and S all closed 2026-08-11 — canonical text
+in contract §9, proposal §5–§9, and the planning record's P/S closure):**
 
 - **D3 — payload-agnostic `LatestBuf<T>`; blocks are payloads
   (composition).** Closed jointly with the LatestBuf lane: latest =
@@ -117,21 +128,28 @@ contract §9 and proposal §5–§9):**
   carries `[T; N]` plus inclusive first/last sequences; zero-stamp
   applications pay zero timestamp overhead. The seed sketch's
   `Block<T, Stamp, N>` parameterisation is superseded.
-- **P — Copy composition vs SlotPool: open.** Measurement package
-  complete (`bc54a9a` publication matrix; joint D3 matrix `8593b4a`);
-  maintainer deferred naming the ISR/task instruction/time budget and
-  RAM envelope until a holistic reading of the cycle. This record does
-  **not** select Copy and does **not** authorize SlotPool.
-- **S — SlotPool path: gated behind P.** No representative
-  BlockBuf-over-SlotPool integration is authorized while P is unset;
-  choosing a library-wide `N` threshold in lieu of an application budget
-  was explicitly refused (§6.1).
+- **P — Copy composition: CLOSED (maintainer, 2026-08-11).** The
+  measurement package (`bc54a9a` publication matrix; joint D3 matrix
+  `8593b4a`) was read against the integration scoping on #26, and the
+  budget posture is deliberate: no library-wide threshold — the
+  per-shape rows are the budget statement, and adopters own the
+  arithmetic. All nine shapes become release baselines at promotion via
+  the deliberate `--bless`; the double-copy DMA guidance is a bound
+  documentation obligation. The one measured corner Copy leaves
+  unserved (large-block × slow-core × ISR × high-rate) has no named
+  adopter and exits through S's trigger.
+- **S — SlotPool path: CLOSED as DEFERRED (maintainer, 2026-08-11).**
+  Not rejected: full evaluation evidence banked on
+  `candidate/slot-pool`, draft PR #32 closed as deferred, branch
+  archive-tagged. Reopening trigger (any one): a measured budget breach
+  at a supported shape; a direct-to-granted-slot requirement
+  composition cannot satisfy; a standalone zero-copy adopter. On
+  trigger, BlockBuf-over-SlotPool is the demonstration path.
 
 **Review history:** D3 closure and the composition identity were
 confirmed in the LatestBuf contract arbitration (PR #37) as the
-convergent answer both coupled lanes reached independently. BlockBuf's
-remaining gate is not further type-identity review — it is the budget
-decision P.
+convergent answer both coupled lanes reached independently. With P and S
+closed, BlockBuf has no remaining gate but the #34 acceptance review.
 
 **Where the numbers live:** `block-buf-measurements.md` (publication
 matrix `bc54a9a`: 18 cycle rows, 8-target flash); joint D3 matrix on
