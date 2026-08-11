@@ -126,7 +126,9 @@ in contract §8 and proposal §3.1–§3.2):**
 
 **Review history:** issue #30 closed with the lane PROPOSED; PR #33
 carries the admission package. Bugbot high finding (stale MAX load drops
-increments) agreed and fixed with the CAS path + Loom litmus. Codex
+increments) agreed and fixed with a sentinel re-read + Loom litmus — first
+as a bounded CAS, then (Codex P1) as the no-op RMW after review showed the
+CAS lowers to an unbounded LR/SC loop on RISC-V. Codex
 P2 (qualify README Sink/Source claim) agreed. Cross-lane handle
 decision recorded against #29; cycle decision matrix remains #26.
 Contract clause IDs (I/T/A/B/H/X) are load-bearing for tests and models
@@ -135,6 +137,7 @@ Contract clause IDs (I/T/A/B/H/X) are load-bearing for tests and models
 **Where the numbers live:** proposal §3.1 (eight-target `increment` /
 `take_count` code-size table; pinned Cortex-M3 instruction regions under
 rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — confirmed 8 / 7
-post-CAS); contract §9 evidence map; tracking: issue #30, PR #33; completion
+after the sentinel-RMW fix); contract §9 evidence map; tracking: issue #30,
+PR #33; completion
 commits `0a22ada` (clause-numbered contract + pinned costs) and
 `f26d4c3` (H closed, promotion finalized).

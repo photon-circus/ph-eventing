@@ -119,11 +119,12 @@ The accepted answer shared with EventFlags is H1–H4: sole-role
 `Send + !Sync` handles with `&self` hot-path operations and state resident in
 the signal. For CountedSignal, this is a correctness choice rather than an API
 style preference. The bounded candidate implementation confirms saturation with
-a compare-exchange and advances below the sentinel the same way. Sole-producer
-ownership means the consumer is the only possible intervening writer and can
-only reset the state, so there is at most one contention retry and the RMW
-cannot wrap; a second raiser would invalidate the no-wrap proof and the current
-evidence for B1.
+a no-op RMW re-read of the count — an RMW observes the latest value in
+modification order, so a stale `MAX` cannot be mistaken for saturation and no
+retry is ever needed. Sole-producer ownership means the consumer is the only
+possible intervening writer and can only reset the state, so the follow-up
+`fetch_add` cannot wrap; a second raiser would invalidate the no-wrap proof and
+the current evidence for B1.
 
 The independent LatestBuf A.3 decision currently recommends the same handle
 shape. This closes H for EventFlags and CountedSignal only. Whether the
@@ -138,13 +139,13 @@ a separate maintainer decision on issue #26.
 | I2–I3, T2, A2–A3 | `saturates_instead_of_wrapping`; Loom's `counted_signal_saturation_boundary_is_linearizable` model |
 | T1–T3, A1 | Loom's `counted_signal_take_partitions_increments` model; threaded take stress |
 | T3, A1 (post-take / stale MAX) | Loom's `counted_signal_post_take_increment_observes_reset_epoch` model (seeded at `MAX`; Relaxed gate only) |
-| B1–B2 | Source review (≤1 contention retry under H1); eight-target gated code-size rows blessed post-fix (46–76 B `increment`); Cortex-M3 cycles re-measured post-CAS at 8 / 7 (`./scripts/verify.sh cycles`, QEMU 10.0.11) |
+| B1–B2 | Source review (fixed sequence under H1 — no compare-exchange, no retry); eight-target gated code-size rows blessed post-fix (46–76 B `increment`); Cortex-M3 cycles re-measured after the sentinel-RMW fix at 8 / 7 (`./scripts/verify.sh cycles`, QEMU 10.0.11) |
 | B3 | Source review plus normal, Miri, Loom, and embedded-target executions of both hot paths |
 | H1, H3 | `handles_are_exclusive_and_reusable_after_drop`, including state continuation after reacquisition |
 | H2 | `handles_are_send`; producer and consumer compile-fail doctests pin `!Sync` |
 | H4 | `const_new_works_in_static_context` |
 
-The candidate's relaxed atomic orderings and its sole-producer CAS proof are
+The candidate's relaxed atomic orderings and its sole-producer no-op-RMW proof are
 implementation evidence for this abstract contract. They remain in
 [`counted-signal.md`](counted-signal.md) §3.1 and the module documentation,
 not in the semantic clauses above.

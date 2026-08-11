@@ -5,18 +5,21 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 ### Fixed
 - `CountedSignal::increment`: replace the load-and-skip-on-`MAX` short-circuit
-  with a sole-producer–bounded CAS that treats observed `MAX` as maybe-stale
-  (`MAX → MAX` confirms saturation; failure retries once into the post-take
-  epoch). A completed `take_count` followed by a later `increment` can no
+  with a no-op RMW (`fetch_or(0)`) re-read that treats observed `MAX` as
+  maybe-stale — an RMW observes the latest value in modification order, so a
+  `MAX` re-read confirms saturation and anything else proceeds into the
+  post-take epoch, with no compare-exchange and no LR/SC retry loop on
+  RISC-V. A completed `take_count` followed by a later `increment` can no
   longer lose the occurrence under Relaxed observation (contract T3/A1). Loom
   litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
 ### Documentation
-- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 post-CAS), and the H closure record.
-- CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-CAS
+- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 after the sentinel-RMW fix), and the H closure record.
+- CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-RMW
   fix (`./scripts/verify.sh cycles`, QEMU 10.0.11); pending-remeasure markers cleared.
-- CountedSignal contract B1: at most one contention retry from the sole
-  consumer reset; proposal §3.1 linearization claim corrected; README Sink/Source
-  claim qualified to payload-buffer handles.
+- CountedSignal contract B1: fixed instruction sequence with a no-op RMW
+  sentinel re-read — no compare-exchange, no retry; proposal §3.1
+  linearization claim corrected; README Sink/Source claim qualified to
+  payload-buffer handles.
 ### Added
 - `CountedSignal`: a payload-free SPSC counter with a bounded
   `increment`, atomic `take_count`, exact `u32` saturation, and observable
@@ -24,8 +27,8 @@ All notable changes to this project will be documented in this file.
   interleaving, and the post-take stale-`MAX` litmus; its frozen contract maps
   citable clauses to unit, threaded, Loom, Miri, code-size, and QEMU evidence.
   Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
-  handle. Cortex-M3 instruction counts remain 8 / 7 after the CAS path
-  (`./scripts/verify.sh cycles`).
+  handle. Cortex-M3 instruction counts remain 8 / 7 after the sentinel-RMW
+  path (`./scripts/verify.sh cycles`).
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.
