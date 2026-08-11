@@ -56,7 +56,13 @@ if ! command -v qemu-system-arm >/dev/null 2>&1; then
     printf '  Debian/Ubuntu:  sudo apt-get install qemu-system-arm\n'
     printf '  or use the reference image:  ./scripts/verify.sh cycles\n'
     printf 'A SKIP is not a pass -- see RELEASING.md.\n'
-    exit 0
+    # Exit 2 for "could not run", same convention as codesize.sh: a SKIP must
+    # be distinguishable from a pass, or a wrapper that only checks the exit
+    # code -- scripts/verify.sh's loop is exactly that -- reports the matrix
+    # as passed with a measurement missing. Inside the reference image this
+    # branch cannot fire (QEMU is baked in and guarded), so there a 2 means
+    # the environment itself is broken.
+    exit 2
 fi
 
 # Counts are stable per QEMU build, not across builds, so every run records
@@ -65,7 +71,8 @@ printf '==> %s\n' "$(qemu-system-arm --version | head -1)"
 
 if ! rustup target list --installed 2>/dev/null | grep -qx thumbv7m-none-eabi; then
     printf 'SKIP: rustup target add thumbv7m-none-eabi\n'
-    exit 0
+    printf 'A SKIP is not a pass -- see RELEASING.md.\n'
+    exit 2
 fi
 
 SYSROOT="$(rustc --print sysroot)" || exit 1
