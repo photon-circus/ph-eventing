@@ -79,10 +79,14 @@ section and contract IDs in parentheses; those texts are normative.
   requirement, reopens the SlotPool branch from its banked evidence.
 - **The double-copy hazard is real for DMA integrations (P
   obligation).** DMA already wrote the bytes once; builder-then-publish
-  crosses them twice unless the builder is the DMA target or publication
-  moves to task context. Landed: the `src/block.rs` module docs carry
-  this guidance (with the RAM, inversion, and rejection-cost
-  disclosures), so integrators choose rather than discover.
+  crosses them twice, and the builder cannot be the DMA target — its
+  storage is deliberately private, with no address or writable-slice
+  API. The choices are to budget both copies or to move publication to
+  task context; a direct-to-granted-slot fill API is exactly the
+  registered reopening condition of cycle decision S. Landed: the
+  `src/block.rs` module docs carry this guidance (with the RAM,
+  inversion, and rejection-cost disclosures), so integrators choose
+  rather than discover.
 - **Drop-new is an action, not a type (§5.1).** There is no
   `DropBlockBuf`; discarding a newly completed block is what the caller
   does with `Err(block)`. Loss after completion is reported by the
@@ -103,7 +107,7 @@ section and contract IDs in parentheses; those texts are normative.
 | No block-layer atomics; transport evidence unchanged (§8) | Block path: unit + Miri; LatestBuf/EventBuf: detector-on Miri and Loom on selected transport | Proven (transport) |
 | Copy vs SlotPool foundation (P / S) | Matrix complete (`bc54a9a`); read against the #26 integration scoping; per-shape rows adopted as the budget statement | **Closed — P = Copy composition, S = deferred (2026-08-11); nothing blocks promotion but the #34 acceptance review** |
 
-Full CI for the lane: 78 unit tests, 12 doctests, 4 compile-fail, 8
+Full CI for the lane: 76 unit tests, 12 doctests, 4 compile-fail, 8
 gated codesize targets, 3 embedded checks, 6 Miri passes, 5 Loom
 models.
 
