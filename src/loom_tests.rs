@@ -21,7 +21,7 @@
 
 use crate::{EventBuf, LatestBuf, SeqRing};
 use loom::sync::Arc;
-use loom::sync::atomic::{AtomicBool, Ordering};
+use loom::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use loom::thread;
 
 /// The three-slot exchange transfers complete payload ownership in both
@@ -37,14 +37,77 @@ fn latest_buf_returns_only_complete_publications() {
             let producer = producer_channel.try_producer().unwrap();
             let _ = producer.publish([1, 1]);
             let _ = producer.publish([2, 2]);
+            let _ = producer.publish([3, 3]);
         });
 
         let consumer = thread::spawn(move || {
             let consumer = channel.try_consumer().unwrap();
-            for _ in 0..2 {
+            for _ in 0..3 {
                 if let Some(item) = consumer.take_latest() {
-                    assert!(item.generation == 1 || item.generation == 2);
+                    assert!((1..=3).contains(&item.generation));
                     assert_eq!(item.value, [item.generation; 2]);
+                }
+                thread::yield_now();
+            }
+        });
+
+        producer.join().unwrap();
+        consumer.join().unwrap();
+    });
+}
+
+/// Forces a slot to travel producer -> consumer -> exchange -> producer.
+/// Relaxed phase markers influence scheduling without supplying the
+/// happens-before edges that the exchange itself must provide.
+#[test]
+fn latest_buf_reused_slot_keeps_exclusive_ownership() {
+    loom::model(|| {
+        let channel = Arc::new(LatestBuf::<[u32; 2]>::new());
+        let phase = Arc::new(AtomicU32::new(0));
+
+        let producer_channel = Arc::clone(&channel);
+        let producer_phase = Arc::clone(&phase);
+        let producer = thread::spawn(move || {
+            let producer = producer_channel.try_producer().unwrap();
+            let _ = producer.publish([1, 1]);
+            producer_phase.store(1, Ordering::Relaxed);
+            for _ in 0..3 {
+                if producer_phase.load(Ordering::Relaxed) >= 2 {
+                    let _ = producer.publish([2, 2]);
+                    producer_phase.store(3, Ordering::Relaxed);
+                    break;
+                }
+                thread::yield_now();
+            }
+            for _ in 0..3 {
+                if producer_phase.load(Ordering::Relaxed) >= 4 {
+                    let _ = producer.publish([3, 3]);
+                    producer_phase.store(5, Ordering::Relaxed);
+                    break;
+                }
+                thread::yield_now();
+            }
+        });
+
+        let consumer = thread::spawn(move || {
+            let consumer = channel.try_consumer().unwrap();
+            for _ in 0..3 {
+                if phase.load(Ordering::Relaxed) >= 1 {
+                    if let Some(item) = consumer.take_latest() {
+                        assert_eq!(item.value, [item.generation; 2]);
+                        phase.store(2, Ordering::Relaxed);
+                    }
+                    break;
+                }
+                thread::yield_now();
+            }
+            for _ in 0..3 {
+                if phase.load(Ordering::Relaxed) >= 3 {
+                    if let Some(item) = consumer.take_latest() {
+                        assert_eq!(item.value, [item.generation; 2]);
+                        phase.store(4, Ordering::Relaxed);
+                    }
+                    break;
                 }
                 thread::yield_now();
             }

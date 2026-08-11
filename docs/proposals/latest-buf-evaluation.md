@@ -177,7 +177,7 @@ An implementation is ready to compare only when its PR can fill every cell:
 |---|---|---|
 | Unit semantics and wrap seam | pass: 9 focused tests | pass: 8 focused tests on comparison branch |
 | L1-L4 Loom models | partial: payload ownership plus producer and consumer L3 pass; L2 and optional L4 remain | partial: six models pass, but its joined L3 does not isolate the taken-flag handoff |
-| All applicable ordering mutations fail | pending | partial: Drop `Release -> Relaxed` and claim `AcqRel -> Release` fail Loom; exchange matrix remains |
+| All applicable ordering mutations fail | pass: all six exchange and four role-handoff weakenings detected | partial: Drop `Release -> Relaxed` and claim `AcqRel -> Release` fail Loom; exchange matrix remains |
 | Miri race detector on | pass: 9 focused tests, including threaded patterned payload | pass: 8 focused tests on comparison branch |
 | Native patterned-payload stress | pass | not implemented |
 | Embedded compile matrix | pass: thumbv6m portable-atomic, thumbv7em, riscv32imac | pass: same library paths, candidate-specific rerun pending |
@@ -193,3 +193,11 @@ crate's stateless-handle precedent and has no Drop-time state-copying path.
 The persist-on-drop prototype remains on its independent comparison branch;
 it is not rejected, but its possible register-residency advantage must be
 measured and its L3 model repaired before it can displace the default.
+
+For the channel-state mutation run, Loom rejects producer `Acquire`/`Relaxed`
+and consumer `Release`/`Relaxed` exchange orderings, plus both roles' weakened
+Drop and reacquisition orderings. Miri's race detector rejects the two
+relinquish-only exchange mutations (`producer -> Release`, `consumer ->
+Acquire`) that Loom's tracked-cell model does not expose, with failing seeds
+53 and 47 respectively. Production remains `AcqRel` on both exchanges and
+Release/Acquire on both role handoffs.
