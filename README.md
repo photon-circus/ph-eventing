@@ -84,6 +84,17 @@ you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
 newest when full; the proposed `LatestBuf<Block<T, N>>` will retain only the
 latest complete block.
 
+**Budget the composition before choosing it.** Publication copies the
+complete block, so cost scales with block bytes (159–8,658 reference
+instructions across the measured 2/8/16-byte × N = 8/32/128 grid), a
+rejected push costs nearly as much as an accepted one (the complete block
+is preserved and returned, within 5–31 instructions), and RAM is multiple
+complete blocks — `Q` slots plus the private builder. Small windows can
+invert the economics (per-sample publication beats blocks at the
+8/16-byte `N = 8` corners), and DMA integrations must avoid the double
+copy: make the builder the DMA target, or publish from task context. The
+`block` module docs carry the full measured disclosure.
+
 ```rust
 use ph_eventing::{BlockBuilder, EventBuf};
 

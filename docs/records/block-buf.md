@@ -101,7 +101,7 @@ section and contract IDs in parentheses; those texts are normative.
 | Flash cost bounded across gated targets | 8-target codesize matrix: 110–312 B per completion-plus-publication shape | Measured |
 | Joint D3 composition cost vs per-sample (D3) | Matrix `8593b4a`: 171–6,958 instructions; 136–8,280 B combined channel+builder RAM; small-N inversion documented | Measured |
 | No block-layer atomics; transport evidence unchanged (§8) | Block path: unit + Miri; LatestBuf/EventBuf: detector-on Miri and Loom on selected transport | Proven (transport) |
-| Copy vs SlotPool foundation (P / S) | Matrix complete; named budget/envelope absent; maintainer deferred holistic reading | **Open — blocks promotion** |
+| Copy vs SlotPool foundation (P / S) | Matrix complete (`bc54a9a`); read against the #26 integration scoping; per-shape rows adopted as the budget statement | **Closed — P = Copy composition, S = deferred (2026-08-11); nothing blocks promotion but the #34 acceptance review** |
 
 Full CI for the lane: 78 unit tests, 12 doctests, 4 compile-fail, 8
 gated codesize targets, 3 embedded checks, 6 Miri passes, 5 Loom

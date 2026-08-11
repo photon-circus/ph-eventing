@@ -63,6 +63,15 @@ for arg in "$@"; do
 done
 
 BASELINE="scripts/codesize/baseline.tsv"
+REGEN="./scripts/codesize.sh --bless"
+# Block-matrix rows gate against their own baseline file: a bless from a
+# block-matrix run writes only block rows, and letting that touch the
+# default baseline would silently drop every default row -- the exact
+# partial-bless hazard the refusal below exists to prevent.
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    BASELINE="scripts/codesize/baseline-block.tsv"
+    REGEN="./scripts/codesize.sh block-matrix --bless"
+fi
 # Growth beyond this many bytes on any row fails the gate. Absolute, not a
 # percentage: at 100-200 bytes a percentage is noise, and the regression this
 # exists to catch was +60 on Cortex-M0+ and +78 on ESP32-S2. Shrinkage never
@@ -191,6 +200,13 @@ for entry in $TARGETS; do
             printf '%-30s %-10s %8s %8s %10s %10s\n' \
                 "$target" "$shape" "${code:--}" "$block_bytes" \
                 "$accepted_bytes" "$rejected_bytes"
+            # Persist gated rows so the baseline machinery below can bless
+            # and compare them; Xtensa stays ungated as in the default mode.
+            case "$target" in
+                xtensa-*) ;;
+                *) [ -n "$code" ] && printf '%s\tblock_%s\t%s\n' \
+                    "$target" "$shape" "$code" >> "$RESULTS" ;;
+            esac
         done
         continue
     fi
@@ -231,7 +247,9 @@ if [ "$BLOCK_MATRIX" = "1" ]; then
     printf 'returning the complete rejected block to the caller.\n'
     printf 'These are logical payload-traffic bounds; code_B is emitted flash.\n'
     printf 'Run scripts/cycles.sh for accepted/rejected instruction paths.\n'
-    exit 0
+    printf '\n'
+    # Fall through to the baseline gate: block rows bless into and compare
+    # against baseline-block.tsv, so post-promotion regressions are gated.
 fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -255,8 +273,8 @@ if [ "$BLESS" = "1" ]; then
         exit 1
     fi
     {
-        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless
-'
+        printf '# ph-eventing code-size baseline. Regenerate: %s
+' "$REGEN"
         printf '# rustc-commit: %s
 ' "$RUSTC_ID"
         printf '#
@@ -291,8 +309,8 @@ if [ ! -f "$BASELINE" ]; then
     printf '
 SKIP baseline gate: %s does not exist yet.
 ' "$BASELINE"
-    printf 'Create it with: ./scripts/codesize.sh --bless
-'
+    printf 'Create it with: %s
+' "$REGEN"
     exit 2
 fi
 
