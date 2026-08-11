@@ -47,16 +47,18 @@ pub(crate) struct TrackedCell<T>(loom::cell::UnsafeCell<T>);
 pub(crate) struct TrackedCell<T>(core::cell::UnsafeCell<T>);
 
 impl<T> TrackedCell<T> {
+    /// Construct a cell. Const on the host path; Loom's cell is not
+    /// const-constructible, so the Loom build keeps a non-const `new`.
+    #[cfg(not(loom))]
+    #[inline(always)]
+    pub(crate) const fn new(value: T) -> Self {
+        Self(core::cell::UnsafeCell::new(value))
+    }
+
+    #[cfg(loom)]
     #[inline(always)]
     pub(crate) fn new(value: T) -> Self {
-        #[cfg(loom)]
-        {
-            Self(loom::cell::UnsafeCell::new(value))
-        }
-        #[cfg(not(loom))]
-        {
-            Self(core::cell::UnsafeCell::new(value))
-        }
+        Self(loom::cell::UnsafeCell::new(value))
     }
 
     /// Access the contents through a shared pointer.

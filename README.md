@@ -73,8 +73,8 @@ the consumer reports drops when it lags behind by more than `N`.
 use ph_eventing::SeqRing;
 
 let ring = SeqRing::<u32, 64>::new();
-let producer = ring.producer();
-let mut consumer = ring.consumer();
+let producer = ring.try_producer().expect("no producer taken yet");
+let mut consumer = ring.try_consumer().expect("no consumer taken yet");
 
 producer.push(123);
 assert_eq!(consumer.poll_one_value(), Some((1, 123)));
@@ -92,8 +92,8 @@ silently lost.
 use ph_eventing::EventBuf;
 
 let buf = EventBuf::<u32, 2>::new();
-let producer = buf.producer();
-let consumer = buf.consumer();
+let producer = buf.try_producer().expect("no producer taken yet");
+let consumer = buf.try_consumer().expect("no consumer taken yet");
 
 assert!(producer.push(1).is_ok());
 assert!(producer.push(2).is_ok());
@@ -115,13 +115,13 @@ use ph_eventing::traits::{Source, Sink, forward};
 
 // bridge a SeqRing producer → EventBuf consumer
 let seq = SeqRing::<u32, 8>::new();
-let sp = seq.producer();
-let mut sc = seq.consumer();
+let sp = seq.try_producer().expect("no producer taken yet");
+let mut sc = seq.try_consumer().expect("no consumer taken yet");
 
 sp.push(1); sp.push(2);
 
 let eb = EventBuf::<u32, 8>::new();
-let mut ep = eb.producer();
+let mut ep = eb.try_producer().expect("no producer taken yet");
 
 let (n, err) = forward(&mut sc, &mut ep, 10);
 assert_eq!(n, 2);
@@ -133,6 +133,27 @@ assert!(err.is_none());
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+
+### Declarative static bring-up
+
+`static_spsc!` names the handle types for you, so a signature does not have to
+spell out `ph_eventing::event_buf::Producer<'static, u32, 64>`:
+
+```rust
+ph_eventing::static_spsc! {
+    pub mod telemetry: EventBuf<u32, 64>;
+}
+
+fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+
+let (tx, rx) = telemetry::take().expect("first take");
+```
+
+It expands to a `static`, two type aliases, and an all-or-nothing `take()` —
+no allocation, no indirection, and no instruction that would not be there
+written by hand. `SeqRing` works the same way. Note the handles are
+`Send + !Sync` by design, so they cannot themselves live in a `static`; taking
+them is a runtime step and always will be.
 
 ## Semantics
 
@@ -166,8 +187,10 @@ assert!(err.is_none());
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
 - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
-  active. `producer()`/`consumer()` will panic if called while another handle of the same kind
-  is active. Using unsafe to bypass these constraints (or sharing handles concurrently) is
+  active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
+  on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
+  The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
+  0.3.0. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
   undefined behavior.
 - `T: Copy` is required by all types to avoid allocation and return values by copy.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
@@ -201,11 +224,11 @@ in a task loop. That works, with three things to know:
   `try_consumer` return `None` instead.
 - **The buffer must outlive both handles.** The handles borrow it, so the usual
   answer is to own the buffer where it lives longest.
-- **`new()` is not a `const fn`**, so you cannot write
-  `static BUF: EventBuf<u32, 64> = EventBuf::new();` directly. Use a
-  `StaticCell`, a `OnceCell`, or a binding in `main` that outlives the tasks
-  borrowing it. This is the one ergonomic wrinkle on embedded targets and it is
-  worth knowing before you design around it.
+- **`new()` is a `const fn`** on the normal build, so
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. (Under `--cfg loom`
+  it is non-const because Loom's atomics are not const-constructible.) Handles
+  still borrow the buffer, so an ISR / task split typically pairs the `static`
+  with a `StaticCell` or similar for the handles themselves.
 
 ### Choosing `N`
 
@@ -243,7 +266,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 60 unit + 8 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 69 unit + 11 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

@@ -131,10 +131,28 @@ use core::mem::MaybeUninit;
 #[cfg(test)]
 use core::sync::atomic::AtomicUsize;
 
-fn atomic_u32_array<const N: usize>(init: u32) -> [AtomicU32; N] {
-    core::array::from_fn(|_| AtomicU32::new(init))
+// Helpers are `const fn` on the host path so `SeqRing::new` can be const.
+// Loom's atomics are not const-constructible, so the Loom build keeps the
+// non-const variants used by the non-const `new` below.
+//
+// Prefer `[const { … }; N]` over `array::from_fn`: the latter is not
+// const-callable with these constructors on the MSRV toolchain.
+#[cfg(not(loom))]
+const fn atomic_u32_array<const N: usize>() -> [AtomicU32; N] {
+    [const { AtomicU32::new(0) }; N]
 }
 
+#[cfg(loom)]
+fn atomic_u32_array<const N: usize>() -> [AtomicU32; N] {
+    core::array::from_fn(|_| AtomicU32::new(0))
+}
+
+#[cfg(not(loom))]
+const fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
+    [const { UnsafeCell::new(MaybeUninit::uninit()) }; N]
+}
+
+#[cfg(loom)]
 fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| UnsafeCell::new(MaybeUninit::uninit()))
 }
@@ -183,14 +201,51 @@ unsafe impl<T: Copy + Send, const N: usize> Sync for SeqRing<T, N> {}
 impl<T: Copy, const N: usize> SeqRing<T, N> {
     /// Create a new ring buffer.
     ///
+    /// On the normal (non-Loom) build this is a `const fn`, so the ring can be
+    /// placed in a `static`: `static RING: SeqRing<u32, 64> = SeqRing::new();`.
+    /// Under `--cfg loom` it is deliberately non-const — Loom's atomics are
+    /// not const-constructible.
+    ///
+    /// # Capacity `0` is a build failure
+    /// The `N > 0` check is a *const* assertion, so a zero-capacity buffer
+    /// cannot be constructed at all -- there is no runtime panic left to
+    /// catch, and therefore no way to write the negative case as a `#[test]`.
+    /// This `compile_fail` doctest is that coverage, and pinning the error code
+    /// keeps it honest: without it the test would also pass on a typo.
+    ///
+    /// ```compile_fail,E0080
+    /// let _ = ph_eventing::SeqRing::<u32, 0>::new();
+    /// ```
+    ///
     /// # Panics
-    /// Panics if `N == 0`.
-    pub fn new() -> Self {
-        assert!(N > 0);
+    /// Does not panic on the host path. Under Loom, where `new` is non-const,
+    /// `N == 0` is a runtime assertion instead.
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "SeqRing capacity N must be > 0");
+        }
         Self {
             next_seq: AtomicU32::new(0),
             published_seq: AtomicU32::new(0),
-            slot_seq: atomic_u32_array::<N>(0),
+            slot_seq: atomic_u32_array::<N>(),
+            slots: unsafe_cell_array::<T, N>(),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a new ring buffer (Loom build — non-const).
+    ///
+    /// # Panics
+    /// Panics if `N == 0`.
+    #[cfg(loom)]
+    pub fn new() -> Self {
+        assert!(N > 0, "SeqRing capacity N must be > 0");
+        Self {
+            next_seq: AtomicU32::new(0),
+            published_seq: AtomicU32::new(0),
+            slot_seq: atomic_u32_array::<N>(),
             slots: unsafe_cell_array::<T, N>(),
             producer_taken: AtomicBool::new(false),
             consumer_taken: AtomicBool::new(false),
@@ -226,8 +281,22 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
 
     /// Create the producer handle. Only one producer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_producer`](Self::try_producer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a producer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_producer() and handle None"
+    )]
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
         self.try_producer()
@@ -254,8 +323,22 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
 
     /// Create the consumer handle. Only one consumer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_consumer`](Self::try_consumer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a consumer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_consumer() and handle None"
+    )]
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
         self.try_consumer()
@@ -618,6 +701,12 @@ impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
 
 #[cfg(test)]
 mod tests {
+    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
+    // so these tests are their coverage -- including the two that assert the
+    // panic message. Allowing the lint here rather than at the crate root keeps
+    // the warning live for library code, which is where it should bite.
+    #![allow(deprecated)]
+
     use super::{SeqRing, TEST_AFTER_READ_SEQ, TEST_AFTER_READ_TARGET};
     use core::sync::atomic::Ordering;
     use std::vec::Vec;
@@ -1028,5 +1117,39 @@ mod tests {
         assert_eq!(consumer.poll_one_value(), None);
         // latest does not require an advanced cursor
         assert_eq!(consumer.latest_value(), Some((2, 20)));
+    }
+
+    // Loom's `new` is deliberately non-const, so a `static` init only exists
+    // on the host path.
+    #[cfg(not(loom))]
+    #[test]
+    fn const_new_works_in_const_context() {
+        static RING: SeqRing<u32, 4> = SeqRing::new();
+        assert_eq!(RING.capacity(), 4);
+    }
+
+    // See the matching test in `event_buf`: the value of the const `new` is
+    // `'static`, `Send` handles off a `static`, not merely that the `static`
+    // compiles. Pin the signatures so a lifetime regression fails the build.
+    #[cfg(not(loom))]
+    #[test]
+    fn static_ring_yields_static_sendable_handles() {
+        static RING: SeqRing<u32, 4> = SeqRing::new();
+
+        fn producer_for_isr() -> super::Producer<'static, u32, 4> {
+            RING.producer()
+        }
+        fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
+            RING.consumer()
+        }
+        fn assert_send<T: Send>(_: &T) {}
+
+        let p = producer_for_isr();
+        let mut c = consumer_for_task();
+        assert_send(&p);
+        assert_send(&c);
+
+        p.push(9);
+        assert_eq!(c.poll_one_value(), Some((1, 9)));
     }
 }
