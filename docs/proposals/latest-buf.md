@@ -751,6 +751,14 @@ consistently present.
 No implementation should silently imply FIFO semantics where the primitive
 intentionally returns only the newest value.
 
+**Decision (D2, closed 2026-08-11): the first option.** The maintainer's
+articulation, on the record: `LatestSink`/`LatestSource` were designed to
+solve the problem the existing traits could not — they *are* the contract
+surface for the type. The second option remains the pre-registered additive
+upgrade path under exactly the adopter-evidence condition stated above; the
+third stays gated behind the second-implementation rule for payload-metadata
+vocabulary. See the contract §9 and non-promise X7.
+
 ## 14. Safety Argument
 
 The proposed soundness argument is based on ownership, not post-hoc

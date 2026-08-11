@@ -215,11 +215,22 @@ the measured implementation, per environment.
     requirement belongs to the supervision layer (watchdog/heartbeat),
     which detects a dead consumer orders of magnitude sooner than any
     generation wrap.
+- **X7.** Substitution into generic `Source<T>` pipelines. The consumer
+  does not implement `Source<T>` (D2): `try_pop`'s shape cannot report
+  displacement, and displacement is this channel's designed overload
+  behaviour (X1), so a generic pipeline would silently discard loss
+  evidence during *normal* operation. `LatestSource<T>` is the consumer's
+  designed contract surface. A caller whose domain genuinely permits
+  discarding the skipped count writes its own adapter — the decision to
+  discard loss evidence is an application decision, signed in application
+  code, never the transport's. Adding a convenience `Source` impl later
+  remains an additive, adopter-evidence-gated decision (§9 D2); it must
+  never arrive as a silent convenience.
 
 ## 9. Decision points (D)
 
-D1 is **closed** (2026-08-11, below). D2 and D3 remain open deliberately;
-neither blocks contract review, and both must be closed before the
+D1 and D2 are **closed** (2026-08-11, below). D3 remains open deliberately;
+it does not block contract review, and it must be closed before the
 implementation is accepted.
 
 - **D1. Wrap-ambiguity policy — CLOSED (maintainer, 2026-08-11): options
@@ -241,10 +252,25 @@ implementation is accepted.
   reachability arithmetic at representative rates, and the (c) escape
   hatch. "Unreachable in practice" is a measured claim to be shown, never
   a reason for silence.
-- **D2. `Source<T>` policy.** Whether the consumer implements the existing
-  `Source<T>` (proposal §13). The contract default is the proposal's option
-  1 (no impl; `LatestSource` only) — the safest position given the
-  `RingBuf::pop` precedent — pending maintainer confirmation.
+- **D2. `Source<T>` policy — CLOSED (maintainer, 2026-08-11): the
+  proposal's option 1.** The consumer does not implement `Source<T>`;
+  `LatestSource<T>` is the consumer's contract surface. The maintainer's
+  articulation, recorded as the rationale: **the `LatestSink`/`LatestSource`
+  traits were designed to solve the problem the existing traits could not —
+  they are the contract surface for the type**, not a parallel convenience
+  beside a missing `Source` impl. `Source::try_pop`'s shape structurally
+  cannot report displacement, and displacement is this channel's *designed*
+  overload behaviour (X1) — so a generic `Source` impl would discard loss
+  evidence during normal operation, recreating the `RingBuf::pop`
+  rejection in a case where the loss is routine rather than a corner.
+  The proposal's option 2 (a documented-convenience `Source` impl) remains
+  the pre-registered **additive** upgrade path, to be reconsidered only on
+  adopter evidence per §13 — never retrofitted by convenience; option 3
+  (a sequenced-payload `Source`) stays subsumed by the second-
+  implementation trait gate on payload-metadata vocabulary. New
+  non-promise **X7** states the substitution limitation for adopters, and
+  the evidence map pins the absence of the impl so it cannot regress
+  silently.
 - **D3. First deliverable form.** Latest-sample vs latest-complete-block
   (proposal §11). The contract above is form-agnostic (a block is just a
   `T`), but the acceptance measurements are not; the choice shapes the
@@ -267,6 +293,7 @@ without a row here is a clause nobody is keeping true.
 | H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation checks stated observably: after a drop in one context and reacquisition in another, the generation sequence resumes (G1) and skipped accounting still satisfies C3 — exercised under Loom and race-detector-on Miri, because a sequential test cannot exercise a cross-context handoff. How continuation state survives the drop is the implementation's concern, and validating that mechanism belongs to the proposal's evidence (Appendix A.3), not this map |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
 | C3/C5/O2 beyond-span, X6 (D1 closure) | Unit test pinning the full-cycle modular result (equal endpoints report zero — the prototype's `full_generation_cycle_uses_documented_approximation` is the template), alongside the G1–G3 wrap-boundary tests; a documentation check that the concrete type's public docs carry the X6 disclosure (span, silent-zero case, reachability arithmetic, escape hatch) |
+| X7 (D2 closure) | Compile-fail test pinning that the consumer does **not** implement `Source<T>`, so the decision cannot regress via a later convenience impl; a documentation check that the public docs name `LatestSource` as the contract surface and state the adapter escape hatch |
 
 ## 11. Relationship to the design sketch
 

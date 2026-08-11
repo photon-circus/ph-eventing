@@ -13,6 +13,16 @@ All notable changes to this project will be documented in this file.
   does not detect the crossing, and a full-cycle gap reports zero. Option (b) — an explicit
   "wrapped/unknown" state — is rejected on the record: it prices wrap detection into every
   hot-path operation and still cannot recover the lost count.
+- `LatestBuf` contract: decision **D2** (`Source<T>` policy) is closed as the proposal's
+  option 1 — the consumer does not implement `Source<T>`; `LatestSink`/`LatestSource` were
+  designed as the type's contract surface, solving what the existing traits structurally
+  could not (`try_pop` cannot report displacement, and displacement is the type's *designed*
+  overload behaviour, making the `RingBuf::pop` rejection apply with more force). New
+  non-promise **X7** states the substitution limitation honestly: no generic pipeline
+  composition without a caller-written adapter — discarding loss evidence is an application
+  decision, never the transport's. A convenience `Source` impl remains an additive,
+  adopter-evidence-gated future decision, and a compile-fail pin keeps it from arriving
+  silently.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so
