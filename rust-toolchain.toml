@@ -7,6 +7,11 @@ targets = [
     "thumbv6m-none-eabi",
     "thumbv7em-none-eabihf",
     "thumbv8m.main-none-eabihf",
+    # Both are measured by scripts/codesize.sh. Without pinning them here a
+    # fresh checkout silently skips two of the eight gated rows, which
+    # contradicts the claim that the pinned tooling reproduces the matrix.
+    "thumbv8m.main-none-eabi",
+    "thumbv8m.base-none-eabi",
     "riscv32imac-unknown-none-elf",
     "wasm32-unknown-unknown",
     "armv7a-none-eabi",

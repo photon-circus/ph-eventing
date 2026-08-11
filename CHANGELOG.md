@@ -17,6 +17,80 @@ All notable changes to this project will be documented in this file.
   and only live entries are read. Relaxing a bound is compatible for callers, but `RingBuf` is no
   longer free of `unsafe`, which was a documented property of the type — so it is recorded as
   breaking rather than as a quiet improvement.
+- The code-size gate could report a pass without gating anything. Three defects found by automated
+  review, all now demonstrated fixed: a skipped gate exited 0 and `ci.sh` recorded **PASS** despite
+  printing SKIP; a baseline row with no matching measurement printed `MISSING` and still passed;
+  and `--bless` would overwrite the baseline after a partial run, silently deleting the rows it
+  could not measure. The script now exits `2` for "could not run", `ci.sh` maps that to a real
+  `SKIP` row with a summary warning, missing rows fail, and `--bless` refuses after any skip or
+  failure.
+### Added
+- `static_spsc!` — declarative bring-up for a `static` SPSC buffer. Expands to a `static`, two
+  handle type aliases, and an all-or-nothing `take()`. This is the crate's one concession to
+  ergonomics and it is made at **compile time**: no allocation, no indirection, no instruction that
+  would not be there if written out by hand.
+
+  It exists because handles are `Send + !Sync` — which is exactly what makes moving a producer into
+  an ISR sound — and a `static` requires `Sync`, so handles can **never** live in a `static`
+  whatever the constructor looks like. Taking them stays a runtime step permanently. What the macro
+  removes is the boilerplate: naming
+  `ph_eventing::event_buf::Producer<'static, u32, 64>` in every signature that accepts a handle.
+
+  ```rust
+  ph_eventing::static_spsc! {
+      pub mod telemetry: EventBuf<u32, 64>;
+  }
+  fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+  let (tx, rx) = telemetry::take().expect("first take");
+  ```
+
+  It generates a module rather than prefixed names because `macro_rules!` cannot concatenate
+  identifiers; a proc-macro dependency would have bought nicer names at a cost this crate does not
+  pay.
+### Added
+- `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
+  The check is a const assertion, so there is no runtime panic to catch and the case cannot be
+  written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.
+  The expected error code is pinned (`compile_fail,E0080`) so the test cannot pass for the wrong
+  reason. No dev-dependency was added; rustdoc does this natively.
+- `scripts/cycles.sh` now covers all three types, and measures the claim rather than restating it.
+  Every `push` is constant with respect to occupancy — `EventBuf` 25/25, `SeqRing` 34/33,
+  `RingBuf` 19/20 for empty vs loaded. `SeqRing` lag recovery is **O(1) in the lag**: a consumer
+  2×N behind costs 115 instructions, one ~2000 behind costs 114. Deliberately not wired into
+  `ci.sh` — it needs a system package (`qemu-system-arm`) that the pinned toolchain does not
+  supply, and a check most contributors cannot run would make a green `ci.sh` mean less.
+### Added
+- `scripts/cycles.sh` — instruction-cost measurement under QEMU, covering the half of the
+  determinism claim that code size cannot reach. `push` costs **25 instructions into an empty
+  buffer and 25 into a nearly-full one**; the rejected push is 19, `pop` 20 and 14, `len()` 14.
+  Constant with respect to occupancy and `N`, which is the property the crate advertises and had
+  never actually measured. Requires `qemu-system-arm` (a system package, not supplied by
+  `rust-toolchain.toml`); skips cleanly without it.
+### Added
+- Code-size baseline gate. `scripts/codesize.sh` compares against a committed `baseline.tsv` and
+  `ci.sh` runs it as a check, so flash cost is pinned rather than merely measurable. Growth beyond
+  +16 bytes fails; shrinkage only reports; a toolchain mismatch `SKIP`s rather than failing, since
+  comparing codegen across compilers is noise. Xtensa is measured but never gated, because gating
+  it would make the esp-rs fork mandatory. The baseline is committable because it is
+  host-independent — verified byte-identical on Windows and Linux for the same pinned rustc across
+  all eight gated targets.
+
+### Deprecated
+- **`SeqRing::producer` / `consumer` and `EventBuf::producer` / `consumer`**, in favour of the
+  `try_*` variants added in 0.1.4. Scheduled for removal in 0.3.0. On a microcontroller a panic is
+  a reset, and the panic machinery costs flash: a code-size probe shows no panic strings reach the
+  binary when only the `try_*` constructors are used. The shorter, more discoverable name being
+  the hazardous one is the inversion this corrects. The deprecated methods are unchanged and still
+  tested; only the recommendation moves.
+### Added
+- `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
+  non-const because Loom's atomics are not const-constructible.
+
+### Changed
+- **Breaking:** `SeqRing::new` and `EventBuf::new` reject `N == 0` with a const assertion on the
+  host path instead of a runtime `assert!`. `SeqRing::<T, 0>::new()` no longer compiles where it
+  previously panicked.
 
 ## 0.1.4 - 2026-08-10
 ### Added
@@ -62,6 +136,7 @@ All notable changes to this project will be documented in this file.
   `./scripts/ci.sh`, which never invokes an action and so cannot validate an actions bump. It now
   names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
   the workflow after merge.
+- README / crate docs: static-init guidance updated for SPSC `const fn new`.
 
 ### Known issues
 - `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour.
