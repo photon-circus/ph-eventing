@@ -9,6 +9,11 @@
 - **Related:** [`latest-buf.md`](latest-buf.md) §11 (the complete-block
   variant sketch) and [`latest-buf-contract.md`](latest-buf-contract.md)
   decision point **D3** — this document and D3 must be resolved together.
+  **Resolved (2026-08-11):** D3 is closed as the convergent answer —
+  payload-agnostic `LatestBuf<T>`, blocks as payloads, composition as the
+  type identity (contract §9). The developed candidate on
+  `candidate/block-buf` carries the confirmed design; this seed document is
+  historical.
 
 ## 1. Design sketch (from the taxonomy)
 
@@ -25,6 +30,15 @@ Many producers naturally operate in blocks:
 - image-sensor lines or tiles.
 
 Conceptually:
+
+> **Superseded (2026-08-11):** the sketch below, including its
+> `Block<T, Stamp, N>` parameterisation and the three named types that
+> follow, is the historical seed. D3's closure accepted the developed
+> candidate's `Block<T, N>` (payload and count only; stamps travel inside
+> `T`) with composition as the type identity — `LatestBuf<Block<T, N>>`
+> latest, `EventBuf<Block<T, N>, Q>` queued, caller policy for drop-new.
+> See §5.1 of the developed document on `candidate/block-buf` and the
+> contract §9.
 
 ```rust
 pub struct Block<T, Stamp, const N: usize> {
@@ -80,6 +94,14 @@ obvious.
 
 ## 3. Open questions
 
+> **Superseded (2026-08-11):** the type-identity questions below are
+> answered by D3's closure — composition over payload-agnostic
+> primitives, no new named types (contract §9). The fill-side,
+> `Copy`-vs-`SlotPool`, and stamp questions are answered in the developed
+> document on `candidate/block-buf` (`BlockBuilder`, the deferred **P**
+> decision, and stamps-inside-`T` respectively). Retained unedited as the
+> seed record.
+
 - Is `LatestBlockBuf` a new type or `LatestBuf<Block<T, Stamp, N>>` plus a
   fill-side helper? What, concretely, does a separate type buy?
 - Is `QueuedBlockBuf` a new type or `EventBuf<Block<…>>`? If the answer is
@@ -98,7 +120,8 @@ obvious.
 
 ## 4. Promotion bar to PROPOSED
 
-1. Resolve D3 jointly with this document (maintainer decision).
+1. Resolve D3 jointly with this document (maintainer decision). **Done
+   2026-08-11** — closed as composition; see the contract §9.
 2. Answer the type-identity questions above — in particular whether each
    variant is a new primitive or a composition over existing/planned ones.
 3. Develop to the detail level of [`latest-buf.md`](latest-buf.md); derive
