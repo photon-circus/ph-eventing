@@ -110,9 +110,10 @@ producer into an ISR and a consumer into a task loop. A `static` requires
 changes that. The buffer reaches `.bss` with zero init; the handle setup stays a
 runtime step, permanently.
 
-That is the strongest current candidate for the macro escape hatch above: a
-declarative bring-up macro could hide the boilerplate without adding a single
-runtime instruction. It has not been built.
+That is what the macro escape hatch above is for, and `static_spsc!` (0.2.0)
+is it: a declarative bring-up macro that hides the boilerplate without adding a
+single runtime instruction. It cannot remove the runtime `take()` — nothing
+can, for the `Sync` reason above — only the type spelling around it.
 
 ## Codebase Structure
 
@@ -455,13 +456,9 @@ fine** — only git is affected. Do git on the Windows side, builds on either.
 #### Scripted edits must normalise line endings first
 
 Git checks out CRLF here. A Python or `sed` edit whose anchor spans lines and
-uses `
-` silently matches nothing, and the "fix" reports success having
-changed no file. Read with `newline=""`, `.replace("
-", "
-")`, match, then
-write with `newline="
-"`.
+uses `\n` silently matches nothing, and the "fix" reports success having
+changed no file. Read with `newline=""`, `.replace("\r\n", "\n")`, match, then
+write with `newline="\n"`.
 
 Related: inside a heredoc, `\n` in a Python string is collapsed before Python
 sees it. Use raw strings (`r"..."`) for any anchor containing a literal
@@ -775,7 +772,6 @@ cargo test
 - `works_without_default_bound` — `T: Copy` only, no `Default`
 - `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
 - `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
-- `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
 

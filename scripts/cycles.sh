@@ -125,8 +125,15 @@ if [ ! -s "$LOG" ]; then
     exit 1
 fi
 
-printf '\n'
-awk '
+# Every marker except `m_end` and `m_overhead` opens a region that must produce
+# exactly one row. Capturing the report rather than streaming it is what lets
+# both the parse status and the row count be checked -- otherwise a changed
+# trace format, an unreached marker, or an awk error prints a short table under
+# a success footer and exits 0, which is precisely the silent-measurement
+# failure this probe exists to rule out.
+expected_regions=$((total_marks - 2))
+
+report="$(awk '
     # GNU awk has a strtonum builtin; mawk, the default awk on a stock
     # Debian/Ubuntu, does not -- verified. The parse then aborts and, with no
     # status check, the script printed its footer and exited 0 having measured
@@ -177,7 +184,24 @@ awk '
         }
         if (open != "") count++
     }
-' "$SYMS" "$LOG"
+' "$SYMS" "$LOG")"
+awk_status=$?
+
+if [ "$awk_status" -ne 0 ]; then
+    printf 'error: trace parse failed (awk exited %s)\n' "$awk_status" >&2
+    exit 1
+fi
+
+# `grep -c` exits non-zero on a count of zero, which would be swallowed here.
+measured="$(printf '%s\n' "$report" | awk '/^  [a-z]/ { n++ } END { print n + 0 }')"
+if [ "$measured" -ne "$expected_regions" ]; then
+    printf 'error: measured %s regions, expected %s.\n' \
+        "$measured" "$expected_regions" >&2
+    printf 'A marker was never reached, or the QEMU trace format changed.\n' >&2
+    exit 1
+fi
+
+printf '\n%s\n' "$report"
 
 printf '\n'
 printf 'Instructions retired on the guest, marker overhead subtracted.\n'

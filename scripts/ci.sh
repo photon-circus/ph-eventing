@@ -100,6 +100,7 @@ if rustup toolchain list 2>/dev/null | grep -q '^stable'; then
 else
     printf '\n==> stable\nstable toolchain not installed; skipping (rustup toolchain install stable)\n'
     summary="${summary}  SKIP  stable (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
 # Supply chain: advisories, licences, bans, sources. Skipped with a notice
@@ -110,6 +111,7 @@ if command -v cargo-deny >/dev/null 2>&1; then
 else
     printf '\n==> deny\ncargo-deny not installed; skipping (cargo install cargo-deny)\n'
     summary="${summary}  SKIP  deny (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
 # Coverage floor. A gate, not a vanity number -- it fails only on a real drop,
@@ -122,14 +124,20 @@ if command -v cargo-llvm-cov >/dev/null 2>&1; then
 else
     printf '\n==> coverage\ncargo-llvm-cov not installed; skipping (cargo install cargo-llvm-cov)\n'
     summary="${summary}  SKIP  coverage (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
-# Code size is a guarantee like any other: unpinned, it drifts. The gate is
-# presence-gated on the baseline and skips loudly when the toolchain differs
-# from the one that produced it, so it cannot become a source of noise.
-run_check 'codesize (baseline gate)' ./scripts/codesize.sh
-
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
+    # Code size is a guarantee like any other: unpinned, it drifts. The gate is
+    # presence-gated on the baseline and skips loudly when the toolchain differs
+    # from the one that produced it, so it cannot become a source of noise.
+    #
+    # It belongs under SKIP_EMBEDDED because it cross-compiles all eight gated
+    # targets. Run outside this branch it would make the advertised host-only
+    # escape hatch fail for the one reason a caller sets it: not having the
+    # embedded toolchains.
+    run_check 'codesize (baseline gate)' ./scripts/codesize.sh
+
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
         --features portable-atomic-unsafe-assume-single-core

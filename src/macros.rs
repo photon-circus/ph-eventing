@@ -2,11 +2,11 @@
 //!
 //! This is the crate's one concession to ergonomics, and it is made the way
 //! `AGENTS.md` says to make it: **at compile time, for zero runtime cost**.
-//! The macro expands to a `static`, two type aliases, and one function. It
+//! The macro expands to a `static`, two type aliases, and two functions. It
 //! introduces no allocation, no indirection, and no instruction that would not
 //! be there if you wrote it out.
 
-/// Declare a `static` SPSC buffer with its handle types and a one-shot take.
+/// Declare a `static` SPSC buffer with its handle types and a paired take.
 ///
 /// # What it solves
 ///
@@ -63,8 +63,14 @@
 /// - It uses the fallible constructors, so no panic path reaches your binary.
 ///   On a microcontroller a panic is a reset, and the panic machinery costs
 ///   flash.
-/// - The generated module owns its `static`. Nothing else can reach the buffer
-///   except through `take()`, which is what keeps the SPSC guarantee honest.
+/// - `take()` is not one-shot. Dropping both handles releases their claim
+///   flags, and a later call succeeds again — which is what makes a failed
+///   partial take recoverable rather than permanent.
+/// - The generated module owns its `static`, but `take()` is not the only way
+///   in: the accessor below hands out `&'static` to it, so `try_producer()` /
+///   `try_consumer()` remain reachable. That is deliberate and safe — the SPSC
+///   guarantee is enforced by the buffer's own claim flags, not by hiding it.
+///   The macro removes the boilerplate; it does not add an invariant.
 #[macro_export]
 macro_rules! static_spsc {
     (
