@@ -9,6 +9,8 @@
 - **Related:** [`latest-buf.md`](latest-buf.md) §11 (the complete-block
   variant sketch) and [`latest-buf-contract.md`](latest-buf-contract.md)
   decision point **D3** — this document and D3 must be resolved together.
+  **Resolved (2026-08-11):** D3 closed as the composition this document
+  recommends (contract §9, PR #37; confirmation recorded in §5 below).
 
 ## 1. Design sketch (from the taxonomy)
 
@@ -127,6 +129,12 @@ This resolves the architectural part of D3: sample and block are not mutually
 exclusive primitive forms. `LatestBuf<T>` remains payload-agnostic while
 `Block<T, N>` is a separately useful payload/fill abstraction. Which ships
 first remains release scheduling, not a type-system choice.
+
+**Confirmed (maintainer, 2026-08-11):** D3 is closed exactly this way — the
+convergent answer is the answer (contract §9, PR #37). The closure binds a
+documentation obligation on the block-payload surfaces: per-shape RAM stated
+plainly, the small-`N` publication-cost inversion stated as guidance, and
+the no-partial-block limitation stated for adopters.
 
 A named wrapper should be reconsidered only if it enforces a contract that
 composition cannot, such as direct-to-granted-slot filling with zero
@@ -256,6 +264,7 @@ no block-specific evidence; Loom remains required for the selected transport.
 
 1. Maintainer confirms the type-identity recommendation and treats D3 as a
    scheduling decision rather than separate sample/block primitive designs.
+   **Done 2026-08-11** — D3 closed as composition (contract §9, PR #37).
 2. Compare the completed section 6 matrix against named budgets; choose Copy
    composition or SlotPool/grants from the result. The measurement is complete;
    naming the instruction/time and RAM budgets remains a maintainer decision.
