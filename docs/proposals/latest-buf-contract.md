@@ -150,7 +150,10 @@ the measured implementation, per environment.
   and instruction costs are measured claims, stated per target and
   toolchain.
 
-## 9. Decision points (D) — maintainer input required
+## 9. Decision points (D) — deferred by maintainer decision (2026-08-11)
+
+All three remain open deliberately; none blocks contract review. They must
+be closed before implementation (step 2 of the adoption sequence) begins.
 
 - **D1. Wrap-ambiguity policy.** If more than a full generation cycle of
   publications occurs between two takes, `skipped` is inherently ambiguous
