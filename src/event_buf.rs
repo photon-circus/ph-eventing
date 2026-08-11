@@ -77,9 +77,9 @@ const RETRY_LIMIT: usize = 2;
 /// # Panics
 /// - `EventBuf::new()` fails to compile (const assertion) when `N == 0` on the
 ///   host path; under Loom it panics at runtime.
-/// - `producer()` / `consumer()` panic if called while another handle of
-///   the same kind is already active. Use [`EventBuf::try_producer`] /
-///   [`EventBuf::try_consumer`] for a fallible alternative.
+/// - Handle acquisition never panics: [`EventBuf::try_producer`] /
+///   [`EventBuf::try_consumer`] return `None` while a handle of that kind is
+///   active. (The panicking `producer()` / `consumer()` were removed in 0.3.0.)
 pub struct EventBuf<T: Copy, const N: usize> {
     head: AtomicU32,
     tail: AtomicU32,
@@ -217,8 +217,10 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Try to create the producer handle.
     ///
-    /// Returns `None` if a producer is already active. Prefer this over
-    /// [`producer`](Self::producer) when fallible bring-up is needed.
+    /// Returns `None` if a producer is already active — never panics. On the
+    /// targets this crate exists for a panic is a reset, so fallible bring-up
+    /// is the only handle-acquisition API. (The panicking `producer()` was
+    /// deprecated in 0.2.0 and removed in 0.3.0.)
     #[inline]
     pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
         if self.producer_taken.swap(true, Ordering::AcqRel) {
@@ -231,34 +233,12 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
         }
     }
 
-    /// Create the producer handle. Only one producer may be active.
-    ///
-    /// # Deprecated
-    /// Prefer [`try_producer`](Self::try_producer). This crate targets firmware,
-    /// where a panic is a reset and the panic machinery itself costs flash — a
-    /// code-size probe shows no panic strings reach the binary when only the
-    /// `try_*` constructors are used. The shorter, more discoverable name being
-    /// the hazardous one is the inversion this deprecation exists to correct.
-    ///
-    /// Still sound, still tested, and convenient on a host where a panic is just
-    /// a failed test. Scheduled for removal in 0.3.0.
-    ///
-    /// # Panics
-    /// Panics if a producer handle is already active.
-    #[deprecated(
-        since = "0.2.0",
-        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_producer() and handle None"
-    )]
-    #[inline]
-    pub fn producer(&self) -> Producer<'_, T, N> {
-        self.try_producer()
-            .expect("EventBuf: only one Producer may be active at a time")
-    }
-
     /// Try to create the consumer handle.
     ///
-    /// Returns `None` if a consumer is already active. Prefer this over
-    /// [`consumer`](Self::consumer) when fallible bring-up is needed.
+    /// Returns `None` if a consumer is already active — never panics. On the
+    /// targets this crate exists for a panic is a reset, so fallible bring-up
+    /// is the only handle-acquisition API. (The panicking `consumer()` was
+    /// deprecated in 0.2.0 and removed in 0.3.0.)
     #[inline]
     pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
         if self.consumer_taken.swap(true, Ordering::AcqRel) {
@@ -269,30 +249,6 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
                 _not_sync: PhantomData,
             })
         }
-    }
-
-    /// Create the consumer handle. Only one consumer may be active.
-    ///
-    /// # Deprecated
-    /// Prefer [`try_consumer`](Self::try_consumer). This crate targets firmware,
-    /// where a panic is a reset and the panic machinery itself costs flash — a
-    /// code-size probe shows no panic strings reach the binary when only the
-    /// `try_*` constructors are used. The shorter, more discoverable name being
-    /// the hazardous one is the inversion this deprecation exists to correct.
-    ///
-    /// Still sound, still tested, and convenient on a host where a panic is just
-    /// a failed test. Scheduled for removal in 0.3.0.
-    ///
-    /// # Panics
-    /// Panics if a consumer handle is already active.
-    #[deprecated(
-        since = "0.2.0",
-        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_consumer() and handle None"
-    )]
-    #[inline]
-    pub fn consumer(&self) -> Consumer<'_, T, N> {
-        self.try_consumer()
-            .expect("EventBuf: only one Consumer may be active at a time")
     }
 }
 
@@ -450,12 +406,6 @@ impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
 
 #[cfg(test)]
 mod tests {
-    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
-    // so these tests are their coverage -- including the two that assert the
-    // panic message. Allowing the lint here rather than at the crate root keeps
-    // the warning live for library code, which is where it should bite.
-    #![allow(deprecated)]
-
     use super::*;
 
     #[test]
@@ -470,8 +420,8 @@ mod tests {
     #[test]
     fn push_and_pop_fifo() {
         let buf = EventBuf::<u32, 4>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         assert!(p.push(10).is_ok());
         assert!(p.push(20).is_ok());
@@ -486,8 +436,8 @@ mod tests {
     #[test]
     fn push_rejects_when_full() {
         let buf = EventBuf::<u32, 2>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         assert!(p.push(1).is_ok());
         assert!(p.push(2).is_ok());
@@ -501,8 +451,8 @@ mod tests {
     #[test]
     fn drain_returns_count() {
         let buf = EventBuf::<u32, 8>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         for i in 0..5 {
             p.push(i).unwrap();
@@ -522,8 +472,8 @@ mod tests {
     #[test]
     fn drain_on_empty_returns_zero() {
         let buf = EventBuf::<u32, 4>::new();
-        let _p = buf.producer();
-        let c = buf.consumer();
+        let _p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         let n = c.drain(10, |_| panic!("should not be called"));
         assert_eq!(n, 0);
@@ -533,44 +483,28 @@ mod tests {
     fn producer_consumer_can_be_recreated() {
         let buf = EventBuf::<u32, 4>::new();
         {
-            let p = buf.producer();
+            let p = buf.try_producer().unwrap();
             p.push(1).unwrap();
         }
         // producer dropped — can create a new one
-        let p = buf.producer();
+        let p = buf.try_producer().unwrap();
         p.push(2).unwrap();
 
         {
-            let c = buf.consumer();
+            let c = buf.try_consumer().unwrap();
             assert_eq!(c.pop(), Some(1));
         }
         // consumer dropped — can create a new one
-        let c = buf.consumer();
+        let c = buf.try_consumer().unwrap();
         assert_eq!(c.pop(), Some(2));
         assert_eq!(c.pop(), None);
     }
 
     #[test]
-    #[should_panic(expected = "only one Producer")]
-    fn double_producer_panics() {
-        let buf = EventBuf::<u32, 4>::new();
-        let _p1 = buf.producer();
-        let _p2 = buf.producer();
-    }
-
-    #[test]
-    #[should_panic(expected = "only one Consumer")]
-    fn double_consumer_panics() {
-        let buf = EventBuf::<u32, 4>::new();
-        let _c1 = buf.consumer();
-        let _c2 = buf.consumer();
-    }
-
-    #[test]
     fn wraps_around_correctly() {
         let buf = EventBuf::<u32, 3>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         // fill, drain, fill again — exercises the wrap
         for round in 0u32..4 {
@@ -595,8 +529,8 @@ mod tests {
     #[test]
     fn len_and_full_track_state() {
         let buf = EventBuf::<u32, 3>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         assert_eq!(buf.len(), 0);
         assert!(buf.is_empty());
@@ -622,7 +556,7 @@ mod tests {
 
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                let p = buf.producer();
+                let p = buf.try_producer().unwrap();
                 for i in 0..pushes {
                     let _ = p.push(i);
                 }
@@ -630,7 +564,7 @@ mod tests {
             });
 
             scope.spawn(|| {
-                let c = buf.consumer();
+                let c = buf.try_consumer().unwrap();
                 while !done.load(Ordering::Acquire) {
                     c.pop();
                 }
@@ -656,7 +590,7 @@ mod tests {
 
         let received = std::thread::scope(|scope| {
             scope.spawn(|| {
-                let p = buf.producer();
+                let p = buf.try_producer().unwrap();
                 // Backpressure means push can fail; retry so the stream is
                 // complete and any gap in the consumer's view is a real bug.
                 for i in 0..total {
@@ -669,7 +603,7 @@ mod tests {
             });
 
             let consumer = scope.spawn(|| {
-                let c = buf.consumer();
+                let c = buf.try_consumer().unwrap();
                 let mut seen = 0u32;
                 while seen < total {
                     match c.pop() {
@@ -716,8 +650,8 @@ mod tests {
     #[test]
     fn peek_copies_without_advancing() {
         let buf = EventBuf::<u32, 4>::new();
-        let p = buf.producer();
-        let c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let c = buf.try_consumer().unwrap();
 
         assert_eq!(c.peek(), None);
         p.push(10).unwrap();
@@ -752,10 +686,10 @@ mod tests {
         static BUF: EventBuf<u32, 4> = EventBuf::new();
 
         fn producer_for_isr() -> super::Producer<'static, u32, 4> {
-            BUF.producer()
+            BUF.try_producer().unwrap()
         }
         fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
-            BUF.consumer()
+            BUF.try_consumer().unwrap()
         }
         fn assert_send<T: Send>(_: &T) {}
 

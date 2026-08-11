@@ -120,12 +120,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
-    // so these tests are their coverage -- including the two that assert the
-    // panic message. Allowing the lint here rather than at the crate root keeps
-    // the warning live for library code, which is where it should bite.
-    #![allow(deprecated)]
-
     use super::*;
     use crate::{EventBuf, RingBuf, SeqRing};
 
@@ -142,7 +136,7 @@ mod tests {
     #[test]
     fn seq_producer_as_sink() {
         let ring = SeqRing::<u32, 4>::new();
-        let mut p = ring.producer();
+        let mut p = ring.try_producer().unwrap();
         assert!(p.try_push(10).is_ok());
         assert!(p.try_push(20).is_ok());
     }
@@ -150,7 +144,7 @@ mod tests {
     #[test]
     fn event_producer_as_sink() {
         let buf = EventBuf::<u32, 2>::new();
-        let mut p = buf.producer();
+        let mut p = buf.try_producer().unwrap();
         assert!(p.try_push(1).is_ok());
         assert!(p.try_push(2).is_ok());
         assert_eq!(p.try_push(3), Err(3));
@@ -161,8 +155,8 @@ mod tests {
     #[test]
     fn seq_consumer_as_source() {
         let ring = SeqRing::<u32, 4>::new();
-        let p = ring.producer();
-        let mut c = ring.consumer();
+        let p = ring.try_producer().unwrap();
+        let mut c = ring.try_consumer().unwrap();
 
         p.push(10);
         p.push(20);
@@ -175,8 +169,8 @@ mod tests {
     #[test]
     fn event_consumer_as_source() {
         let buf = EventBuf::<u32, 4>::new();
-        let p = buf.producer();
-        let mut c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let mut c = buf.try_consumer().unwrap();
 
         p.push(10).unwrap();
         p.push(20).unwrap();
@@ -191,21 +185,21 @@ mod tests {
     #[test]
     fn forward_seq_to_event() {
         let seq = SeqRing::<u32, 8>::new();
-        let sp = seq.producer();
-        let mut sc = seq.consumer();
+        let sp = seq.try_producer().unwrap();
+        let mut sc = seq.try_consumer().unwrap();
 
         sp.push(1);
         sp.push(2);
         sp.push(3);
 
         let eb = EventBuf::<u32, 8>::new();
-        let mut ep = eb.producer();
+        let mut ep = eb.try_producer().unwrap();
 
         let (n, err) = forward(&mut sc, &mut ep, 10);
         assert_eq!(n, 3);
         assert!(err.is_none());
 
-        let ec = eb.consumer();
+        let ec = eb.try_consumer().unwrap();
         assert_eq!(ec.pop(), Some(1));
         assert_eq!(ec.pop(), Some(2));
         assert_eq!(ec.pop(), Some(3));
@@ -214,8 +208,8 @@ mod tests {
     #[test]
     fn forward_event_to_ringbuf() {
         let eb = EventBuf::<u32, 8>::new();
-        let ep = eb.producer();
-        let mut ec = eb.consumer();
+        let ep = eb.try_producer().unwrap();
+        let mut ec = eb.try_consumer().unwrap();
 
         ep.push(10).unwrap();
         ep.push(20).unwrap();
@@ -232,15 +226,15 @@ mod tests {
     #[test]
     fn forward_stops_when_sink_full() {
         let src_buf = EventBuf::<u32, 8>::new();
-        let sp = src_buf.producer();
-        let mut sc = src_buf.consumer();
+        let sp = src_buf.try_producer().unwrap();
+        let mut sc = src_buf.try_consumer().unwrap();
 
         for i in 0..5 {
             sp.push(i).unwrap();
         }
 
         let dst_buf = EventBuf::<u32, 2>::new();
-        let mut dp = dst_buf.producer();
+        let mut dp = dst_buf.try_producer().unwrap();
 
         let (n, err) = forward(&mut sc, &mut dp, 10);
         assert_eq!(n, 2);
@@ -250,11 +244,11 @@ mod tests {
     #[test]
     fn forward_empty_source_transfers_nothing() {
         let seq = SeqRing::<u32, 4>::new();
-        let _sp = seq.producer();
-        let mut sc = seq.consumer();
+        let _sp = seq.try_producer().unwrap();
+        let mut sc = seq.try_consumer().unwrap();
 
         let eb = EventBuf::<u32, 4>::new();
-        let mut ep = eb.producer();
+        let mut ep = eb.try_producer().unwrap();
 
         let (n, err) = forward(&mut sc, &mut ep, 10);
         assert_eq!(n, 0);
@@ -274,8 +268,8 @@ mod tests {
     #[test]
     fn generic_drain_seq() {
         let ring = SeqRing::<u32, 4>::new();
-        let p = ring.producer();
-        let mut c = ring.consumer();
+        let p = ring.try_producer().unwrap();
+        let mut c = ring.try_consumer().unwrap();
 
         p.push(1);
         p.push(2);
@@ -288,8 +282,8 @@ mod tests {
     #[test]
     fn generic_drain_event() {
         let buf = EventBuf::<u32, 4>::new();
-        let p = buf.producer();
-        let mut c = buf.consumer();
+        let p = buf.try_producer().unwrap();
+        let mut c = buf.try_consumer().unwrap();
 
         p.push(1).unwrap();
         p.push(2).unwrap();
