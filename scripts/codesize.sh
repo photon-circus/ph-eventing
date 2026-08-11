@@ -328,8 +328,8 @@ SKIP baseline gate: baseline was recorded with rustc %s, this is %s.
 '
     printf 'signal. Re-bless deliberately after reviewing the diff:
 '
-    printf '  ./scripts/codesize.sh --bless
-'
+    printf '  %s
+' "$REGEN"
     exit 2
 fi
 
@@ -384,8 +384,8 @@ if [ "${regressions:-0}" -gt 0 ]; then
     printf '
 %s row(s) grew by more than %s bytes.
 ' "$regressions" "$TOLERANCE"
-    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless
-'
+    printf 'If the growth is intended, review it and run: %s
+' "$REGEN"
     exit 1
 fi
 printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"

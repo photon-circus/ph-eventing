@@ -36,12 +36,18 @@
 //! preserved and returned rather than reduced to a scalar error. Budget
 //! rejection like acceptance, not like error plumbing.
 //!
-//! **DMA integrations: mind the double copy.** A DMA engine has already
-//! written the samples once; filling this builder from the DMA buffer and
-//! then publishing crosses the payload a second time. Either make the
-//! builder's storage the DMA target, or publish from task context where
-//! the copy is off the interrupt path. (DMA cache maintenance remains
-//! outside this crate, per the taxonomy's out-of-scope list.)
+//! **DMA integrations: the double copy is currently unavoidable in ISR
+//! context.** A DMA engine has already written the samples once, and this
+//! builder's storage is deliberately private — the public API offers no
+//! address or writable slice a DMA controller could target — so filling
+//! the builder from the DMA buffer crosses the payload a second time.
+//! Either budget both copies against the accepted row for your shape, or
+//! publish from task context where the copy is off the interrupt path. A
+//! direct-to-granted-slot fill API is exactly the registered reopening
+//! condition of cycle decision S (the deferred SlotPool foundation) — a
+//! real adopter with this requirement reopens that lane rather than
+//! prying the builder open. (DMA cache maintenance remains outside this
+//! crate, per the taxonomy's out-of-scope list.)
 //!
 //! **No partial block is ever visible** — sample-level freshness inside a
 //! filling window is unobtainable by design, stated here so it is chosen,

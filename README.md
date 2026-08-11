@@ -91,8 +91,9 @@ rejected push costs nearly as much as an accepted one (the complete block
 is preserved and returned, within 5–31 instructions), and RAM is multiple
 complete blocks — `Q` slots plus the private builder. Small windows can
 invert the economics (per-sample publication beats blocks at the
-8/16-byte `N = 8` corners), and DMA integrations must avoid the double
-copy: make the builder the DMA target, or publish from task context. The
+8/16-byte `N = 8` corners), and DMA integrations currently cannot avoid
+the double copy in ISR context — the builder's storage is deliberately
+private, so either budget both copies or publish from task context. The
 `block` module docs carry the full measured disclosure.
 
 ```rust
