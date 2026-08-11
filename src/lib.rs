@@ -21,6 +21,24 @@
 //! The [`traits::forward`] function transfers items from any `Source` to any
 //! `Sink`, making it easy to bridge different buffer types.
 //!
+//! # Static bring-up
+//!
+//! [`static_spsc!`](crate::static_spsc) declares a `static` buffer together with
+//! named handle types, so a signature need not spell out
+//! `event_buf::Producer<'static, T, N>`:
+//!
+//! ```
+//! ph_eventing::static_spsc! {
+//!     pub mod telemetry: EventBuf<u32, 64>;
+//! }
+//!
+//! fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+//!
+//! let (tx, rx) = telemetry::take().expect("first take");
+//! on_sample(&tx, 1);
+//! assert_eq!(rx.pop(), Some(1));
+//! ```
+//!
 //! # Quick start — `RingBuf`
 //! ```
 //! use ph_eventing::RingBuf;
@@ -37,8 +55,8 @@
 //! use ph_eventing::SeqRing;
 //!
 //! let ring = SeqRing::<u32, 64>::new();
-//! let producer = ring.producer();
-//! let mut consumer = ring.consumer();
+//! let producer = ring.try_producer().expect("producer");
+//! let mut consumer = ring.try_consumer().expect("consumer");
 //!
 //! producer.push(42);
 //! consumer.poll_one(|seq, v| {
@@ -52,8 +70,8 @@
 //! use ph_eventing::EventBuf;
 //!
 //! let buf = EventBuf::<u32, 4>::new();
-//! let producer = buf.producer();
-//! let consumer = buf.consumer();
+//! let producer = buf.try_producer().expect("producer");
+//! let consumer = buf.try_consumer().expect("consumer");
 //!
 //! assert!(producer.push(1).is_ok());
 //! assert!(producer.push(2).is_ok());
@@ -66,13 +84,13 @@
 //! use ph_eventing::traits::{Source, Sink, forward};
 //!
 //! let seq = SeqRing::<u32, 8>::new();
-//! let sp = seq.producer();
-//! let mut sc = seq.consumer();
+//! let sp = seq.try_producer().expect("producer");
+//! let mut sc = seq.try_consumer().expect("consumer");
 //!
 //! sp.push(1); sp.push(2);
 //!
 //! let eb = EventBuf::<u32, 8>::new();
-//! let mut ep = eb.producer();
+//! let mut ep = eb.try_producer().expect("producer");
 //!
 //! let (n, err) = forward(&mut sc, &mut ep, 10);
 //! assert_eq!(n, 2);
@@ -93,10 +111,22 @@
 //! # Safety and concurrency
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
-//!   consumer must be active. `producer()`/`consumer()` will panic if called
-//!   while another handle of the same kind is active; `try_producer()` /
-//!   `try_consumer()` return `None` instead. Using unsafe to bypass these
-//!   constraints is undefined behavior.
+//!   consumer must be active. Use `try_producer()` / `try_consumer()`, which
+//!   return `None` rather than panicking — on a microcontroller a panic is a
+//!   reset. The panicking `producer()` / `consumer()` are deprecated since
+//!   0.2.0. Using unsafe to bypass these constraints is undefined behavior.
+//!
+//!   The examples here use `.expect(...)` for brevity, which is a panic. That
+//!   is fine in a doctest on a host; in firmware, branch on the `None`:
+//!
+//! ```
+//! # use ph_eventing::EventBuf;
+//! # let buf = EventBuf::<u32, 4>::new();
+//! let Some(tx) = buf.try_producer() else {
+//!     return; // already claimed -- report it, do not reset the device
+//! };
+//! # let _ = tx;
+//! ```
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
@@ -118,10 +148,12 @@
 //!   handed to both contexts. The `Producer` and `Consumer` handles are
 //!   `Send + !Sync`: move each into the context that owns it, never share one.
 //! - The handles borrow the buffer, so the buffer must outlive them.
-//! - **`new()` is not a `const fn`**, so
-//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` will not compile. Use a
-//!   `StaticCell`, a `OnceCell`, or a binding in `main` that outlives its
-//!   borrowers.
+//! - **`new()` is a `const fn`** on the normal build, so
+//!   `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. (Under
+//!   `--cfg loom` it is non-const because Loom's atomics are not
+//!   const-constructible.) Handles still borrow the buffer, so an ISR /
+//!   task split typically pairs the `static` with a `StaticCell` or similar
+//!   for the handles themselves.
 //!
 //! `N` is fixed at compile time and the buffer lives inline —
 //! `N * size_of::<T>()` bytes, no allocation. For [`EventBuf`] it is the
@@ -162,6 +194,9 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 // forward straight to portable-atomic, whose own `compile_error!` fires while
 // the dependency compiles, so a guard in this file would never be reached. A
 // build script does not depend on portable-atomic and runs regardless.
+
+#[macro_use]
+mod macros;
 
 pub mod event_buf;
 pub mod ring;

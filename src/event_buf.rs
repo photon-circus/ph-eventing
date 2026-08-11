@@ -32,8 +32,8 @@
 //! use ph_eventing::EventBuf;
 //!
 //! let buf = EventBuf::<u32, 4>::new();
-//! let producer = buf.producer();
-//! let consumer = buf.consumer();
+//! let producer = buf.try_producer().expect("producer");
+//! let consumer = buf.try_consumer().expect("consumer");
 //!
 //! assert!(producer.push(1).is_ok());
 //! assert!(producer.push(2).is_ok());
@@ -48,6 +48,17 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
+// Const on the host path so `EventBuf::new` can be const. Loom's cell is not
+// const-constructible, so the Loom build keeps a non-const helper.
+//
+// Prefer `[const { … }; N]` over `array::from_fn`: the latter is not
+// const-callable with these constructors on the MSRV toolchain.
+#[cfg(not(loom))]
+const fn slot_array<T, const N: usize>() -> [TrackedCell<MaybeUninit<T>>; N] {
+    [const { TrackedCell::new(MaybeUninit::uninit()) }; N]
+}
+
+#[cfg(loom)]
 fn slot_array<T, const N: usize>() -> [TrackedCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| TrackedCell::new(MaybeUninit::uninit()))
 }
@@ -64,7 +75,8 @@ const RETRY_LIMIT: usize = 2;
 /// and can inspect the oldest item with [`Consumer::peek`] without consuming it.
 ///
 /// # Panics
-/// - `EventBuf::new()` panics if `N == 0`.
+/// - `EventBuf::new()` fails to compile (const assertion) when `N == 0` on the
+///   host path; under Loom it panics at runtime.
 /// - `producer()` / `consumer()` panic if called while another handle of
 ///   the same kind is already active. Use [`EventBuf::try_producer`] /
 ///   [`EventBuf::try_consumer`] for a fallible alternative.
@@ -85,8 +97,45 @@ unsafe impl<T: Copy + Send, const N: usize> Sync for EventBuf<T, N> {}
 impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// Create a new, empty event buffer.
     ///
+    /// On the normal (non-Loom) build this is a `const fn`, so the buffer can
+    /// be placed in a `static`:
+    /// `static BUF: EventBuf<u32, 64> = EventBuf::new();`.
+    /// Under `--cfg loom` it is deliberately non-const — Loom's atomics are
+    /// not const-constructible.
+    ///
+    /// # Capacity `0` is a build failure
+    /// The `N > 0` check is a *const* assertion, so a zero-capacity buffer
+    /// cannot be constructed at all -- there is no runtime panic left to
+    /// catch, and therefore no way to write the negative case as a `#[test]`.
+    /// This `compile_fail` doctest is that coverage, and pinning the error code
+    /// keeps it honest: without it the test would also pass on a typo.
+    ///
+    /// ```compile_fail,E0080
+    /// let _ = ph_eventing::EventBuf::<u32, 0>::new();
+    /// ```
+    ///
+    /// # Panics
+    /// Does not panic on the host path. Under Loom, where `new` is non-const,
+    /// `N == 0` is a runtime assertion instead.
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "EventBuf capacity N must be > 0");
+        }
+        Self {
+            head: AtomicU32::new(0),
+            tail: AtomicU32::new(0),
+            slots: slot_array::<T, N>(),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a new, empty event buffer (Loom build — non-const).
+    ///
     /// # Panics
     /// Panics if `N == 0`.
+    #[cfg(loom)]
     pub fn new() -> Self {
         assert!(N > 0, "EventBuf capacity N must be > 0");
         Self {
@@ -184,8 +233,22 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Create the producer handle. Only one producer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_producer`](Self::try_producer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a producer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_producer() and handle None"
+    )]
     #[inline]
     pub fn producer(&self) -> Producer<'_, T, N> {
         self.try_producer()
@@ -210,8 +273,22 @@ impl<T: Copy, const N: usize> EventBuf<T, N> {
 
     /// Create the consumer handle. Only one consumer may be active.
     ///
+    /// # Deprecated
+    /// Prefer [`try_consumer`](Self::try_consumer). This crate targets firmware,
+    /// where a panic is a reset and the panic machinery itself costs flash — a
+    /// code-size probe shows no panic strings reach the binary when only the
+    /// `try_*` constructors are used. The shorter, more discoverable name being
+    /// the hazardous one is the inversion this deprecation exists to correct.
+    ///
+    /// Still sound, still tested, and convenient on a host where a panic is just
+    /// a failed test. Scheduled for removal in 0.3.0.
+    ///
     /// # Panics
     /// Panics if a consumer handle is already active.
+    #[deprecated(
+        since = "0.2.0",
+        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_consumer() and handle None"
+    )]
     #[inline]
     pub fn consumer(&self) -> Consumer<'_, T, N> {
         self.try_consumer()
@@ -373,6 +450,12 @@ impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
 
 #[cfg(test)]
 mod tests {
+    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
+    // so these tests are their coverage -- including the two that assert the
+    // panic message. Allowing the lint here rather than at the crate root keeps
+    // the warning live for library code, which is where it should bite.
+    #![allow(deprecated)]
+
     use super::*;
 
     #[test]
@@ -646,5 +729,42 @@ mod tests {
         assert_eq!(c.peek(), Some(20));
         assert_eq!(c.pop(), Some(20));
         assert_eq!(c.peek(), None);
+    }
+
+    // Loom's `new` is deliberately non-const, so a `static` init only exists
+    // on the host path.
+    #[cfg(not(loom))]
+    #[test]
+    fn const_new_works_in_const_context() {
+        static BUF: EventBuf<u32, 4> = EventBuf::new();
+        assert!(BUF.is_empty());
+        assert_eq!(BUF.capacity(), 4);
+    }
+
+    // The point of the const `new` is not that a `static` compiles -- it is
+    // that handles borrowed from one are `'static` and `Send`, which is what
+    // lets the producer move into an ISR while the consumer stays in a task
+    // loop. A test that only builds the `static` would still pass if the
+    // lifetime were tied to a local, so pin the signature explicitly.
+    #[cfg(not(loom))]
+    #[test]
+    fn static_buf_yields_static_sendable_handles() {
+        static BUF: EventBuf<u32, 4> = EventBuf::new();
+
+        fn producer_for_isr() -> super::Producer<'static, u32, 4> {
+            BUF.producer()
+        }
+        fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
+            BUF.consumer()
+        }
+        fn assert_send<T: Send>(_: &T) {}
+
+        let p = producer_for_isr();
+        let c = consumer_for_task();
+        assert_send(&p);
+        assert_send(&c);
+
+        p.push(7).unwrap();
+        assert_eq!(c.pop(), Some(7));
     }
 }

@@ -1,0 +1,33 @@
+# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless
+# rustc-commit: ded5c06cf21d2b93bffd5d884aa6e96934ee4234
+#
+# Host-independent: byte-identical on x86_64-pc-windows-msvc and
+# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all
+# eight gated targets. That is what makes committing it sound.
+#
+# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it
+# would make that fork mandatory for every contributor.
+armv7a-none-eabi	bss	268
+armv7a-none-eabi	data	0
+armv7a-none-eabi	two_calls	220
+armv7r-none-eabi	bss	268
+armv7r-none-eabi	data	0
+armv7r-none-eabi	two_calls	220
+riscv32imac-unknown-none-elf	bss	268
+riscv32imac-unknown-none-elf	data	0
+riscv32imac-unknown-none-elf	two_calls	152
+thumbv6m-none-eabi	bss	268
+thumbv6m-none-eabi	data	0
+thumbv6m-none-eabi	two_calls	156
+thumbv7em-none-eabi	bss	268
+thumbv7em-none-eabi	data	0
+thumbv7em-none-eabi	two_calls	180
+thumbv7m-none-eabi	bss	268
+thumbv7m-none-eabi	data	0
+thumbv7m-none-eabi	two_calls	180
+thumbv8m.base-none-eabi	bss	268
+thumbv8m.base-none-eabi	data	0
+thumbv8m.base-none-eabi	two_calls	156
+thumbv8m.main-none-eabi	bss	268
+thumbv8m.main-none-eabi	data	0
+thumbv8m.main-none-eabi	two_calls	152

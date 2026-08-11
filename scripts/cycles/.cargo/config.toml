@@ -1,0 +1,22 @@
+[build]
+target = "thumbv7m-none-eabi"
+
+[target.thumbv7m-none-eabi]
+# `link.x` comes from cortex-m-rt; `memory.x` next to this file describes the
+# lm3s6965evb memory map.
+rustflags = ["-C", "link-arg=-Tlink.x"]
+
+# `-icount shift=0` makes one guest instruction take exactly one clock tick.
+# That is the whole trick: it turns SysTick into an instruction counter and
+# makes every run bit-identical, which is what lets these numbers be a gate
+# rather than a benchmark. Without it QEMU runs as fast as it can and the
+# counts vary per run and per host.
+runner = """
+qemu-system-arm
+  -cpu cortex-m3
+  -machine lm3s6965evb
+  -nographic
+  -semihosting-config enable=on,target=native
+  -icount shift=0
+  -kernel
+"""

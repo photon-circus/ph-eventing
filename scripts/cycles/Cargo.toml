@@ -1,0 +1,23 @@
+# Cycle-cost probe. Runs under QEMU with instruction counting so the numbers are
+# deterministic. Its own workspace, like scripts/codesize, so the root package
+# keeps reporting zero dependencies.
+[workspace]
+
+[package]
+name = "ph-eventing-cycles"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ph-eventing = { path = "../.." }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+cortex-m-semihosting = "0.5"
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+debug = true

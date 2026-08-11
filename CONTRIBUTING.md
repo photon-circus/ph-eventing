@@ -117,6 +117,39 @@ What each pass is for:
 race is real by the letter of the memory model. Read its module docs before
 reporting a Miri finding as new.
 
+### Code size on the embedded targets
+
+If you change an API shape that embedded callers reach for -- especially
+anything touching atomics -- measure it before arguing about it:
+
+```bash
+./scripts/codesize.sh              # 8 upstream targets
+XTENSA=1 ./scripts/codesize.sh     # plus ESP32, needs the esp-rs fork
+```
+
+A design that looks cheaper on Cortex-M4 can be markedly worse on Cortex-M0+,
+where portable-atomic turns each read-modify-write into an interrupt-disable
+critical section, or on RISC-V, where `compare_exchange` lowers to an LR/SC
+loop while `fetch_or` is a single instruction. One target is not evidence.
+
+Nothing extra to install: `llvm-size` comes from the `llvm-tools` component
+that `rust-toolchain.toml` already declares.
+
+### Instruction cost
+
+If you change a hot path, measure the time cost as well as the size cost:
+
+```bash
+./scripts/cycles.sh
+```
+
+Needs `qemu-system-arm` (`sudo apt-get install qemu-system-arm`); it skips
+cleanly without it. It is deliberately **not** part of `./scripts/ci.sh` —
+every other check is satisfied by the pinned toolchain alone, and a check most
+contributors cannot run would make a green `ci.sh` mean less rather than more.
+
+Paste the numbers into your PR, as with `codesize.sh`.
+
 ### Coverage
 
 Local CI enforces a 90% line floor via `cargo llvm-cov`. Coverage is **not
