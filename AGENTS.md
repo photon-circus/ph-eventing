@@ -633,6 +633,7 @@ Re-bless deliberately, never reflexively — the diff is the review:
 ```bash
 ./scripts/codesize.sh              # baseline, 8 upstream targets
 ./scripts/codesize.sh split        # include try_split, on branches that have it
+./scripts/codesize.sh block-matrix # BlockBuilder completion + EventBuf publication
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
 ```
 
@@ -665,6 +666,16 @@ reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
 environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
 regions by exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
+
+The BlockBuf candidate's large-payload mode is isolated from the standard
+probe so its monomorphisations cannot perturb the standard LTO decisions:
+
+```bash
+./scripts/cycles.sh block-matrix
+./scripts/verify.sh cycles block-matrix  # pinned reference environment
+```
+
+Run the default probe as well when changing shared measurement infrastructure.
 
 | | empty | loaded | rejected/empty |
 |---|---:|---:|---:|

@@ -28,6 +28,7 @@
 # Usage:
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
+#   ./scripts/codesize.sh block-matrix     # Block completion + publication shapes
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
@@ -46,9 +47,14 @@ export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
 BLESS=0
+BLOCK_MATRIX=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
+        block-matrix)
+            PROBE_FEATURES="block-matrix"
+            BLOCK_MATRIX=1
+            ;;
         --bless) BLESS=1 ;;
         # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
         *) printf 'unknown argument: %s
@@ -114,11 +120,19 @@ fn_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
-printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        TARGET SHAPE code_B block_B accepted_B rejected_B
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        '------------------------------' '----------' '------' '-------' '----------' '----------'
+else
+    printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
+    printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+fi
 
 skipped=0
 failed=0
+matrix_missing=0
 
 for entry in $TARGETS; do
     target="$(printf '%s' "$entry" | cut -d'|' -f1)"
@@ -160,6 +174,27 @@ for entry in $TARGETS; do
     fi
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
+
+    if [ "$BLOCK_MATRIX" = "1" ]; then
+        for shape in w2_n8 w2_n32 w2_n128 w8_n8 w8_n32 w8_n128 w16_n8 w16_n32 w16_n128; do
+            width="$(printf '%s' "$shape" | sed 's/^w\([0-9]*\)_.*/\1/')"
+            count="$(printf '%s' "$shape" | sed 's/.*_n//')"
+            code="$(fn_size "$ar" "block_${shape}_publish")"
+            block_bytes=$((width * count + 8))
+            accepted_bytes=$((block_bytes * 2))
+            # A rejected push preserves and returns the complete block, so it
+            # crosses a caller-visible result boundary instead of a slot-write
+            # boundary. Both paths therefore carry two block-sized moves after
+            # the final sample: builder completion plus publish-or-return.
+            rejected_bytes=$((block_bytes * 2))
+            [ -z "$code" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-10s %8s %8s %10s %10s\n' \
+                "$target" "$shape" "${code:--}" "$block_bytes" \
+                "$accepted_bytes" "$rejected_bytes"
+        done
+        continue
+    fi
+
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
@@ -182,6 +217,22 @@ if [ "$skipped" -gt 0 ]; then
     printf 'per-architecture differences this script exists to find.\n\n'
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
+
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    if [ "$matrix_missing" -gt 0 ]; then
+        printf '%s block-matrix function(s) had no code-size measurement.\n' \
+            "$matrix_missing" >&2
+        exit 1
+    fi
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'block_B is size_of::<Block<T, N>>(). accepted_B counts builder\n'
+    printf 'completion plus publication; rejected_B counts completion plus\n'
+    printf 'returning the complete rejected block to the caller.\n'
+    printf 'These are logical payload-traffic bounds; code_B is emitted flash.\n'
+    printf 'Run scripts/cycles.sh for accepted/rejected instruction paths.\n'
+    exit 0
+fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Baseline gate

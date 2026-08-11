@@ -15,6 +15,11 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 cortex-m-semihosting = "0.5"
 
+[features]
+# Isolate the large-payload completion/publication matrix from the standard
+# hot-path probe so adding matrix rows cannot perturb its LTO decisions.
+block-matrix = []
+
 [profile.release]
 opt-level = "z"
 lto = true

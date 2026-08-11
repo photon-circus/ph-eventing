@@ -201,6 +201,26 @@ Required matrix before promotion:
 - all code-size targets and the reference QEMU cycle target; and
 - both instructions and bytes copied, not just atomic handoff cost.
 
+### 6.1 Measurement result (2026-08-11)
+
+The full matrix is recorded in
+[`block-buf-measurements.md`](block-buf-measurements.md). It includes exact
+code-size rows for all eight gated targets and accepted/rejected instruction
+counts from the pinned QEMU 10.0.11 reference environment.
+
+On the reference Cortex-M3, accepted completion plus publication ranges from
+159 instructions for 2-byte samples at `N = 8` to 8,658 instructions for
+16-byte samples at `N = 128`. Rejection is within 5–31 instructions of the
+accepted path because the complete rejected block is preserved and returned to
+the caller. Logical payload traffic ranges from 48 to 4,112 bytes per path.
+
+This supplies the missing measurements but does not close the foundation
+decision: no named ISR/task instruction budget or RAM envelope exists in the
+record. Decision **P** therefore remains open, and decision **S** must continue
+to wait. The next maintainer input is the budget for the supported shapes; only
+then can the branch choose Copy composition or authorize the representative
+BlockBuf-over-SlotPool integration.
+
 ## 7. Deferred choices and decision evidence
 
 | Choice | Safe default | Evidence that changes it |
@@ -236,8 +256,10 @@ no block-specific evidence; Loom remains required for the selected transport.
 
 1. Maintainer confirms the type-identity recommendation and treats D3 as a
    scheduling decision rather than separate sample/block primitive designs.
-2. Run the section 6 matrix against named budgets; choose Copy composition or
-   SlotPool/grants from the result.
+2. Compare the completed section 6 matrix against named budgets; choose Copy
+   composition or SlotPool/grants from the result. The measurement is complete;
+   naming the instruction/time and RAM budgets remains a maintainer decision.
 3. Run standard CI and Miri; run Loom for the selected transport.
-4. If Copy wins, extend code-size/cycle probes with accepted block shapes. If
-   SlotPool wins, specify grant teardown and ownership proof before PROPOSED.
+4. If Copy wins, decide which completed matrix rows become release baselines.
+   If SlotPool wins, specify grant teardown and ownership proof before
+   PROPOSED.
