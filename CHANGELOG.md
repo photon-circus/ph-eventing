@@ -12,6 +12,29 @@ All notable changes to this project will be documented in this file.
   `SKIP` row with a summary warning, missing rows fail, and `--bless` refuses after any skip or
   failure.
 ### Added
+- `static_spsc!` — declarative bring-up for a `static` SPSC buffer. Expands to a `static`, two
+  handle type aliases, and an all-or-nothing `take()`. This is the crate's one concession to
+  ergonomics and it is made at **compile time**: no allocation, no indirection, no instruction that
+  would not be there if written out by hand.
+
+  It exists because handles are `Send + !Sync` — which is exactly what makes moving a producer into
+  an ISR sound — and a `static` requires `Sync`, so handles can **never** live in a `static`
+  whatever the constructor looks like. Taking them stays a runtime step permanently. What the macro
+  removes is the boilerplate: naming
+  `ph_eventing::event_buf::Producer<'static, u32, 64>` in every signature that accepts a handle.
+
+  ```rust
+  ph_eventing::static_spsc! {
+      pub mod telemetry: EventBuf<u32, 64>;
+  }
+  fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+  let (tx, rx) = telemetry::take().expect("first take");
+  ```
+
+  It generates a module rather than prefixed names because `macro_rules!` cannot concatenate
+  identifiers; a proc-macro dependency would have bought nicer names at a cost this crate does not
+  pay.
+### Added
 - `compile_fail` doctests covering the `N == 0` rejection on `SeqRing::new` and `EventBuf::new`.
   The check is a const assertion, so there is no runtime panic to catch and the case cannot be
   written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.

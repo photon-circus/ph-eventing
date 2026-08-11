@@ -62,6 +62,7 @@ ph-eventing/
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
+    ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
@@ -755,18 +756,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 8 doctests, plus 2 `compile_fail` doctests.
-
-**Compile-fail coverage.** `N == 0` is a *const* assertion on all three types,
-so there is no runtime panic to catch and no way to write the negative case as
-a `#[test]` — `zero_capacity_panics` had to be deleted when the assertion moved
-to compile time. The gap is closed with `compile_fail` doctests on each `new`,
-**with the error code pinned** (`compile_fail,E0080`). The code matters: a bare
-`compile_fail` also passes when the snippet fails for an unrelated reason, such
-as a typo in the type name, so it would silently stop testing what it claims to.
-This needs no dev-dependency — `trybuild` was considered and rejected, since
-rustdoc already does it and the crate's dependency budget is worth more than
-the nicer output.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 67 unit tests + 11 doctests, plus 2 `compile_fail` doctests.
 
 ## Code Conventions
 
