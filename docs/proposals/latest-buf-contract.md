@@ -229,9 +229,7 @@ the measured implementation, per environment.
 
 ## 9. Decision points (D)
 
-D1 and D2 are **closed** (2026-08-11, below). D3 remains open deliberately;
-it does not block contract review, and it must be closed before the
-implementation is accepted.
+All three decision points are **closed** (2026-08-11, below).
 
 - **D1. Wrap-ambiguity policy — CLOSED (maintainer, 2026-08-11): options
   (a) + (c) together.** `skipped` is exact within one wrap span and reports
@@ -271,10 +269,33 @@ implementation is accepted.
   non-promise **X7** states the substitution limitation for adopters, and
   the evidence map pins the absence of the impl so it cannot regress
   silently.
-- **D3. First deliverable form.** Latest-sample vs latest-complete-block
-  (proposal §11). The contract above is form-agnostic (a block is just a
-  `T`), but the acceptance measurements are not; the choice shapes the
-  probe payloads.
+- **D3. First deliverable form — CLOSED (maintainer, 2026-08-11): the
+  convergent answer.** The first deliverable is the payload-agnostic
+  `LatestBuf<T>` exactly as this contract states it: a complete block is a
+  payload (`T = Block<…>`), and sample-versus-block is a release-scheduling
+  and RAM choice, never a separate primitive. There is no `LatestBlockBuf`
+  to design; the coupled BlockBuf candidate's composition
+  (`LatestBuf<Block<T, N>>` for latest, `EventBuf<Block<T, N>, Q>` for
+  queued, caller policy on the returned block for drop-new) is the
+  confirmed type identity. Both lanes reached this independently, and the
+  joint composition matrix (`8593b4a`; 66 pinned regions over 2/8/16-byte
+  samples × `N = 8/32/128`) measured it: no row establishes a separate
+  latest-block contract, and the probe-payload concern above is satisfied
+  by having measured both shapes.
+  **Documentation obligation, binding on the block-payload surfaces:**
+  per-shape RAM stated plainly (three complete blocks plus the private
+  builder — 136–8,280 B across the measured grid); the small-block
+  inversion stated as guidance, not buried (at `N = 8`, block publication
+  costs 54%/31% more than `N` individual publishes for 8/16-byte samples;
+  block release wins for every 2-byte row and for 8/16-byte rows at
+  `N >= 32`); and the no-partial-block limitation stated for adopters —
+  composition never exposes an incomplete window, so sample-level
+  freshness inside a partially filled block is unobtainable by design.
+  **Registered reopening condition** (carried from the evaluation record):
+  a separate block transport earns existence only by enforcing a guarantee
+  composition cannot — direct-to-granted-slot filling with a measured
+  copy/RAM win — and that question lives behind cycle decisions P/S, not
+  here.
 
 ## 10. Evidence map
 

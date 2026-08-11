@@ -23,6 +23,15 @@ All notable changes to this project will be documented in this file.
   decision, never the transport's. A convenience `Source` impl remains an additive,
   adopter-evidence-gated future decision, and a compile-fail pin keeps it from arriving
   silently.
+- `LatestBuf` contract: decision **D3** (first deliverable form) is closed as the convergent
+  answer from both coupled lanes — payload-agnostic `LatestBuf<T>`, with a complete block as
+  a payload (`LatestBuf<Block<T, N>>` latest / `EventBuf<Block<T, N>, Q>` queued / caller
+  policy for drop-new) and no separate `LatestBlockBuf`. The joint composition matrix is the
+  acceptance measurement set for both shapes; the closure binds a documentation obligation
+  on the block-payload surfaces (per-shape RAM, the small-`N` cost inversion, and the
+  no-partial-block limitation) and registers the only reopening condition: a separate block
+  transport must enforce a guarantee composition cannot, behind cycle decisions P/S. All
+  three contract decision points are now closed.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so

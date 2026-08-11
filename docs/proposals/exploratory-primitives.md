@@ -77,7 +77,8 @@ block. Overload policies (`Latest` / `Queued` / `Drop`) are separate
 compile-time types. Each delivered block is internally contiguous even when
 whole blocks are skipped, so a DSP knows exactly where a discontinuity
 occurred. Likely one of the strongest additions for embedded DSP; coupled
-to the LatestBuf contract's decision point D3.
+to the LatestBuf contract's decision point D3 (closed 2026-08-11 as
+composition over payload-agnostic `LatestBuf<T>` — contract §9).
 
 ## 3. SlotPool: bounded zero-copy ownership transfer
 

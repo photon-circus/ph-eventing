@@ -9,6 +9,11 @@
 - **Related:** [`latest-buf.md`](latest-buf.md) §11 (the complete-block
   variant sketch) and [`latest-buf-contract.md`](latest-buf-contract.md)
   decision point **D3** — this document and D3 must be resolved together.
+  **Resolved (2026-08-11):** D3 is closed as the convergent answer —
+  payload-agnostic `LatestBuf<T>`, blocks as payloads, composition as the
+  type identity (contract §9). The developed candidate on
+  `candidate/block-buf` carries the confirmed design; this seed document is
+  historical.
 
 ## 1. Design sketch (from the taxonomy)
 
@@ -98,7 +103,8 @@ obvious.
 
 ## 4. Promotion bar to PROPOSED
 
-1. Resolve D3 jointly with this document (maintainer decision).
+1. Resolve D3 jointly with this document (maintainer decision). **Done
+   2026-08-11** — closed as composition; see the contract §9.
 2. Answer the type-identity questions above — in particular whether each
    variant is a new primitive or a composition over existing/planned ones.
 3. Develop to the detail level of [`latest-buf.md`](latest-buf.md); derive
