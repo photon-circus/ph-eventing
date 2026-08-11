@@ -4,11 +4,12 @@
 //!
 //! | Type | When to reach for it |
 //! |------|----------------------|
+//! | [`Block`] / [`BlockBuilder`] | Complete contiguous sample windows; compose with a transport. |
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
 //!
-//! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
+//! All are fixed-size, zero-allocation, and generic over `T: Copy`.
 //!
 //! # Common traits
 //!
@@ -200,12 +201,14 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 #[macro_use]
 mod macros;
 
+pub mod block;
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
+pub use block::{Block, BlockBuilder, FillError};
 pub use event_buf::EventBuf;
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};

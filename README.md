@@ -13,11 +13,12 @@ Stack-allocated ring buffers for no-std embedded targets.
 
 | Type | Use case |
 |------|----------|
+| [`Block<T, N>` / `BlockBuilder<T, N>`](#complete-blocks) | Build complete contiguous sample windows, then compose them with a transport. |
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
 
-All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
 ## What this optimises for
 
@@ -48,6 +49,7 @@ panics, or hides a cost.
 
 ## Features
 - Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
+- Complete contiguous sample blocks with an explicit fill-side builder.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
 - No heap, no dynamic dispatch, no required dependencies.
@@ -68,6 +70,35 @@ panics, or hides a cost.
   combinations individually; `scripts/ci.sh` enumerates the supported set.
 
 ## Usage
+
+### Complete blocks
+
+`BlockBuilder<T, N>` privately accumulates sequenced samples and yields a
+`Block<T, N>` only when all `N` contiguous samples are present. A gap is
+returned to the caller without changing the partial block, and clearing or
+dropping a partial builder publishes nothing. Timestamping is payload policy:
+use a timestamped type for `T` when required.
+
+`Block` is deliberately not another queue. Compose it with the overload policy
+you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
+newest when full; the proposed `LatestBuf<Block<T, N>>` will retain only the
+latest complete block.
+
+```rust
+use ph_eventing::{BlockBuilder, EventBuf};
+
+let mut fill = BlockBuilder::<i16, 4>::new();
+for (sequence, sample) in [(10, 1), (11, 2), (12, 3)] {
+    assert!(fill.push(sequence, sample).unwrap().is_none());
+}
+let block = fill.push(13, 4).unwrap().unwrap();
+
+let queue = EventBuf::<_, 2>::new();
+let producer = queue.try_producer().unwrap();
+let consumer = queue.try_consumer().unwrap();
+producer.push(block).unwrap();
+assert_eq!(consumer.pop().unwrap().samples(), &[1, 2, 3, 4]);
+```
 
 ### RingBuf
 
@@ -293,7 +324,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 69 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
+| 78 unit + 12 doctests + 4 compile-fail | Behaviour, including threaded stress tests for both SPSC types; zero capacities rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

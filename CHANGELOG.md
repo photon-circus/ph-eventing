@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample
+  windows without introducing another queue policy. The builder rejects gaps
+  explicitly, skips reserved sequence zero at wrap, and yields a public block
+  only after all `N` samples are initialized. Compose blocks with
+  `EventBuf<Block<...>, Q>` today or the proposed `LatestBuf<Block<...>>` for
+  freshness-first handoff.
+
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked

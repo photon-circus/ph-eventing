@@ -1,0 +1,336 @@
+//! Complete, contiguous sample blocks and a fill-side builder.
+//!
+//! `Block` is deliberately a payload, not a queue. Compose it with the
+//! transport whose overload policy matches the application:
+//!
+//! - `EventBuf<Block<T, N>, Q>` queues up to `Q` complete blocks and rejects
+//!   the newest block when full;
+//! - the proposed `LatestBuf<Block<T, N>>` retains only the latest complete
+//!   block.
+//!
+//! Publication cannot expose a partial block because [`BlockBuilder`] only
+//! yields a [`Block`] after all `N` samples have been written. Dropping or
+//! clearing a partially filled builder publishes nothing.
+//!
+//! Timestamps are payload policy: use a timestamped sample type for `T` when
+//! each sample needs a stamp. The transport does not impose one.
+//!
+//! # Example
+//! ```
+//! use ph_eventing::{BlockBuilder, EventBuf};
+//!
+//! let mut fill = BlockBuilder::<i16, 4>::new();
+//! assert!(fill.push(10, 1).unwrap().is_none());
+//! assert!(fill.push(11, 2).unwrap().is_none());
+//! assert!(fill.push(12, 3).unwrap().is_none());
+//! let block = fill.push(13, 4).unwrap().unwrap();
+//!
+//! let queue = EventBuf::<_, 2>::new();
+//! let producer = queue.try_producer().unwrap();
+//! let consumer = queue.try_consumer().unwrap();
+//! producer.push(block).unwrap();
+//! assert_eq!(consumer.pop().unwrap().samples(), &[1, 2, 3, 4]);
+//! ```
+//!
+//! A zero-sized block is rejected at compile time:
+//!
+//! ```compile_fail,E0080
+//! use ph_eventing::BlockBuilder;
+//! const BAD: BlockBuilder<u8, 0> = BlockBuilder::new();
+//! # let _ = BAD;
+//! ```
+
+use core::mem::MaybeUninit;
+
+/// A complete, contiguous block of `N` samples.
+///
+/// Sequence `0` is reserved. The first and last sequence values describe the
+/// inclusive range represented by `samples`; wrap skips the reserved value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Block<T: Copy, const N: usize> {
+    first_sequence: u32,
+    last_sequence: u32,
+    samples: [T; N],
+}
+
+impl<T: Copy, const N: usize> Block<T, N> {
+    /// Sequence of the first sample in the block.
+    #[must_use]
+    pub const fn first_sequence(&self) -> u32 {
+        self.first_sequence
+    }
+
+    /// Sequence of the last sample in the block.
+    #[must_use]
+    pub const fn last_sequence(&self) -> u32 {
+        self.last_sequence
+    }
+
+    /// The complete contiguous sample array.
+    #[must_use]
+    pub const fn samples(&self) -> &[T; N] {
+        &self.samples
+    }
+
+    /// Consume the block and return its sample array.
+    #[must_use]
+    pub fn into_samples(self) -> [T; N] {
+        self.samples
+    }
+}
+
+/// Why a sample could not be appended to a [`BlockBuilder`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillError<T: Copy> {
+    /// Sequence `0` is reserved and never identifies a sample.
+    ReservedSequence {
+        /// The rejected sample.
+        sample: T,
+    },
+    /// The sequence was not the next contiguous value.
+    Discontinuous {
+        /// The required next sequence.
+        expected: u32,
+        /// The sequence supplied by the caller.
+        received: u32,
+        /// The rejected sample.
+        sample: T,
+    },
+}
+
+/// Privately fills one block and publishes it to the caller only when complete.
+///
+/// A discontinuous sample is rejected without changing the partial block. The
+/// caller can preserve it, or call [`clear`](Self::clear) and retry the returned
+/// sample as the start of a new window. This keeps loss policy explicit.
+pub struct BlockBuilder<T: Copy, const N: usize> {
+    samples: [MaybeUninit<T>; N],
+    len: usize,
+    first_sequence: u32,
+    last_sequence: u32,
+}
+
+impl<T: Copy, const N: usize> BlockBuilder<T, N> {
+    /// Create an empty builder.
+    ///
+    /// `N == 0` is rejected at compile time.
+    #[must_use]
+    pub const fn new() -> Self {
+        const { assert!(N > 0, "BlockBuilder capacity must be greater than zero") };
+        Self {
+            samples: [const { MaybeUninit::uninit() }; N],
+            len: 0,
+            first_sequence: 0,
+            last_sequence: 0,
+        }
+    }
+
+    /// Append one sequenced sample.
+    ///
+    /// Returns `Ok(None)` while the block is partial and `Ok(Some(block))`
+    /// exactly when the `N`th sample completes it. Completion also resets the
+    /// builder, ready for the next block.
+    pub fn push(&mut self, sequence: u32, sample: T) -> Result<Option<Block<T, N>>, FillError<T>> {
+        if sequence == 0 {
+            return Err(FillError::ReservedSequence { sample });
+        }
+
+        if self.len != 0 {
+            let expected = next_sequence(self.last_sequence);
+            if sequence != expected {
+                return Err(FillError::Discontinuous {
+                    expected,
+                    received: sequence,
+                    sample,
+                });
+            }
+        } else {
+            self.first_sequence = sequence;
+        }
+
+        self.samples[self.len].write(sample);
+        self.len += 1;
+        self.last_sequence = sequence;
+
+        if self.len != N {
+            return Ok(None);
+        }
+
+        // SAFETY: `len == N`, and `len` advances only after the corresponding
+        // slot is written. `T: Copy`, so copying the initialized array out does
+        // not invalidate the backing `MaybeUninit` storage.
+        let samples = unsafe { self.samples.as_ptr().cast::<[T; N]>().read() };
+        let block = Block {
+            first_sequence: self.first_sequence,
+            last_sequence: self.last_sequence,
+            samples,
+        };
+        self.clear();
+        Ok(Some(block))
+    }
+
+    /// Discard the partial block, if any.
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.first_sequence = 0;
+        self.last_sequence = 0;
+    }
+
+    /// Number of samples currently held in the private partial block.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether no partial block is being filled.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Number of samples required for a complete block.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        N
+    }
+
+    /// Sequence required by the next `push`, or `None` when any non-zero
+    /// sequence may start a new block.
+    #[must_use]
+    pub const fn expected_sequence(&self) -> Option<u32> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(next_sequence(self.last_sequence))
+        }
+    }
+}
+
+impl<T: Copy, const N: usize> Default for BlockBuilder<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Copy, const N: usize> core::fmt::Debug for BlockBuilder<T, N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlockBuilder")
+            .field("len", &self.len)
+            .field("capacity", &N)
+            .field("first_sequence", &self.first_sequence)
+            .field("last_sequence", &self.last_sequence)
+            .finish_non_exhaustive()
+    }
+}
+
+const fn next_sequence(sequence: u32) -> u32 {
+    if sequence == u32::MAX {
+        1
+    } else {
+        sequence + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EventBuf;
+
+    #[test]
+    fn completes_only_after_n_contiguous_samples() {
+        let mut fill = BlockBuilder::<u16, 3>::new();
+        assert_eq!(fill.push(41, 4), Ok(None));
+        assert_eq!(fill.push(42, 5), Ok(None));
+        let block = fill.push(43, 6).unwrap().unwrap();
+        assert_eq!(block.first_sequence(), 41);
+        assert_eq!(block.last_sequence(), 43);
+        assert_eq!(block.samples(), &[4, 5, 6]);
+        assert!(fill.is_empty());
+    }
+
+    #[test]
+    fn completion_resets_for_the_next_block() {
+        let mut fill = BlockBuilder::<u8, 1>::new();
+        assert_eq!(fill.push(7, 9).unwrap().unwrap().into_samples(), [9]);
+        assert_eq!(fill.push(8, 10).unwrap().unwrap().into_samples(), [10]);
+    }
+
+    #[test]
+    fn rejects_reserved_zero_without_changing_partial_block() {
+        let mut fill = BlockBuilder::<u8, 2>::new();
+        assert_eq!(fill.push(9, 1), Ok(None));
+        assert_eq!(
+            fill.push(0, 2),
+            Err(FillError::ReservedSequence { sample: 2 })
+        );
+        assert_eq!(fill.len(), 1);
+        assert_eq!(fill.expected_sequence(), Some(10));
+    }
+
+    #[test]
+    fn rejects_gap_without_hiding_loss_policy() {
+        let mut fill = BlockBuilder::<u8, 2>::new();
+        assert_eq!(fill.push(9, 1), Ok(None));
+        assert_eq!(
+            fill.push(11, 2),
+            Err(FillError::Discontinuous {
+                expected: 10,
+                received: 11,
+                sample: 2
+            })
+        );
+        assert_eq!(fill.len(), 1);
+    }
+
+    #[test]
+    fn clear_discards_a_partial_block() {
+        let mut fill = BlockBuilder::<u8, 4>::new();
+        assert_eq!(fill.push(1, 1), Ok(None));
+        fill.clear();
+        assert!(fill.is_empty());
+        assert_eq!(fill.expected_sequence(), None);
+        assert_eq!(fill.push(20, 2), Ok(None));
+    }
+
+    #[test]
+    fn sequence_wrap_skips_zero() {
+        let mut fill = BlockBuilder::<u8, 2>::new();
+        assert_eq!(fill.push(u32::MAX, 1), Ok(None));
+        let block = fill.push(1, 2).unwrap().unwrap();
+        assert_eq!(block.first_sequence(), u32::MAX);
+        assert_eq!(block.last_sequence(), 1);
+    }
+
+    #[test]
+    fn works_without_default_bound() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        struct NoDefault(u8);
+
+        let mut fill = BlockBuilder::<NoDefault, 1>::new();
+        let block = fill.push(1, NoDefault(3)).unwrap().unwrap();
+        assert_eq!(block.samples(), &[NoDefault(3)]);
+    }
+
+    #[test]
+    fn default_and_capacity_match_new() {
+        let fill = BlockBuilder::<u8, 8>::default();
+        assert_eq!(fill.capacity(), 8);
+        assert_eq!(fill.len(), 0);
+    }
+
+    #[test]
+    fn event_buf_composition_queues_and_returns_a_rejected_block() {
+        let mut fill = BlockBuilder::<u8, 2>::new();
+        assert_eq!(fill.push(1, 10), Ok(None));
+        let first = fill.push(2, 11).unwrap().unwrap();
+        assert_eq!(fill.push(3, 12), Ok(None));
+        let second = fill.push(4, 13).unwrap().unwrap();
+
+        let queue = EventBuf::<Block<u8, 2>, 1>::new();
+        let producer = queue.try_producer().unwrap();
+        let consumer = queue.try_consumer().unwrap();
+        assert_eq!(producer.push(first), Ok(()));
+        assert_eq!(producer.push(second), Err(second));
+        assert_eq!(consumer.pop(), Some(first));
+    }
+}

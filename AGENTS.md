@@ -31,6 +31,10 @@ It ships three primitives:
 - **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
 
+`Block<T, N>` + `BlockBuilder<T, N>` is the non-concurrent complete-window
+payload/fill abstraction. It composes with those transports rather than adding
+a fourth queue policy.
+
 **Key characteristics:**
 - Zero runtime dependencies (`portable-atomic` is optional; `loom` is a dev-dependency gated on `--cfg loom`). Verify with `cargo tree` — it must print the crate alone.
 - `#![no_std]` by default (std only for testing)
@@ -151,6 +155,7 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
+| `Block<T: Copy, N>` / `BlockBuilder<T, N>` | Complete contiguous sample payload and private fill state; no atomics |
 | `RingBuf<T: Copy, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
 | `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
 | `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
@@ -790,6 +795,17 @@ Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`, and `src/trai
 cargo test
 ```
 
+**`block::tests`:**
+- `completes_only_after_n_contiguous_samples` -- complete-only publication and metadata
+- `completion_resets_for_the_next_block` -- builder reuse, including `N = 1`
+- `rejects_reserved_zero_without_changing_partial_block` -- reserved sequence handling
+- `rejects_gap_without_hiding_loss_policy` -- explicit discontinuity and preserved partial state
+- `clear_discards_a_partial_block` -- explicit teardown policy
+- `sequence_wrap_skips_zero` -- contiguous wrap from `u32::MAX` to `1`
+- `works_without_default_bound` -- `T: Copy` only, no `Default`
+- `default_and_capacity_match_new` -- constructor/default introspection
+- `event_buf_composition_queues_and_returns_a_rejected_block` -- composed FIFO/rejection policy
+
 **`ring::tests`:**
 - `new_ring_is_empty` — Fresh ring state
 - `push_and_get` — Basic push/get/latest
@@ -865,8 +881,9 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
-doctests pinning the `N == 0` rejection (`E0080`) on all three types.
+`src/block.rs`, and `src/traits.rs`. Total: 78 unit tests + 12 doctests, plus 4
+`compile_fail` doctests pinning zero-capacity rejection (`E0080`) on the three
+buffers and `BlockBuilder`.
 
 ## Code Conventions
 
