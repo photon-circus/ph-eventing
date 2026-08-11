@@ -84,15 +84,23 @@ and all clauses below are stated against the sequence of those instants.
   104 yields `skipped = 2`.
 - **C4.** Each publication is observed **at most once**. A taken generation
   is never returned again.
-- **C5.** Observed generations are strictly increasing in wrap-aware order:
-  `take_latest` never returns a generation older than or equal to a
-  previously returned one.
+- **C5.** Observed generations are strictly increasing in wrap-aware order
+  **within one wrap span** (the same scope as O2): while fewer than a full
+  generation cycle of publications separates two takes, `take_latest`
+  never returns a generation older than or equal to a previously returned
+  one. Beyond that span a genuinely newer publication can carry a
+  previously seen generation value, so the comparison is inherently
+  ambiguous there — closing D1 must define the ordering behaviour for that
+  case along with the gap reporting.
 - **C6.** The value returned under generation `g` is exactly and completely
   the value published under `g` (with P6: no torn, mixed, or partially
   initialized value is ever returned).
-- **C7.** `take_latest` never waits for, observes the progress of, or
-  invokes the producer, and never delays it: the consumer may hold a
-  returned value indefinitely without affecting any producer clause.
+- **C7.** `take_latest` never waits for the producer, never invokes it,
+  and never delays it: its cost bound (B2) is independent of producer
+  activity, and the consumer may hold a returned value indefinitely
+  without affecting any producer clause. Its *result* is allowed — and by
+  C1/C2 required — to reflect published state; observing `pending` is part
+  of the operation's own bounded work, never a wait on the producer.
 
 ## 5. Ordering and accounting clauses (O)
 
@@ -141,15 +149,16 @@ the measured implementation, per environment.
   makes moving a handle into an ISR sound.)
 - **H3.** A channel is constructible in a `static` (const construction on
   the normal build), matching the existing primitives.
-- **H4.** Reacquisition continues, never restarts: a handle acquired after
-  a drop behaves as the dropped handle would have. The generation sequence
-  resumes (G1 holds across the drop), skipped accounting stays exact (C3),
-  and no storage is ever owned by two roles. Any state a handle carries
-  must therefore be persisted into the channel across the drop; a design
-  that cannot honour this must not offer reacquisition for that role
-  (narrowing H2 explicitly rather than weakening H4). *(Added after
-  review: the proposal's sketch carries producer state in the handle — see
-  proposal Appendix A.3.)*
+- **H4.** Reacquisition continues, never restarts: after a handle is
+  dropped and its role reacquired, the channel's observable behaviour is
+  indistinguishable from the original handle having continued. The
+  generation sequence resumes (G1 holds across the drop), skipped
+  accounting stays exact (C3), and every other clause keeps holding. A
+  design that cannot honour this must not offer reacquisition for that
+  role (narrowing H2 explicitly rather than weakening H4). *(How
+  continuation state survives the drop is an implementation concern,
+  deliberately not specified here — the proposal's sketch carries producer
+  state in the handle, and Appendix A.3 lists candidate mechanisms.)*
 
 ## 8. What the contract does not promise (X)
 
@@ -175,7 +184,9 @@ be closed before implementation (step 2 of the adoption sequence) begins.
   (a) document the maximum reliable gap and leave larger gaps approximate;
   (b) return an explicit "unknown/wrapped" gap state;
   (c) point callers at a wider producer-assigned sequence in the payload.
-  O2 is scoped "within one wrap span" until this is decided.
+  O2 and C5 are scoped "within one wrap span" until this is decided, and
+  closing D1 must define both the gap reporting and the ordering behaviour
+  beyond that span.
 - **D2. `Source<T>` policy.** Whether the consumer implements the existing
   `Source<T>` (proposal §13). The contract default is the proposal's option
   1 (no impl; `LatestSource` only) — the safest position given the
@@ -199,7 +210,7 @@ without a row here is a clause nobody is keeping true.
 | O1–O3 | Property assertions inside the Loom models and the stress test (conservation counting on both sides) |
 | B1–B3 | Code review of the final algorithm (no loops) + `cycles.sh` regions showing cost constant w.r.t. lag/occupancy |
 | B4 | `codesize.sh` panic-string probe (the 0.2.0 technique) |
-| H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation tests: the generation sequence resumes across the drop and no slot is ever owned twice |
+| H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation tests: the generation sequence resumes across the drop and no storage is ever owned by two roles. The drop→reacquire handoff is a cross-context handoff, so it additionally gets a Loom model (drop in one thread, reacquire in another) and race-detector-on Miri coverage — sequential tests cannot see a missing publication ordering on the continuation state |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
 
 ## 11. Relationship to the design sketch
