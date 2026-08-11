@@ -326,6 +326,94 @@ Two traps that look like bugs but are not:
   `cargo +stable`, which does take precedence. Local CI has a `stable:` pass
   for exactly this reason — without it nothing would catch a new stable lint.
 
+### Git traps in this repo
+
+Every item here cost real rework in this repository. They cluster around three
+things: **Windows + Git Bash**, **worktrees**, and **nested cargo workspaces**.
+
+#### Never `git add -A` here
+
+The probes under `scripts/` are separate cargo workspaces, so they build into
+`scripts/*/target/` — which the root-anchored `/target` rule in `.gitignore`
+does not match. `git add -A` swept roughly 500 build artifacts into a commit
+**four separate times** before the ignore rules covered both probes, once
+reaching ~393 MB of proposed history.
+
+Stage explicit paths, and check before committing:
+
+```bash
+git add src/ AGENTS.md CHANGELOG.md          # not -A
+git diff --cached --name-only | grep -c 'target/'   # must print 0
+```
+
+The ignore rules now exist, but a **new** probe directory reintroduces the
+hazard immediately.
+
+#### `chmod +x` does not commit the executable bit on Windows
+
+Git Bash sets the working-tree bit, so the script runs locally and looks fine.
+The index still records `100644`, and it fails with `Permission denied` on
+every Unix checkout. Two scripts shipped that way and were caught in review, not
+by any local run.
+
+```bash
+git update-index --chmod=+x scripts/foo.sh
+git ls-files -s scripts/                     # confirm 100755
+```
+
+#### `git checkout -- <path>` destroys *all* uncommitted work in that path
+
+Used to undo one bad edit in `src/`, it also silently discarded a set of
+deprecation attributes added minutes earlier in the same directory. Prefer
+`git stash` (recoverable) or revert the specific hunk.
+
+#### Git does not work from WSL in this worktree
+
+The worktree's `.git` file holds a Windows absolute path that WSL cannot
+resolve, so any `git` command from WSL fails with a confusing "not a git
+repository" naming a doubled path. **Building and testing from WSL works
+fine** — only git is affected. Do git on the Windows side, builds on either.
+
+#### Scripted edits must normalise line endings first
+
+Git checks out CRLF here. A Python or `sed` edit whose anchor spans lines and
+uses `
+` silently matches nothing, and the "fix" reports success having
+changed no file. Read with `newline=""`, `.replace("
+", "
+")`, match, then
+write with `newline="
+"`.
+
+Related: inside a heredoc, `\n` in a Python string is collapsed before Python
+sees it. Use raw strings (`r"..."`) for any anchor containing a literal
+backslash-n, which every `printf` format string does.
+
+#### Stacked PRs desync the moment you touch a middle one
+
+Adding a commit to a PR partway down a stack invalidates every child. They do
+not conflict *with* it — they silently build on a stale parent until GitHub
+marks one `DIRTY`. Recovery is a cascade of merges from the bottom up, and each
+one is an opportunity to resolve wrongly. A seven-deep stack cost four
+conflict resolutions from a single mid-stack commit.
+
+Keep stacks shallow, and after editing a middle PR, sync every descendant
+immediately rather than at review time.
+
+#### Changelog ordering
+
+Closing the `## Unreleased` heading before the release's PRs merge turns every
+one of them `CONFLICTING` — their entries are anchored on that line. See
+RELEASING.md step 4; the manifest bump is safe early, the heading rename is not.
+
+#### This shell is POSIX sh, not PowerShell
+
+A PowerShell here-string (`-m @'...'@`) passed to `git commit` produced a commit
+whose subject line was a bare `@`. Use `git commit -F -` with a heredoc.
+
+Also: `grep -c` exits non-zero when it finds nothing, which silently breaks
+`&&` chains that look like they are just printing a count.
+
 ### Releasing
 
 Follow [RELEASING.md](RELEASING.md). Two things it exists to stop:
