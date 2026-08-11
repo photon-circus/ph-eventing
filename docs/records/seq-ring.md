@@ -64,9 +64,11 @@ channel (`LatestBuf` is, with a race-free ownership argument).
   1 MHz push rate; ~5 days at 10 kHz). The module docs carry the full
   disclosure — span, silent-zero case, reachability arithmetic — and
   the structural escape hatches: bound the interval between ordered
-  polls (`poll_*`/`skip_to_latest` resynchronize; the non-advancing
-  `latest` does not), bound mid-read preemption, or use `EventBuf`,
-  which has no sequence wrap.
+  polls (`poll_one` or a nonzero-budget `poll_up_to` resynchronizes,
+  as does `skip_to_latest`; `poll_up_to(0, …)` returns before touching
+  the resume point and the non-advancing `latest` never moves it),
+  bound mid-read preemption, or use `EventBuf`, which has no sequence
+  wrap.
 - **Loss is designed behaviour.** Overwrite is the overload policy; the
   counters report it, nothing prevents it. Consumers that must see every
   event belong on `EventBuf`.

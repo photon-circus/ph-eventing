@@ -6,8 +6,9 @@
 //! - Sequence numbers are monotonically increasing `u32`; `0` is reserved to mean "empty".
 //! - The consumer can drain in-order (`poll_one`/`poll_up_to`) or sample the newest value (`latest`).
 //! - If the consumer lags by more than `N`, it skips ahead and reports the number of dropped items.
-//!   The one exception is the sequence wrap, which can drop a few extra entries depending on `N` —
-//!   see "Known limitation: extra drops at the sequence wrap" below.
+//!   Two boundaries qualify that accounting: the sequence wrap can drop a few extra entries
+//!   depending on `N`, and a gap of one whole sequence span aliases to "nothing new" and reports
+//!   zero — see the two "Known limitation" sections below.
 //!
 //! # Memory ordering
 //! The producer invalidates the per-slot sequence, writes the value, publishes the new per-slot
@@ -24,7 +25,9 @@
 //! Slot values are read and written with volatile accesses, and the consumer holds its copy as
 //! `MaybeUninit<T>` until the re-check passes. A copy that raced with an overwrite is therefore
 //! discarded as raw bytes and never materialises as a `T` that could violate the type's validity
-//! invariants.
+//! invariants — for reads that complete within one sequence span; the re-check compares sequence
+//! values, so it carries the counter-width ABA bound stated under "Known limitation: whole-span
+//! sequence aliasing" below.
 //!
 //! # Known deviation: the seqlock data race
 //!
@@ -61,9 +64,11 @@
 //!   this ring from two threads, you will get a UB report pointing into this crate. That is the
 //!   deviation, not a new bug. `scripts/miri.*` shows the split-pass approach: full checking
 //!   everywhere else, race detector off for this ring alone.
-//! - **A raced copy is never returned.** The double sequence check discards it, and it is held as
-//!   `MaybeUninit<T>` until validated, so it cannot even briefly exist as a `T` that violates the
-//!   type's validity invariants.
+//! - **A raced copy is never returned** — within the span bound. The double sequence check
+//!   discards it, and it is held as `MaybeUninit<T>` until validated, so it cannot even briefly
+//!   exist as a `T` that violates the type's validity invariants. The check compares sequence
+//!   values, so a read preempted for one whole span of publications can pass both checks against
+//!   a rewritten slot; see "Known limitation: whole-span sequence aliasing".
 //!
 //! ## If that is not acceptable
 //! - [`crate::EventBuf`] is race-free by construction — its producer and consumer never touch the
@@ -136,9 +141,11 @@
 //! ~4.29 billion publications. At a sustained 1 MHz push rate a poll gap must exceed ~71.6
 //! minutes — and the mid-read stall must hold the consumer *between two instructions of one
 //! copy* for that long — before either case is reachable; at 10 kHz it is ~5 days. The escape
-//! hatch is structural: bound the interval between ordered polls (any `poll_*` or
-//! [`Consumer::skip_to_latest`] resynchronizes the resume point; the non-advancing
-//! [`Consumer::latest`] does not) below one span, and bound consumer preemption during a single
+//! hatch is structural: bound the interval between ordered polls (`poll_one` or a
+//! nonzero-budget `poll_up_to` resynchronizes the resume point — even one item drained runs the
+//! lag-recovery jump to within `N` of newest — as does [`Consumer::skip_to_latest`];
+//! `poll_up_to(0, …)` returns before touching the resume point, and the non-advancing
+//! [`Consumer::latest`] never moves it) below one span, and bound consumer preemption during a single
 //! read to less than a span of publications. If neither bound can be stated for your system,
 //! [`crate::EventBuf`] has no sequence wrap of any kind.
 //!

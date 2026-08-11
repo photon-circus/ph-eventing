@@ -52,7 +52,7 @@ it outright. It refuses to be: lossy (that is `SeqRing`), freshness-first
 | No silent loss — every failed delivery is observable at the call site | `push` returns `Err(val)`; the type has no overwrite path; unit + threaded stress incl. lossless-and-ordered Loom model | Proven |
 | Bounded operations, no CAS retry loop | Lamport single-owner cursors: one Relaxed load + one Acquire load + one Release store per side | Proven by construction; cycle rows measured in 0.2.0 |
 | `len` reads a consistent cursor pair | The bracketed `tail`/`head`/`tail` sampling documented in the module docs | Pinned |
-| Const-constructs into `.bss` | 0.2.0 measurement across 11 targets; codesize baseline gated in CI | Measured, gated |
+| Const-constructs into `.bss` | 0.2.0 measurement across 11 targets; codesize baseline gated in CI | Measured on 11 targets; regression-gated on the eight upstream baseline targets only — the three Xtensa rows are opt-in (esp-rs toolchain) and deliberately never baseline-gated |
 | Queued block transport (D3) adds no new concurrency contract | The block layer adds no atomics; existing EventBuf clauses apply with `T = Block<…>`; publication-cost matrix at `bc54a9a` | Measured |
 
 ## 4. The record
