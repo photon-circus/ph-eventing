@@ -11,9 +11,10 @@
 //! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
 //!
 //! An evaluation-only `slot_pool` module is also compiled for this crate's
-//! tests and can be enabled downstream with `experimental-slot-pool`. Its API
-//! and guarantees are exploratory and are not part of the three published
-//! primitive contracts above.
+//! tests and can be enabled downstream with `experimental-slot-pool`. It uses
+//! type-state-checked lazy initialization and zero-copy reusable grants, but
+//! its API is exploratory and is not part of the three published primitive
+//! contracts above.
 //!
 //! # Common traits
 //!

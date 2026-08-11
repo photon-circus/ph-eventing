@@ -78,6 +78,10 @@ run_miri 'host: seqlock logic (race detector off)' \
 run_miri "host: $SEEDS scheduler seeds" \
     "$BASE -Zmiri-many-seeds=0..$SEEDS" -- concurrent_spsc len_stays
 
+run_miri "host: SlotPool initialization, $SEEDS scheduler seeds" \
+    "$BASE -Zmiri-many-seeds=0..$SEEDS" -- \
+    slot_pool::tests::vacant_slots_require_write_before_publication
+
 if [ "${HOST_ONLY:-0}" = "0" ]; then
     for target in $CROSS_TARGETS; do
         run_miri "$target" "$BASE" --target "$target" -- --skip "$SEQLOCK_TEST"

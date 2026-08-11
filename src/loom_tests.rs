@@ -19,6 +19,7 @@
 // they remain public API until 0.3.0, so their orderings still need proving.
 #![allow(deprecated)]
 
+use crate::slot_pool::{Reservation, SlotPool};
 use crate::{EventBuf, SeqRing};
 use loom::sync::Arc;
 use loom::thread;
@@ -212,5 +213,107 @@ fn seq_ring_latest_is_never_ahead_of_published() {
 
         producer.join().unwrap();
         consumer.join().unwrap();
+    });
+}
+
+/// Slot publication makes the producer's complete mutation visible before a
+/// claim can read it, and claim release finishes before producer reuse.
+///
+/// Capacity one makes every slot access conflict if either Release/Acquire
+/// edge is missing. SlotPool's Loom build routes grant/claim access through a
+/// tracked cell, so Loom reports an actual overlapping access rather than
+/// merely checking cursor values.
+#[test]
+fn slot_pool_commit_and_claim_transfer_exclusive_access() {
+    loom::model(|| {
+        let pool = Arc::new(SlotPool::new([0_u32]));
+
+        let producer_pool = Arc::clone(&pool);
+        let producer = thread::spawn(move || {
+            let mut producer = producer_pool.try_producer().expect("producer");
+            let Reservation::Initialized(mut grant) =
+                producer.try_reserve().expect("available slot")
+            else {
+                panic!("pre-initialized pool returned a vacant slot");
+            };
+            grant.with_mut(|value| *value = 0xA5A5_5A5A);
+            grant.with(|value| assert_eq!(*value, 0xA5A5_5A5A));
+            grant.commit();
+        });
+
+        let consumer_pool = Arc::clone(&pool);
+        let consumer = thread::spawn(move || {
+            let mut consumer = consumer_pool.try_consumer().expect("consumer");
+            consumer.try_claim().map(|claim| {
+                claim.with(|value| assert_eq!(*value, 0xA5A5_5A5A));
+            })
+        });
+
+        producer.join().unwrap();
+        let observed = consumer.join().unwrap().is_some();
+
+        // If the racing poll happened before publication, publication must be
+        // visible now. If it claimed the item, its Drop already released it.
+        let mut consumer = pool.try_consumer().expect("reacquired consumer");
+        match (observed, consumer.try_claim()) {
+            (true, None) => {}
+            (false, Some(claim)) => {
+                claim.with(|value| assert_eq!(*value, 0xA5A5_5A5A));
+            }
+            (true, Some(_)) => panic!("one committed slot was claimed twice"),
+            (false, None) => panic!("committed slot was lost"),
+        }
+    });
+}
+
+/// Dropping a mutated grant publishes nothing under every cancellation race.
+/// A later commit of the same reusable slot is the only value a claim may see.
+#[test]
+fn slot_pool_grant_drop_never_publishes_cancellation_residue() {
+    loom::model(|| {
+        let pool = Arc::new(SlotPool::new([0_u32]));
+
+        let producer_pool = Arc::clone(&pool);
+        let producer = thread::spawn(move || {
+            let mut producer = producer_pool.try_producer().expect("producer");
+
+            let Reservation::Initialized(mut cancelled) =
+                producer.try_reserve().expect("available slot")
+            else {
+                panic!("pre-initialized pool returned a vacant slot");
+            };
+            cancelled.with_mut(|value| *value = 1);
+            drop(cancelled);
+            thread::yield_now();
+
+            let Reservation::Initialized(mut committed) =
+                producer.try_reserve().expect("cancelled slot is free")
+            else {
+                panic!("cancelled initialized slot became vacant");
+            };
+            committed.with_mut(|value| *value = 2);
+            committed.commit();
+        });
+
+        let consumer_pool = Arc::clone(&pool);
+        let consumer = thread::spawn(move || {
+            let mut consumer = consumer_pool.try_consumer().expect("consumer");
+            consumer.try_claim().map(|claim| {
+                claim.with(|value| assert_eq!(*value, 2, "cancelled value was published"));
+            })
+        });
+
+        producer.join().unwrap();
+        let observed = consumer.join().unwrap().is_some();
+
+        let mut consumer = pool.try_consumer().expect("reacquired consumer");
+        match (observed, consumer.try_claim()) {
+            (true, None) => {}
+            (false, Some(claim)) => {
+                claim.with(|value| assert_eq!(*value, 2));
+            }
+            (true, Some(_)) => panic!("one committed slot was claimed twice"),
+            (false, None) => panic!("committed slot was lost"),
+        }
     });
 }

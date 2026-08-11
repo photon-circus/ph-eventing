@@ -28,6 +28,7 @@
 # Usage:
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
+#   ./scripts/codesize.sh slot-pool        # SlotPool operation shapes
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
@@ -46,9 +47,14 @@ export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
 BLESS=0
+SLOT_POOL=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
+        slot-pool)
+            PROBE_FEATURES="slot-pool"
+            SLOT_POOL=1
+            ;;
         --bless) BLESS=1 ;;
         # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
         *) printf 'unknown argument: %s
@@ -114,8 +120,14 @@ fn_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
-printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+if [ "$SLOT_POOL" = "1" ]; then
+    printf '%-30s %10s %10s %10s %10s\n' TARGET reserve_B commit_B init_B claim_B
+    printf '%-30s %10s %10s %10s %10s\n' \
+        '------------------------------' '---------' '--------' '------' '-------'
+else
+    printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
+    printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+fi
 
 skipped=0
 failed=0
@@ -160,6 +172,21 @@ for entry in $TARGETS; do
     fi
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
+
+    if [ "$SLOT_POOL" = "1" ]; then
+        reserve="$(fn_size "$ar" slot_pool_reserve_cancel)"
+        commit="$(fn_size "$ar" slot_pool_reserve_commit)"
+        init="$(fn_size "$ar" slot_pool_initialize_commit)"
+        claim="$(fn_size "$ar" slot_pool_claim_release)"
+        printf '%-30s %10s %10s %10s %10s\n' \
+            "$target" "${reserve:--}" "${commit:--}" "${init:--}" "${claim:--}"
+        [ -z "$reserve" ] && failed=$((failed + 1))
+        [ -z "$commit" ] && failed=$((failed + 1))
+        [ -z "$init" ] && failed=$((failed + 1))
+        [ -z "$claim" ] && failed=$((failed + 1))
+        continue
+    fi
+
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
@@ -182,6 +209,17 @@ if [ "$skipped" -gt 0 ]; then
     printf 'per-architecture differences this script exists to find.\n\n'
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
+
+if [ "$SLOT_POOL" = "1" ]; then
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'reserve_B includes the available/full branch and cancellation;\n'
+    printf 'commit_B adds initialized mutation and publication; init_B records\n'
+    printf 'the first-write type-state transition plus publication; claim_B\n'
+    printf 'includes the available/empty branch, read, and release. Run\n'
+    printf 'scripts/cycles.sh slot-pool for state-specific instruction paths.\n'
+    exit 0
+fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Baseline gate

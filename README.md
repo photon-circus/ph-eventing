@@ -22,11 +22,13 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 ### Experimental SlotPool
 
 The `experimental-slot-pool` feature exposes an evaluation-only `SlotPool<T, N>`.
-It transfers FIFO ownership of pre-initialized reusable slots through RAII
-producer grants and consumer claims, including non-`Copy` payloads. This is a
-candidate probe, not a published primitive contract: the API may change or be
-removed, and the promotion evidence described in
-[`docs/proposals/slot-pool.md`](docs/proposals/slot-pool.md) is not complete.
+It transfers FIFO ownership through RAII grants and claims, including non-`Copy`
+payloads. Pools may start initialized or use type-state-checked lazy
+construction: a vacant grant has no `commit` method until `write(T)` constructs
+the slot. SlotPool-specific Loom models, Miri initialization coverage, a
+zero-copy block probe, and [target measurements](docs/proposals/slot-pool-measurements.md)
+are complete. This remains an experimental candidate until the admission
+decisions in [`docs/proposals/slot-pool.md`](docs/proposals/slot-pool.md) close.
 
 ## What this optimises for
 
@@ -302,7 +304,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 75 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for the SPSC types and the experimental SlotPool; `N == 0` rejected at compile time |
+| 79 unit + 12 feature-enabled doctests + 4 compile-fail | Behaviour, including SlotPool initialization/type-state, zero-copy block handoff, and threaded SPSC stress; default docs remain 11 + 3 |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

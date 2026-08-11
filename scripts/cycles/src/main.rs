@@ -26,6 +26,9 @@
 use core::hint::black_box;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug;
+#[cfg(feature = "slot-pool")]
+use ph_eventing::slot_pool::{Reservation, SlotPool};
+#[cfg(not(feature = "slot-pool"))]
 use ph_eventing::{EventBuf, RingBuf, SeqRing};
 
 #[panic_handler]
@@ -59,6 +62,7 @@ macro_rules! markers {
     };
 }
 
+#[cfg(not(feature = "slot-pool"))]
 markers! {
     0 => m_end,
     1 => m_overhead,
@@ -85,6 +89,20 @@ markers! {
     19 => m_sr_poll_lagged_far,
 }
 
+#[cfg(feature = "slot-pool")]
+markers! {
+    0 => m_end,
+    1 => m_overhead,
+    20 => m_sp_reserve_available,
+    21 => m_sp_reserve_full,
+    22 => m_sp_commit,
+    23 => m_sp_claim_empty,
+    24 => m_sp_claim_available,
+    25 => m_sp_release,
+    26 => m_sp_initialize_commit,
+}
+
+#[cfg(not(feature = "slot-pool"))]
 fn event_buf_costs() {
     let buf = EventBuf::<u32, 8>::new();
     let tx = buf.try_producer().expect("producer");
@@ -125,6 +143,7 @@ fn event_buf_costs() {
     m_end();
 }
 
+#[cfg(not(feature = "slot-pool"))]
 fn seq_ring_costs() {
     let ring = SeqRing::<u32, 8>::new();
     let tx = ring.try_producer().expect("producer");
@@ -173,6 +192,7 @@ fn seq_ring_costs() {
     m_end();
 }
 
+#[cfg(not(feature = "slot-pool"))]
 fn ring_buf_costs() {
     let mut ring = RingBuf::<u32, 8>::new();
 
@@ -197,6 +217,96 @@ fn ring_buf_costs() {
     m_end();
 }
 
+#[cfg(feature = "slot-pool")]
+fn slot_pool_costs() {
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut producer = pool.try_producer().expect("producer");
+
+        m_sp_reserve_available();
+        let reservation = black_box(producer.try_reserve());
+        m_end();
+        let _cancelled = black_box(reservation).map(Reservation::cancel);
+    }
+
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut producer = pool.try_producer().expect("producer");
+        let Reservation::Initialized(grant) = producer.try_reserve().expect("available") else {
+            panic!("initialized pool returned vacant slot");
+        };
+
+        m_sp_commit();
+        grant.commit();
+        m_end();
+    }
+
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut producer = pool.try_producer().expect("producer");
+        let Reservation::Initialized(grant) = producer.try_reserve().expect("available") else {
+            panic!("initialized pool returned vacant slot");
+        };
+        grant.commit();
+
+        m_sp_reserve_full();
+        let _ = black_box(producer.try_reserve());
+        m_end();
+    }
+
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut consumer = pool.try_consumer().expect("consumer");
+
+        m_sp_claim_empty();
+        let _ = black_box(consumer.try_claim());
+        m_end();
+    }
+
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut producer = pool.try_producer().expect("producer");
+        let mut consumer = pool.try_consumer().expect("consumer");
+        let Reservation::Initialized(grant) = producer.try_reserve().expect("available") else {
+            panic!("initialized pool returned vacant slot");
+        };
+        grant.commit();
+
+        m_sp_claim_available();
+        let claim = black_box(consumer.try_claim());
+        m_end();
+        drop(black_box(claim));
+    }
+
+    {
+        let pool = SlotPool::new([0_u32]);
+        let mut producer = pool.try_producer().expect("producer");
+        let mut consumer = pool.try_consumer().expect("consumer");
+        let Reservation::Initialized(grant) = producer.try_reserve().expect("available") else {
+            panic!("initialized pool returned vacant slot");
+        };
+        grant.commit();
+        let claim = consumer.try_claim().expect("published");
+
+        m_sp_release();
+        claim.release();
+        m_end();
+    }
+
+    {
+        let pool = SlotPool::<u32, 1>::new_uninit();
+        let mut producer = pool.try_producer().expect("producer");
+        let Reservation::Vacant(vacant) = producer.try_reserve().expect("available") else {
+            panic!("uninitialized pool returned initialized slot");
+        };
+
+        m_sp_initialize_commit();
+        vacant.write(black_box(1)).commit();
+        m_end();
+    }
+}
+
+#[allow(clippy::empty_loop)]
 #[entry]
 fn main() -> ! {
     // Two adjacent markers: the cost of the markers themselves, subtracted
@@ -204,9 +314,14 @@ fn main() -> ! {
     m_overhead();
     m_end();
 
-    event_buf_costs();
-    seq_ring_costs();
-    ring_buf_costs();
+    #[cfg(not(feature = "slot-pool"))]
+    {
+        event_buf_costs();
+        seq_ring_costs();
+        ring_buf_costs();
+    }
+    #[cfg(feature = "slot-pool")]
+    slot_pool_costs();
 
     debug::exit(debug::EXIT_SUCCESS);
     loop {}

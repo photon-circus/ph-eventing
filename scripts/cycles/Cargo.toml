@@ -15,6 +15,11 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 cortex-m-semihosting = "0.5"
 
+[features]
+# Isolate SlotPool rows from the standard hot-path probe so the additional
+# monomorphizations cannot perturb its LTO decisions.
+slot-pool = ["ph-eventing/experimental-slot-pool"]
+
 [profile.release]
 opt-level = "z"
 lto = true

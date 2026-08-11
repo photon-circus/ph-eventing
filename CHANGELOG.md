@@ -5,13 +5,19 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 ### Added
 - An `experimental-slot-pool` feature exposing an evaluation-only SPSC
-  `SlotPool<T, N>`. The probe transfers pre-initialized, reusable non-`Copy`
-  slots through RAII grants and claims with FIFO backpressure and O(1) cursor
-  operations. It is deliberately not promoted: generic uninitialized fill,
-  SlotPool-specific Loom modeling, target measurements, and trait stabilization
-  remain open.
+  `SlotPool<T, N>`. It transfers reusable non-`Copy` slots through RAII grants
+  and claims with FIFO backpressure and O(1) cursor operations. `new_uninit`
+  adds generic lazy construction: a `VacantGrant` cannot commit until
+  `write(T)` produces an initialized `Grant`, and pool teardown drops only the
+  initialized prefix.
+- SlotPool-specific tracked-cell Loom models for commit/claim/release and
+  grant-drop cancellation, Miri initialization/drop tests, a pointer-identity
+  complete-block integration probe, and cross-target code-size/QEMU instruction
+  probes. Admission and trait stabilization remain deferred decisions.
 
 ### Documentation
+- [`slot-pool-measurements.md`](docs/proposals/slot-pool-measurements.md)
+  records all eight gated flash targets and pinned QEMU state-path counts.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so

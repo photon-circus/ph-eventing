@@ -138,6 +138,7 @@ ph-eventing/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
+    ├── slot_pool.rs        # Experimental SPSC zero-copy ownership transfer
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
     ├── sync.rs             # Atomic/cell shim — swaps in Loom's primitives under --cfg loom
@@ -159,6 +160,9 @@ ph-eventing/
 | `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
+| `SlotPool<T, N>` | Experimental FIFO SPSC pool; initialized or type-state-checked lazy slots |
+| `slot_pool::Reservation` | Initialized `Grant` or uncommittable `VacantGrant` |
+| `slot_pool::Claim` | Borrowed consumer ownership; releases its slot on drop |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
@@ -210,6 +214,42 @@ therefore load-bearing. Clamping the equality branch would keep the return value
 in range after an ordering regression and could hide the broken snapshot from
 tests; retain the unclamped branch so its bound continues to follow from the
 memory-ordering proof.
+
+### Internal model (experimental SlotPool)
+
+`SlotPool` uses the same Lamport SPSC cursor ownership as `EventBuf`, but
+transfers borrowed access instead of copying values. `head` is producer-owned,
+`tail` is consumer-owned, and `[tail, head)` contains published or
+consumer-owned slots. A Release commit publishes all grant mutation; an
+Acquire claim observes it. A Release claim drop precedes the producer's Acquire
+reuse of that slot.
+
+The initialization witness is type state, not a boolean checked by `Claim`:
+
+```
+Reservation::Vacant(VacantGrant) --write(T)--> Grant --commit--> Published
+Reservation::Initialized(Grant) ----------------commit--> Published
+```
+
+`VacantGrant` deliberately has no `commit`. Only `write(T)` can create a
+committable `Grant`, so every position below published `head` contains a valid
+`T`. Do not add a convenience that makes `commit` the witness for arbitrary
+`MaybeUninit` writes; safe Rust cannot infer that those writes constructed all
+of `T`.
+
+Initialized slots form a prefix until all `N` have been constructed. `head`
+cannot skip a vacant slot; cancellation after `write` may put the prefix one
+ahead of `head` but cannot create a hole. The producer-owned
+`initialized: u32` is therefore both sufficient runtime tracking and the exact
+teardown drop count. Once it reaches `N`, every slot stays initialized across
+cursor wrap. Never replace it with `head`-derived logic: `head` wraps and
+cancellation can leave initialized residue without advancing it.
+
+SlotPool's normal build returns references through `Deref`. Its Loom build
+instead uses closure-scoped tracked-cell access so Loom sees the complete slot
+access interval. The capacity-one commit/claim and grant-drop models are
+load-bearing evidence: changing SlotPool storage back to an untracked
+`UnsafeCell` makes those models cursor-only and defeats their purpose.
 
 ### Internal model (SeqRing)
 
@@ -756,8 +796,9 @@ Loom substitutes its own instrumented atomics and cells via
 - Loom's atomics are **not const-constructible**. Anything in a `static` must
   use `core` atomics explicitly (see the test hook in `seq_ring.rs`).
 - `EventBuf` slots use `sync::TrackedCell` so Loom can verify that the producer
-  and consumer never touch the same slot. `SeqRing` slots deliberately use
-  `core::cell::UnsafeCell` — its slot access is racy by construction, and
+  and consumer never touch the same slot. SlotPool uses the same wrapper and
+  closure-scoped access in its Loom-only guard helpers. `SeqRing` deliberately
+  uses `core::cell::UnsafeCell` — its slot access is racy by construction, and
   tracking it would only re-report the documented deviation.
 
 **Loom must never become a runtime dependency.** It is declared under
@@ -869,12 +910,18 @@ cargo test
 - `non_copy_slots_drop_once_with_the_pool` — reusable non-`Copy` values keep one drop obligation
 - `endpoint_handles_are_unique_and_reacquirable` — SPSC handle enforcement
 - `concurrent_transfer_preserves_fifo_and_exclusivity` — threaded handoff stress
+- `vacant_slots_require_write_before_publication` — vacant cancellation cannot publish; `write(T)` is the witness
+- `initialized_cancellation_residue_is_reused` — write-then-cancel leaves one reusable initialized value
+- `partially_initialized_pool_drops_only_constructed_values` — teardown follows the initialized prefix exactly
+- `representative_block_handoff_fills_and_claims_the_same_storage` — producer/consumer block pointer identity
 
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 3 `compile_fail`
-doctests pinning the `N == 0` rejection (`E0080`) on all three types.
+and `src/traits.rs`. Total: 79 unit tests + 11 default doctests, plus 3 default
+`compile_fail` doctests pinning the `N == 0` rejection (`E0080`) on all three
+published types. Enabling `experimental-slot-pool` adds one ordinary doctest
+and one compile-fail test proving `VacantGrant` cannot commit: 12 + 4.
 
 ## Code Conventions
 
@@ -890,7 +937,9 @@ doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
-- Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- `T: Send` required for experimental `SlotPool` to be `Sync`; `T` need not be `Copy`
+- Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in the
+  published buffers and experimental SlotPool
 - No panics in hot paths. All three `new()` reject `N == 0` with a **const**
   assertion, so a zero-capacity buffer fails the build rather than panicking —
   which also means no test can cover the rejection, and the const assertion is
@@ -942,6 +991,10 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `SlotPool`: only initialized `Grant` can commit; `VacantGrant::write(T)` is the initialization witness
+- `SlotPool`: initialized slots are a prefix until the count reaches `N`; pool drop touches exactly that prefix
+- `SlotPool`: cancellation never advances a cursor, publishes, or invokes `T::drop`
+- `SlotPool`: Grant/Claim access is tracked in the Loom build; do not bypass `TrackedCell`
 - `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
   and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
   reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because

@@ -27,6 +27,8 @@ ph-eventing = { path = "../.." }
 cm0 = ["ph-eventing/portable-atomic-unsafe-assume-single-core"]
 # Enable on a branch that has `try_split`; absent on release branches.
 split = []
+# Measure the exploratory SlotPool operation shapes.
+slot-pool = ["ph-eventing/experimental-slot-pool"]
 
 [profile.release]
 # Match what an embedded consumer would realistically ship.

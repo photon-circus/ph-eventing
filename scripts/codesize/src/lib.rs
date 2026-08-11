@@ -7,6 +7,8 @@
 
 use core::panic::PanicInfo;
 use ph_eventing::EventBuf;
+#[cfg(feature = "slot-pool")]
+use ph_eventing::slot_pool::{Consumer as SlotConsumer, Producer as SlotProducer, Reservation};
 
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {
@@ -55,4 +57,62 @@ pub extern "C" fn bringup_split() -> i32 {
         Some(_) => 0,
         None => -4,
     }
+}
+
+/// Reserve and cancel one available initialized SlotPool slot.
+#[cfg(feature = "slot-pool")]
+#[unsafe(no_mangle)]
+pub fn slot_pool_reserve_cancel(producer: &mut SlotProducer<'_, u32, 1>) -> i32 {
+    match producer.try_reserve() {
+        Some(Reservation::Initialized(grant)) => {
+            grant.cancel();
+            1
+        }
+        Some(Reservation::Vacant(vacant)) => {
+            vacant.cancel();
+            2
+        }
+        None => 0,
+    }
+}
+
+/// Reserve, mutate, and commit one initialized SlotPool slot.
+#[cfg(feature = "slot-pool")]
+#[unsafe(no_mangle)]
+pub fn slot_pool_reserve_commit(producer: &mut SlotProducer<'_, u32, 1>, value: u32) -> bool {
+    let Some(reservation) = producer.try_reserve() else {
+        return false;
+    };
+    let Ok(mut grant) = reservation.into_initialized() else {
+        return false;
+    };
+    *grant = value;
+    grant.commit();
+    true
+}
+
+/// Reserve a vacant SlotPool slot, construct its first value, and commit it.
+#[cfg(feature = "slot-pool")]
+#[unsafe(no_mangle)]
+pub fn slot_pool_initialize_commit(producer: &mut SlotProducer<'_, u32, 1>, value: u32) -> bool {
+    let Some(reservation) = producer.try_reserve() else {
+        return false;
+    };
+    let Err(vacant) = reservation.into_initialized() else {
+        return false;
+    };
+    vacant.write(value).commit();
+    true
+}
+
+/// Claim and release one published SlotPool slot.
+#[cfg(feature = "slot-pool")]
+#[unsafe(no_mangle)]
+pub fn slot_pool_claim_release(consumer: &mut SlotConsumer<'_, u32, 1>) -> bool {
+    let Some(claim) = consumer.try_claim() else {
+        return false;
+    };
+    core::hint::black_box(*claim);
+    claim.release();
+    true
 }

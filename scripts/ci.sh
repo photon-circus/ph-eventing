@@ -86,6 +86,8 @@ run_check 'doc' env RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 # two portable-atomic backend features are mutually exclusive, so the supported
 # set has to be enumerated rather than swept.
 run_check 'features: default' cargo check --quiet
+run_check 'features: experimental-slot-pool' \
+    cargo check --quiet --features experimental-slot-pool
 run_check 'features: portable-atomic' cargo check --quiet --features portable-atomic
 run_check 'features: critical-section' \
     cargo check --quiet --features portable-atomic-critical-section
@@ -140,10 +142,12 @@ if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
 
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
-        --features portable-atomic-unsafe-assume-single-core
-    run_check 'thumbv7em-none-eabi' cargo check --target thumbv7em-none-eabi
+        --features portable-atomic-unsafe-assume-single-core,experimental-slot-pool
+    run_check 'thumbv7em-none-eabi' \
+        cargo check --target thumbv7em-none-eabi --features experimental-slot-pool
     run_check 'riscv32imac-unknown-none-elf' \
-        cargo check --target riscv32imac-unknown-none-elf
+        cargo check --target riscv32imac-unknown-none-elf \
+        --features experimental-slot-pool
 fi
 
 report
