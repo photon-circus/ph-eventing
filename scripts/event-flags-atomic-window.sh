@@ -161,12 +161,20 @@ if [ "$want_esp" -eq 1 ]; then
         printf 'error: ESP32-S2 EventFlags hot path contains a branch.\n' >&2
         exit 1
     fi
-    if grep -Eq 'rsil|wsr\.ps' "$tmp_dir/esp32s3.txt"; then
-        printf 'error: ESP32-S3 unexpectedly masks interrupts in EventFlags.\n' >&2
+    # Masking and S32C1I checks are scoped to the EventFlags hot paths. The
+    # probe object also contains bringup_two_calls / event_flags_acquire_roles,
+    # each of which can emit S32C1I on their own — a whole-object count of 2
+    # would pass while raise/take regress away from the native path.
+    if sed -n '/<event_flags_raise>:/,/^$/p; /<event_flags_take>:/,/^$/p' "$tmp_dir/esp32s3.txt" \
+        | grep -Eq 'rsil|wsr\.ps'; then
+        printf 'error: ESP32-S3 EventFlags hot path unexpectedly masks interrupts.\n' >&2
         exit 1
     fi
-    if [ "$(grep -c 's32c1i' "$tmp_dir/esp32s3.txt")" -lt 2 ]; then
-        printf 'error: ESP32-S3 no longer emits native S32C1I for both hot paths.\n' >&2
+    s3_raise_s32="$(sed -n '/<event_flags_raise>:/,/^$/p' "$tmp_dir/esp32s3.txt" | grep -c 's32c1i' || true)"
+    s3_take_s32="$(sed -n '/<event_flags_take>:/,/^$/p' "$tmp_dir/esp32s3.txt" | grep -c 's32c1i' || true)"
+    if [ "$s3_raise_s32" -lt 1 ] || [ "$s3_take_s32" -lt 1 ]; then
+        printf 'error: ESP32-S3 EventFlags hot paths missing native S32C1I (raise=%s take=%s).\n' \
+            "$s3_raise_s32" "$s3_take_s32" >&2
         exit 1
     fi
 fi

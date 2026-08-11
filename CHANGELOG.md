@@ -38,6 +38,9 @@ All notable changes to this project will be documented in this file.
   not rewritten into a no-op `loom_tests::--` filter.
 - `EventFlags` object-size claim corrected from 12 B to the measured 8 B (`size_of` unit assert);
   AGENTS.md role-claim wording aligned with the AcqRel `swap` implementation.
+- ESP32-S3 opt-in atomic-window gate now requires native `s32c1i` inside
+  `event_flags_raise` and `event_flags_take` specifically; a whole-object count
+  could pass on `bringup_two_calls` / `event_flags_acquire_roles` alone.
 
 ### Documentation
 - Cycle decisions **P** and **S** are closed (2026-08-11). **P**: BlockBuf's publication
