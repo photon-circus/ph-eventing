@@ -915,10 +915,11 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-`src/latest_buf.rs`, and `src/traits.rs`. Total: 76 unit tests + 12 doctests, plus 4 `compile_fail`
-doctests: the `N == 0` rejection (`E0080`) on all three ring types, and the
+`src/latest_buf.rs`, and `src/traits.rs`. Total: 76 unit tests + 12 doctests, plus 6 `compile_fail`
+doctests: the `N == 0` rejection (`E0080`) on all three ring types, the
 deliberately absent `Source<T>` impl on `LatestBuf`'s consumer (`E0277`,
-decision D2 — the pin keeps a convenience impl from arriving silently).
+decision D2 — the pin keeps a convenience impl from arriving silently), and
+two pins that `LatestBuf` producer/consumer handles are `!Sync` (contract H2).
 
 ## Code Conventions
 

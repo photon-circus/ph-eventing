@@ -329,6 +329,17 @@ impl<T: Copy> core::fmt::Debug for LatestBuf<T> {
 }
 
 /// Unique, stateless write handle for a [`LatestBuf`].
+///
+/// This handle is `Send + !Sync`: it may move into an ISR or another execution
+/// context, but it may not be shared between contexts. Sole-producer ownership
+/// is load-bearing for the exclusive-slot soundness argument (contract H2).
+///
+/// ```compile_fail
+/// use ph_eventing::latest_buf::Producer;
+///
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<Producer<'static, u32>>();
+/// ```
 pub struct Producer<'a, T: Copy> {
     buf: &'a LatestBuf<T>,
     _not_sync: PhantomData<Cell<()>>,
@@ -391,6 +402,16 @@ impl<T: Copy> core::fmt::Debug for Producer<'_, T> {
 }
 
 /// Unique, stateless read handle for a [`LatestBuf`].
+///
+/// This handle is `Send + !Sync`: it may move into a consumer context, but it
+/// may not be shared between contexts (contract H2).
+///
+/// ```compile_fail
+/// use ph_eventing::latest_buf::Consumer;
+///
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<Consumer<'static, u32>>();
+/// ```
 ///
 /// # No `Source<T>` implementation — by decision, not omission
 /// `Source::try_pop` cannot report the displacement that is this channel's

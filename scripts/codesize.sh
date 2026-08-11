@@ -151,6 +151,7 @@ fi
 skipped=0
 failed=0
 matrix_missing=0
+matrix_not_bss=0
 
 for entry in $TARGETS; do
     target="$(printf '%s' "$entry" | cut -d'|' -f1)"
@@ -217,8 +218,11 @@ for entry in $TARGETS; do
             channel_data="$(section_size "$ar" ".data.$static_name")"
             channel_bss="$(section_size "$ar" ".bss.$static_name")"
             if [ -n "$channel_data" ]; then
+                # Admission claim: const LatestBuf lands in .bss (all-zero image).
+                # .data would charge flash and a startup copy proportional to T.
                 channel="$channel_data"
                 init=data
+                matrix_not_bss=$((matrix_not_bss + 1))
             else
                 channel="$channel_bss"
                 init=bss
@@ -264,8 +268,11 @@ for entry in $TARGETS; do
             channel_data="$(section_size "$ar" ".data.$static_name")"
             channel_bss="$(section_size "$ar" ".bss.$static_name")"
             if [ -n "$channel_data" ]; then
+                # Admission claim: const LatestBuf lands in .bss (all-zero image).
+                # .data would charge flash and a startup copy proportional to T.
                 channel="$channel_data"
                 init=data
+                matrix_not_bss=$((matrix_not_bss + 1))
             else
                 channel="$channel_bss"
                 init=bss
@@ -309,6 +316,13 @@ if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
             "$matrix_missing" >&2
         exit 1
     fi
+    if [ "$matrix_not_bss" -gt 0 ]; then
+        printf '%s LatestBuf channel(s) landed in .data instead of .bss.\n' \
+            "$matrix_not_bss" >&2
+        printf 'Const channels must be an all-zero .bss image; .data charges flash\n' >&2
+        printf 'and a startup copy proportional to the payload.\n' >&2
+        exit 1
+    fi
     [ "$failed" -gt 0 ] && exit 1
     [ "$skipped" -gt 0 ] && exit 2
     printf 'publish_B and take_B are emitted flash for one operation monomorph.\n'
@@ -319,8 +333,8 @@ if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
         printf 'Block and builder rows use the exact shapes from #28 at bc54a9a.\n'
     fi
     printf 'channel_B is target-object RAM for three slots plus channel state.\n'
-    printf 'init reports whether that const-initialized image is .data or .bss;\n'
-    printf '.data also occupies flash and is copied during startup.\n'
+    printf 'init must be .bss (all-zero const image); a .data row fails the matrix\n'
+    printf 'because .data occupies flash and is copied during startup.\n'
     if [ "$LATEST_MATRIX" = "1" ]; then
         printf 'Run scripts/cycles.sh latest-matrix for state-dependent paths.\n'
     else
