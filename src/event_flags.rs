@@ -189,14 +189,14 @@ impl Default for EventFlags {
     }
 }
 
+// Deliberately opaque: printing `pending` would be a non-clearing peek —
+// exactly the advisory observation the frozen API rejects (destructive
+// `take_all` is the only read) — and a Relaxed load carries none of
+// `take_all`'s Acquire publication guarantee. Debug is required by
+// convention; it reports the type, not the state.
 impl core::fmt::Debug for EventFlags {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("EventFlags")
-            .field(
-                "pending",
-                &EventMask::from_bits(self.pending.load(Ordering::Relaxed)),
-            )
-            .finish_non_exhaustive()
+        f.debug_struct("EventFlags").finish_non_exhaustive()
     }
 }
 
