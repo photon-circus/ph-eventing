@@ -168,8 +168,13 @@ assert!(producer.push(3).is_ok());     // space freed
 
 ### Common Traits
 
-All producers implement `Sink<T>` and all consumers implement `Source<T>`,
-so you can write generic code that works with any combination:
+The ring-buffer producers implement `Sink<T>` and their consumers
+implement `Source<T>`, so generic code works with any combination of the
+listed handles. `LatestBuf` deliberately stands outside that pair: its
+consumer implements `LatestSource<T>` (and its producer `LatestSink<T>`),
+because `try_pop` cannot report the displacement that is this channel's
+designed overload behaviour — a generic `Source` bound will not compile
+against it, by decision D2:
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
@@ -195,6 +200,8 @@ assert!(err.is_none());
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+| `LatestSink<T>` | Publish latest | `latest_buf::Producer` (reports replacement) |
+| `LatestSource<T>` | Take latest | `latest_buf::Consumer` (reports generation + skipped) |
 
 ### Declarative static bring-up
 
