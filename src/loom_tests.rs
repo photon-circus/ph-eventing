@@ -19,9 +19,79 @@
 // they remain public API until 0.3.0, so their orderings still need proving.
 #![allow(deprecated)]
 
-use crate::{EventBuf, SeqRing};
+use crate::{EventBuf, LatestBuf, SeqRing};
 use loom::sync::Arc;
+use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::thread;
+
+/// The three-slot exchange transfers complete payload ownership in both
+/// directions. Loom's tracked cells make either a missing Release (offered
+/// slot) or missing Acquire (claimed slot) observable as an access violation.
+#[test]
+fn latest_buf_returns_only_complete_publications() {
+    loom::model(|| {
+        let channel = Arc::new(LatestBuf::<[u32; 2]>::new());
+
+        let producer_channel = Arc::clone(&channel);
+        let producer = thread::spawn(move || {
+            let producer = producer_channel.try_producer().unwrap();
+            let _ = producer.publish([1, 1]);
+            let _ = producer.publish([2, 2]);
+        });
+
+        let consumer = thread::spawn(move || {
+            let consumer = channel.try_consumer().unwrap();
+            for _ in 0..2 {
+                if let Some(item) = consumer.take_latest() {
+                    assert!(item.generation == 1 || item.generation == 2);
+                    assert_eq!(item.value, [item.generation; 2]);
+                }
+                thread::yield_now();
+            }
+        });
+
+        producer.join().unwrap();
+        consumer.join().unwrap();
+    });
+}
+
+/// Channel-resident producer state is published by handle drop and acquired
+/// by the next handle, so reacquisition in another context resumes generation.
+#[test]
+fn latest_buf_producer_reacquisition_continues_across_threads() {
+    loom::model(|| {
+        let channel = Arc::new(LatestBuf::<u32>::new());
+        let first_acquired = Arc::new(AtomicBool::new(false));
+        let first_channel = Arc::clone(&channel);
+        let first_signal = Arc::clone(&first_acquired);
+        let first = thread::spawn(move || {
+            let producer = first_channel.try_producer().unwrap();
+            // Signal before mutating role state. This orders initial role
+            // selection but deliberately does not publish the continuation
+            // write; that must travel through handle drop/acquisition.
+            first_signal.store(true, Ordering::Release);
+            assert_eq!(producer.publish(1).generation, 1);
+        });
+
+        let second = thread::spawn(move || {
+            if first_acquired.load(Ordering::Acquire) {
+                channel
+                    .try_producer()
+                    .map(|producer| producer.publish(2).generation)
+            } else {
+                None
+            }
+        });
+
+        first.join().unwrap();
+        // Loom explores both outcomes: acquisition while the first handle is
+        // live fails, while acquisition after its Release drop succeeds and
+        // must observe the channel-resident continuation state.
+        if let Some(generation) = second.join().unwrap() {
+            assert_eq!(generation, 2);
+        }
+    });
+}
 
 /// Every item the producer pushes is popped exactly once, in order, with no
 /// duplicates and no losses — under every interleaving.

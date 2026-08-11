@@ -49,6 +49,23 @@ pub trait Source<T> {
     fn try_pop(&mut self) -> Option<T>;
 }
 
+/// Publish complete newest-state values with replacement evidence.
+///
+/// Unlike [`Sink`], this trait exposes whether an unread older value was
+/// displaced by the publication.
+pub trait LatestSink<T> {
+    /// Publish `value` and report its generation and any replacement.
+    fn publish_latest(&mut self, value: T) -> crate::latest_buf::PublishReport;
+}
+
+/// Take the latest complete state together with generation and gap evidence.
+///
+/// This is deliberately distinct from FIFO-oriented [`Source`].
+pub trait LatestSource<T> {
+    /// Claim the newest unread publication, or return `None` when empty.
+    fn try_take_latest(&mut self) -> Option<crate::latest_buf::LatestItem<T>>;
+}
+
 /// A bidirectional pass-through: accepts `In` and yields `Out`.
 ///
 /// This is automatically implemented for any type that is both

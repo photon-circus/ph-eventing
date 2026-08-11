@@ -16,8 +16,9 @@ Stack-allocated ring buffers for no-std embedded targets.
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+| [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
-All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All four are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
 ## What this optimises for
 
@@ -47,7 +48,7 @@ tooling that costs nothing at runtime — not a friendlier API that allocates,
 panics, or hides a cost.
 
 ## Features
-- Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
+- Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
 - No heap, no dynamic dispatch, no required dependencies.
@@ -58,6 +59,7 @@ panics, or hides a cost.
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` and `EventBuf::new()` assert `N > 0`.
 - `SeqRing` and `EventBuf` require 32-bit atomics by default.
+- `LatestBuf` also requires 32-bit atomics and stores exactly three payload slots.
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
@@ -107,6 +109,29 @@ producer.push(123);
 assert_eq!(consumer.poll_one_value(), Some((1, 123)));
 // hook form still available:
 // consumer.poll_one(|seq, v| { ... });
+```
+
+### LatestBuf
+
+A three-slot SPSC snapshot channel for state where freshness dominates FIFO
+delivery. Publishing never rejects; it reports whether an unread value was
+replaced. Taking returns the newest complete value with generation and skipped
+counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap;
+beyond a full cycle the wrapped `u32` count is only an approximation. The
+consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
+is not silently discarded. `T` may be one sample or a complete block.
+
+```rust
+use ph_eventing::LatestBuf;
+
+let channel = LatestBuf::<u32>::new();
+let producer = channel.try_producer().expect("producer");
+let consumer = channel.try_consumer().expect("consumer");
+
+let _ = producer.publish(10);
+assert!(producer.publish(20).replaced_unread);
+let item = consumer.take_latest().expect("latest");
+assert_eq!((item.value, item.generation, item.skipped), (20, 2, 1));
 ```
 
 ### EventBuf
@@ -293,7 +318,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 69 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
+| 78 unit + 12 doctests + 3 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

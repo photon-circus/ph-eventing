@@ -862,11 +862,17 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
+**`latest_buf::tests`:**
+- publication/take, replacement evidence, and at-most-once observation
+- handle uniqueness, `Send`, static construction, and stateful reacquisition
+- generation wrap plus the documented beyond-span approximation
+- complete-block payload support and concurrent complete-value stress
+
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
-doctests pinning the `N == 0` rejection (`E0080`) on all three types.
+`src/latest_buf.rs`, and `src/traits.rs`. Total: 78 unit tests + 12 doctests, plus 3 `compile_fail`
+doctests pinning the `N == 0` rejection (`E0080`) on all three ring types.
 
 ## Code Conventions
 

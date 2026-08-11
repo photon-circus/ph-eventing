@@ -7,8 +7,9 @@
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+//! | [`LatestBuf`] | Freshness-first SPSC snapshot — retains one newest unread value. |
 //!
-//! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
+//! All four are fixed-size, zero-allocation, and generic over `T: Copy`.
 //!
 //! # Common traits
 //!
@@ -201,15 +202,17 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 mod macros;
 
 pub mod event_buf;
+pub mod latest_buf;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
 pub use event_buf::EventBuf;
+pub use latest_buf::{LatestBuf, LatestItem, PublishReport};
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
-pub use traits::{Link, Sink, Source};
+pub use traits::{LatestSink, LatestSource, Link, Sink, Source};
 
 #[cfg(all(loom, test))]
 mod loom_tests;

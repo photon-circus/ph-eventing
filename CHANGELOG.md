@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- Evaluable `LatestBuf<T>` prototype: a three-slot, freshness-first SPSC
+  snapshot channel with bounded single-swap publish/take operations,
+  replacement and skipped-generation evidence, and channel-resident endpoint
+  state so handle reacquisition continues rather than restarting. Deferred
+  assumptions are exact accounting within one non-zero `u32` wrap (approximate
+  beyond it), no `Source<T>` implementation, and generic payloads supporting
+  samples or complete blocks.
+
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
