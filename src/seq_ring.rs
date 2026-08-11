@@ -265,8 +265,10 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
 
     /// Try to create the producer handle.
     ///
-    /// Returns `None` if a producer is already active. Prefer this over
-    /// [`producer`](Self::producer) when fallible bring-up is needed.
+    /// Returns `None` if a producer is already active — never panics. On the
+    /// targets this crate exists for a panic is a reset, so fallible bring-up
+    /// is the only handle-acquisition API. (The panicking `producer()` was
+    /// deprecated in 0.2.0 and removed in 0.3.0.)
     #[inline]
     pub fn try_producer(&self) -> Option<Producer<'_, T, N>> {
         if self.producer_taken.swap(true, Ordering::AcqRel) {
@@ -279,34 +281,12 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
         }
     }
 
-    /// Create the producer handle. Only one producer may be active.
-    ///
-    /// # Deprecated
-    /// Prefer [`try_producer`](Self::try_producer). This crate targets firmware,
-    /// where a panic is a reset and the panic machinery itself costs flash — a
-    /// code-size probe shows no panic strings reach the binary when only the
-    /// `try_*` constructors are used. The shorter, more discoverable name being
-    /// the hazardous one is the inversion this deprecation exists to correct.
-    ///
-    /// Still sound, still tested, and convenient on a host where a panic is just
-    /// a failed test. Scheduled for removal in 0.3.0.
-    ///
-    /// # Panics
-    /// Panics if a producer handle is already active.
-    #[deprecated(
-        since = "0.2.0",
-        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_producer() and handle None"
-    )]
-    #[inline]
-    pub fn producer(&self) -> Producer<'_, T, N> {
-        self.try_producer()
-            .expect("SeqRing::producer() called while a producer is active")
-    }
-
     /// Try to create the consumer handle.
     ///
-    /// Returns `None` if a consumer is already active. Prefer this over
-    /// [`consumer`](Self::consumer) when fallible bring-up is needed.
+    /// Returns `None` if a consumer is already active — never panics. On the
+    /// targets this crate exists for a panic is a reset, so fallible bring-up
+    /// is the only handle-acquisition API. (The panicking `consumer()` was
+    /// deprecated in 0.2.0 and removed in 0.3.0.)
     #[inline]
     pub fn try_consumer(&self) -> Option<Consumer<'_, T, N>> {
         if self.consumer_taken.swap(true, Ordering::AcqRel) {
@@ -319,30 +299,6 @@ impl<T: Copy, const N: usize> SeqRing<T, N> {
                 _not_sync: PhantomData,
             })
         }
-    }
-
-    /// Create the consumer handle. Only one consumer may be active.
-    ///
-    /// # Deprecated
-    /// Prefer [`try_consumer`](Self::try_consumer). This crate targets firmware,
-    /// where a panic is a reset and the panic machinery itself costs flash — a
-    /// code-size probe shows no panic strings reach the binary when only the
-    /// `try_*` constructors are used. The shorter, more discoverable name being
-    /// the hazardous one is the inversion this deprecation exists to correct.
-    ///
-    /// Still sound, still tested, and convenient on a host where a panic is just
-    /// a failed test. Scheduled for removal in 0.3.0.
-    ///
-    /// # Panics
-    /// Panics if a consumer handle is already active.
-    #[deprecated(
-        since = "0.2.0",
-        note = "on an embedded target a panic is a reset, and the panic machinery costs flash; use try_consumer() and handle None"
-    )]
-    #[inline]
-    pub fn consumer(&self) -> Consumer<'_, T, N> {
-        self.try_consumer()
-            .expect("SeqRing::consumer() called while a consumer is active")
     }
 
     #[inline]
@@ -701,12 +657,6 @@ impl<T: Copy, const N: usize> crate::traits::Source<T> for Consumer<'_, T, N> {
 
 #[cfg(test)]
 mod tests {
-    // The deprecated `producer()` / `consumer()` remain public API until 0.3.0,
-    // so these tests are their coverage -- including the two that assert the
-    // panic message. Allowing the lint here rather than at the crate root keeps
-    // the warning live for library code, which is where it should bite.
-    #![allow(deprecated)]
-
     use super::{SeqRing, TEST_AFTER_READ_SEQ, TEST_AFTER_READ_TARGET};
     use core::sync::atomic::Ordering;
     use std::vec::Vec;
@@ -714,7 +664,7 @@ mod tests {
     #[test]
     fn poll_one_empty_returns_false() {
         let ring = SeqRing::<u32, 4>::new();
-        let mut consumer = ring.consumer();
+        let mut consumer = ring.try_consumer().unwrap();
         let ok = consumer.poll_one(|_, _| {});
         assert!(!ok);
     }
@@ -722,8 +672,8 @@ mod tests {
     #[test]
     fn polls_in_order() {
         let ring = SeqRing::<u32, 8>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         producer.push(10);
         producer.push(11);
@@ -741,8 +691,8 @@ mod tests {
     #[test]
     fn drops_when_consumer_lags() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         for i in 0..10 {
             producer.push(i);
@@ -760,8 +710,8 @@ mod tests {
     #[test]
     fn latest_reads_newest() {
         let ring = SeqRing::<u32, 8>::new();
-        let producer = ring.producer();
-        let consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let consumer = ring.try_consumer().unwrap();
 
         producer.push(1);
         producer.push(2);
@@ -776,8 +726,8 @@ mod tests {
     #[test]
     fn skip_to_latest_makes_next_poll_latest() {
         let ring = SeqRing::<u32, 8>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         producer.push(10);
         producer.push(11);
@@ -795,8 +745,8 @@ mod tests {
     #[test]
     fn poll_up_to_zero_returns_newest_only() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         producer.push(42);
 
@@ -810,8 +760,8 @@ mod tests {
     #[test]
     fn dropped_counter_can_reset() {
         let ring = SeqRing::<u32, 2>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         for i in 0..5 {
             producer.push(i);
@@ -829,7 +779,7 @@ mod tests {
     #[test]
     fn latest_empty_returns_false() {
         let ring = SeqRing::<u32, 4>::new();
-        let consumer = ring.consumer();
+        let consumer = ring.try_consumer().unwrap();
 
         let ok = consumer.latest(|_, _| {});
 
@@ -839,7 +789,7 @@ mod tests {
     #[test]
     fn latest_returns_false_when_slot_missing() {
         let ring = SeqRing::<u32, 4>::new();
-        let consumer = ring.consumer();
+        let consumer = ring.try_consumer().unwrap();
 
         ring.published_seq.store(1, Ordering::Release);
 
@@ -851,7 +801,7 @@ mod tests {
     #[test]
     fn poll_up_to_counts_dropped_when_slot_missing() {
         let ring = SeqRing::<u32, 4>::new();
-        let mut consumer = ring.consumer();
+        let mut consumer = ring.try_consumer().unwrap();
 
         ring.published_seq.store(1, Ordering::Release);
 
@@ -865,7 +815,7 @@ mod tests {
     #[test]
     fn read_seq_inner_detects_overwrite_during_read() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
+        let producer = ring.try_producer().unwrap();
         let seq = producer.push(7);
 
         TEST_AFTER_READ_SEQ.store(seq.wrapping_add(1), Ordering::Relaxed);
@@ -884,7 +834,7 @@ mod tests {
 
         ring.next_seq.store(u32::MAX, Ordering::Relaxed);
 
-        let seq = ring.producer().push(1);
+        let seq = ring.try_producer().unwrap().push(1);
 
         assert_eq!(seq, 1);
         assert_eq!(ring.next_seq.load(Ordering::Relaxed), 1);
@@ -893,7 +843,7 @@ mod tests {
     #[test]
     fn read_seq_inner_rejects_invalidated_slot() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
+        let producer = ring.try_producer().unwrap();
         let seq = producer.push(7);
 
         ring.slot_seq[SeqRing::<u32, 4>::idx_for(seq)].store(0, Ordering::Release);
@@ -904,8 +854,8 @@ mod tests {
     #[test]
     fn consumer_skips_reserved_seq_zero_on_wrap() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         ring.next_seq.store(u32::MAX - 1, Ordering::Relaxed);
         assert_eq!(producer.push(10), u32::MAX);
@@ -928,8 +878,8 @@ mod tests {
     #[test]
     fn lag_across_wrap_counts_drops_exactly() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         // Park the sequence just below the wrap and consume one item, so the
         // consumer's cursor sits in the pre-wrap region.
@@ -965,8 +915,8 @@ mod tests {
     #[test]
     fn dropped_accum_saturates_instead_of_overflowing() {
         let ring = SeqRing::<u32, 4>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         // A consumer that starts at 0 against a producer near the top of the
         // sequence space books close to 2^32 drops in one poll. On a 32-bit
@@ -1019,7 +969,7 @@ mod tests {
 
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                let producer = ring.producer();
+                let producer = ring.try_producer().unwrap();
                 for i in 0..total {
                     producer.push([i; 4]);
                 }
@@ -1027,7 +977,7 @@ mod tests {
             });
 
             scope.spawn(|| {
-                let mut consumer = ring.consumer();
+                let mut consumer = ring.try_consumer().unwrap();
                 let mut last_seq = 0u32;
                 let mut read_total = 0usize;
 
@@ -1102,8 +1052,8 @@ mod tests {
     #[test]
     fn poll_one_value_and_latest_value() {
         let ring = SeqRing::<u32, 8>::new();
-        let producer = ring.producer();
-        let mut consumer = ring.consumer();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
 
         assert_eq!(consumer.poll_one_value(), None);
         assert_eq!(consumer.latest_value(), None);
@@ -1137,10 +1087,10 @@ mod tests {
         static RING: SeqRing<u32, 4> = SeqRing::new();
 
         fn producer_for_isr() -> super::Producer<'static, u32, 4> {
-            RING.producer()
+            RING.try_producer().unwrap()
         }
         fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
-            RING.consumer()
+            RING.try_consumer().unwrap()
         }
         fn assert_send<T: Send>(_: &T) {}
 
