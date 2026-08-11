@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Documentation
+- **Engineering records established** (`docs/records/`, maintainer decision 2026-08-11): one
+  enduring document per shipped type — a short value statement, risks and integration
+  concerns in integrator terms, technical claims mapped to their validating evidence, then
+  the working record (decisions, measurements, rejected alternatives). Not rustdoc
+  duplication: rustdoc says how to use a type; the record says why it is trustworthy and
+  what it cost. A candidate lane owes its record as part of its acceptance package;
+  [`records/latest-buf.md`](docs/records/latest-buf.md) is the exemplar. The 0.2.0 types
+  receive theirs when next materially touched.
 - `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
   (a) + (c) — `skipped` is one formula (wrap-aware distance minus one, saturated at zero):
   exact within one wrap span, a documented under-count beyond it, and callers whose
