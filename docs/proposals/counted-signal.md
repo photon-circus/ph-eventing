@@ -63,8 +63,9 @@ should remain statically sized and avoid a general dynamic registry.
 
 ## 3. Resolved candidate decisions
 
-- Saturation uses the sole-producer algorithm in §3.1: one Relaxed load and,
-  below `u32::MAX`, one Relaxed `fetch_add`. There is no retry loop.
+- Saturation uses the sole-producer algorithm in §3.1: a Relaxed load plus a
+  compare-exchange that treats observed `u32::MAX` as maybe-stale, with at most
+  one contention retry from the sole consumer reset.
 - `u32::MAX` is the observable saturation sentinel, wrapped in
   `CountSnapshot`; exact excess beyond the sentinel is intentionally absent.
 - `take_count` is a `swap(0)` and reports one take interval, not a running
@@ -83,26 +84,35 @@ answer to the central question that is stronger than the three initially
 listed, but only under a deliberately narrow handle model:
 
 ```rust
-if count.load(Relaxed) != u32::MAX {
-    count.fetch_add(1, Relaxed);
+let observed = count.load(Relaxed);
+if observed == u32::MAX
+    && count.compare_exchange(u32::MAX, u32::MAX, Relaxed, Relaxed).is_ok()
+{
+    return; // confirmed saturated no-op
 }
+count.fetch_add(1, Relaxed);
 ```
 
-This is **not** correct for multiple producers: two producers could both load
-`u32::MAX - 1` and the second `fetch_add` would wrap. It is correct with the
-crate's existing sole `Send + !Sync` producer handle. Between that handle's
-load and `fetch_add`, the consumer's `swap(0)` is the only possible competing
-write and it can only lower the value. The RMW therefore increments either the
-observed epoch or the newly reset epoch and cannot wrap. If the load observes
-`u32::MAX`, that no-op linearizes before a concurrent take and is already
-represented by the saturated snapshot.
+A plain load-and-skip-on-`MAX` short-circuit is **not** exact: after
+`take_count` has returned, a later `increment` may still observe a stale
+`MAX` under Relaxed ordering and drop the occurrence from both take
+intervals (violating T3/A1). The sentinel path therefore confirms with
+`MAX → MAX` — success is a true saturated no-op; failure falls through to
+`fetch_add` into the post-take epoch (at most one contention retry under B1).
+
+This remains **not** correct for multiple producers: two producers could both
+observe `u32::MAX - 1` and the second `fetch_add` would wrap. It is correct with the
+crate's existing sole `Send + !Sync` producer handle. Between the load and
+RMW (or between the failed sentinel CAS and the follow-up `fetch_add`), the
+consumer's `swap(0)` is the only possible competing write and it can only lower
+the value, so the RMW cannot wrap.
 
 Consequences for the deferred decisions:
 
 | Choice | Evaluation result |
 |---|---|
-| Sole `Send + !Sync` producer, methods take `&self` | Exact saturation; bounded to one load plus at most one RMW; matches existing handle ownership. |
-| Shareable/multiple raisers | The two-operation proof fails; needs an unbounded CAS loop, a weaker overflow contract, or a substantially more complex bounded algorithm. |
+| Sole `Send + !Sync` producer, methods take `&self` | Exact saturation; common path is one load plus one `fetch_add`; sentinel path adds one confirming CAS and at most one follow-up `fetch_add`; matches existing handle ownership. |
+| Shareable/multiple raisers | The intervening-writer proof fails; needs an unbounded CAS loop, a weaker overflow contract, or a substantially more complex bounded algorithm. |
 | `u32::MAX` reserved sentinel wrapped by `CountSnapshot` | Full exact range below the sentinel; `is_saturated()` observes saturation in the take that clears it; the snapshot remains one word and needs no second sticky atomic. |
 | `swap(0)` take, relaxed ordering | Counts only, with no payload publication to order. Atomic modification order partitions each increment into exactly one take epoch. |
 
@@ -119,40 +129,42 @@ Evidence added with the prototype:
   saturated (never wrapped) snapshot;
 - a threaded stress test proves repeated concurrent takes preserve the sum of
   100,000 increments;
-- Loom exhaustively models ordinary take partitioning and the load/take/RMW
-  interleaving at `u32::MAX - 1`;
+- Loom exhaustively models ordinary take partitioning, the observe/take/commit
+  interleaving at `u32::MAX - 1`, and a post-take increment seeded at `MAX`
+  sequenced only by a Relaxed gate;
 - the cycle and code-size probes include the ISR-side `increment` and consumer
   `take_count` paths so the remaining admission decision can be made from
   per-target measurements rather than from source shape.
 
 The isolated release-mode code-size rows on the pinned Rust 1.92.0 toolchain
-are small and, importantly, expose the architecture split for review:
+(after the sentinel-CAS fix) expose the architecture split for review:
 
 | Target family | `increment` | `take_count` |
 |---|---:|---:|
-| Cortex-M0 (`thumbv6m`) | 30 B | 24 B |
-| Cortex-M23 (`thumbv8m.base`) | 28 B | 22 B |
-| Cortex-M3/M4/M33 | 28 B | 22 B |
-| Armv7-R / Armv7-A | 40 B | 28 B |
-| RV32IMAC | 18 B | 8 B |
+| Cortex-M0 (`thumbv6m`) | 46 B | 24 B |
+| Cortex-M23 (`thumbv8m.base`) | 56 B | 22 B |
+| Cortex-M3/M4/M33 | 54 B | 22 B |
+| Armv7-R / Armv7-A | 76 B | 28 B |
+| RV32IMAC | 34 B | 8 B |
 
 The M0/M23 rows use the existing portable-atomic single-core probe backend.
+Versus the pre-fix load-and-skip path this is a deliberate +16…+36 B growth
+on gated rows: exactness after a completed take requires the confirming CAS.
 
-The cycle probe has also been run in the pinned reference environment via
-`./scripts/verify.sh cycles`:
+The cycle probe was previously measured in the pinned reference environment via
+`./scripts/verify.sh cycles` for the load-and-skip path:
 
 | Cortex-M3 hot path | Retired guest instructions |
 |---|---:|
-| `increment` | 8 |
+| `increment` | 8 (pre-fix; re-measure after sentinel CAS) |
 | `take_count` | 7 |
 
 Environment stamp: rustc 1.92.0 (`ded5c06cf`), LLVM 21.1.3, QEMU 10.0.11
 (Debian trixie), release `opt-level = "z"` with LTO. The runner subtracts its
 marker overhead and uses one guest instruction per translation block with
 `-icount shift=0`; these are deterministic instruction/tick counts for that
-environment, not a universal microarchitectural cycle claim. Together with
-the eight-target code-size rows, this closes the lane's missing pinned-cost
-evidence.
+environment, not a universal microarchitectural cycle claim. Re-run cycles in
+the reference image before treating the 8/7 cells as current.
 
 ## 3.2 Shared handle decision
 
@@ -167,7 +179,7 @@ type's proof.
 ## 4. Promotion bar to PROPOSED
 
 1. **Complete for the SPSC candidate:** the bounded-saturating-increment
-   question has the load-plus-conditional-RMW answer proved in §3.1.
+   question has the sole-producer CAS answer proved in §3.1.
 2. **Complete:** the shared handle model is sole-role `Send + !Sync` handles
    with `&self` operations for both this lane and EventFlags. The proof
    dependency is recorded in the contract's H-decision section.
@@ -176,7 +188,8 @@ type's proof.
    I/T/A/B/H/X clause IDs and maps each guarantee to evidence.
 4. **Complete for the SPSC candidate:** eight-target code-size rows and pinned
    Cortex-M3 instruction counts carry the cost case; the unit boundary test,
-   threaded stress, Miri, and two Loom models cover atomic take,
-   no-lost-increment accounting, and saturation without wrapping.
+   threaded stress, Miri, and three Loom models cover atomic take,
+   no-lost-increment accounting, saturation without wrapping, and the
+   post-take stale-`MAX` litmus.
 
 The promotion bar is complete; the candidate is ready for evaluation.

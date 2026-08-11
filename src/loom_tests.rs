@@ -16,6 +16,7 @@
 //! [Loom]: https://github.com/tokio-rs/loom
 
 use crate::{CountedSignal, EventBuf, SeqRing};
+use loom::sync::atomic::{AtomicU32, Ordering};
 use loom::sync::Arc;
 use loom::thread;
 
@@ -46,9 +47,9 @@ fn counted_signal_take_partitions_increments() {
     });
 }
 
-/// At the saturation boundary, a take between the producer's load and
-/// `fetch_add` moves the increment into the new epoch; it cannot make the RMW
-/// wrap or lose the increment (contract I2-I3, T2-T3, and A2-A3).
+/// At the saturation boundary, a take between the producer's observe and
+/// commit moves the increment into the new epoch; it cannot make the RMW wrap
+/// or lose the increment (contract I2-I3, T2-T3, and A2-A3).
 #[test]
 fn counted_signal_saturation_boundary_is_linearizable() {
     loom::model(|| {
@@ -70,6 +71,43 @@ fn counted_signal_saturation_boundary_is_linearizable() {
             u64::from(early) + u64::from(final_count),
             u64::from(u32::MAX)
         );
+    });
+}
+
+/// Seeded at `MAX`, a take that has already returned must not let a later
+/// `increment` disappear: wall-clock order is established only by a Relaxed
+/// gate (no Acquire/Release on the count). A stale MAX short-circuit would
+/// lose the occurrence from both intervals (contract T3 and A1).
+#[test]
+fn counted_signal_post_take_increment_observes_reset_epoch() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::with_count_for_model(u32::MAX));
+        let gate = Arc::new(AtomicU32::new(0));
+
+        let producer_signal = Arc::clone(&signal);
+        let producer_gate = Arc::clone(&gate);
+        let producer = thread::spawn(move || {
+            let producer = producer_signal.try_producer().unwrap();
+            while producer_gate.load(Ordering::Relaxed) == 0 {
+                thread::yield_now();
+            }
+            producer.increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer_gate = Arc::clone(&gate);
+        let consumer = thread::spawn(move || {
+            let consumer = consumer_signal.try_consumer().unwrap();
+            let early = consumer.take_count().count();
+            consumer_gate.store(1, Ordering::Relaxed);
+            early
+        });
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(early, u32::MAX);
+        assert_eq!(final_count, 1);
     });
 }
 

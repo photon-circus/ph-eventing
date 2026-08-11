@@ -2,15 +2,16 @@
 //!
 //! [`CountedSignal`] is an exploratory SPSC primitive for events whose
 //! multiplicity matters but whose payload and ordering do not. Its producer
-//! performs at most one load and one read-modify-write per increment; its
-//! consumer atomically takes the accumulated count.
+//! commits each increment with a sole-producer–bounded path; its consumer
+//! atomically takes the accumulated count.
 //!
-//! The single-producer handle is load-bearing. A producer first observes that
-//! the counter is below [`u32::MAX`] and then increments it with `fetch_add`.
-//! Between those operations the sole consumer may reset the counter to zero,
-//! but no other operation can increase it. Consequently `fetch_add` cannot
-//! wrap: it either advances the value observed by the producer or advances a
-//! newly reset epoch. Multiple producers would invalidate that proof.
+//! The single-producer handle is load-bearing. Below [`u32::MAX`] the producer
+//! uses a Relaxed `fetch_add`, which cannot wrap because only the consumer may
+//! write between the load and the RMW and it can only reset to zero. An
+//! observed `u32::MAX` is treated as maybe-stale: a successful `MAX → MAX` CAS
+//! confirms true saturation (no-op), while failure means a completed take
+//! reset the counter and the producer `fetch_add`s into the new epoch. That is
+//! at most one contention retry. Multiple producers would invalidate the proof.
 //!
 //! The counter carries no payload-publication semantics. These Relaxed
 //! operations order the count itself, but do not publish unrelated application
@@ -116,8 +117,9 @@ impl core::fmt::Debug for CountedSignal {
 
 /// The sole incrementing handle for a [`CountedSignal`].
 ///
-/// This handle is `Send + !Sync`. Its exclusivity is what makes exact,
-/// bounded saturation possible without a compare-exchange loop.
+/// This handle is `Send + !Sync`. Its exclusivity is what keeps exact
+/// saturation wrap-free with at most one contention retry on the sentinel
+/// path from the consumer reset.
 ///
 /// The load-bearing `!Sync` property is pinned at compile time:
 ///
@@ -135,18 +137,31 @@ pub struct Producer<'a> {
 impl Producer<'_> {
     /// Record one occurrence.
     ///
-    /// This operation is bounded to one atomic load and, unless the counter
-    /// was already saturated, one atomic `fetch_add`. It never loops and the
-    /// counter never wraps.
+    /// Below `u32::MAX` this is one Relaxed load and one Relaxed `fetch_add`.
+    /// Observed `u32::MAX` is confirmed with a `MAX → MAX` CAS (saturated
+    /// no-op) or, on failure, one `fetch_add` into the post-take epoch. Under
+    /// sole-producer ownership the consumer's `swap(0)` is the only competing
+    /// write, so there is at most one contention retry and the counter never
+    /// wraps.
     #[inline]
     pub fn increment(&self) {
         // Only this handle may increase `count`; the consumer can only reset it
-        // to zero. If this load is below MAX, the later fetch_add therefore
-        // observes either a value no greater than this one or a post-take
-        // value. In both cases adding one cannot wrap.
-        if self.signal.count.load(Ordering::Relaxed) != u32::MAX {
-            self.signal.count.fetch_add(1, Ordering::Relaxed);
+        // to zero. A plain skip on MAX can be stale after take returns, so the
+        // sentinel path must CAS to distinguish true saturation from a reset
+        // epoch that still needs this occurrence (contract T3 / A1).
+        let observed = self.signal.count.load(Ordering::Relaxed);
+        if observed == u32::MAX
+            && self
+                .signal
+                .count
+                .compare_exchange(u32::MAX, u32::MAX, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            return;
         }
+        // Wrap-free under H1: intervening writes can only lower the value.
+        // Reached for every non-MAX observe, and for a stale MAX after take.
+        self.signal.count.fetch_add(1, Ordering::Relaxed);
     }
 }
 

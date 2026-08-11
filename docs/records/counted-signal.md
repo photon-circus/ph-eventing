@@ -1,13 +1,13 @@
 # CountedSignal — engineering record
 
 - **Status:** candidate, PROPOSED — complete admission package on
-  `candidate/counted-signal` (draft PR #33); accepted contract; shared
-  handle decision H closed on this lane's evidence; awaiting acceptance
-  review and release assembly.
+  `candidate/counted-signal` (PR #33); accepted contract; shared
+  handle decision H closed on this lane's evidence; MAX short-circuit
+  exactness fix landed; awaiting acceptance review and release assembly.
 - **Normative sources:** [contract](../proposals/counted-signal-contract.md)
   (clause IDs cited below) · [proposal](../proposals/counted-signal.md) ·
   measurements inline in proposal §3.1 (eight-target code size; pinned
-  Cortex-M3 cycles via `./scripts/verify.sh cycles`).
+  Cortex-M3 cycles via `./scripts/verify.sh cycles` — re-measure after CAS).
 
 ## 1. Value statement
 
@@ -19,11 +19,11 @@ linearizes exactly once into a take interval; when the exact range is
 exhausted the signal saturates observably rather than wrapping — the
 same `dropped_accum` honesty the crate already requires of overload
 accounting. Its soundness argument for exact, wrap-free saturation is
-**sole-producer ownership**: between the producer's load and conditional
-RMW the consumer can only reset, so the RMW cannot wrap. It complements
-`EventFlags` (presence) rather than replacing it, and it refuses to be:
-a payload channel, an ordering authority, a multi-producer bus, or an
-unbounded exact total past saturation.
+**sole-producer ownership**: between CAS attempts the consumer can only
+reset, so the RMW cannot wrap and there is at most one contention retry.
+It complements `EventFlags` (presence) rather than replacing it, and it
+refuses to be: a payload channel, an ordering authority, a multi-producer
+bus, or an unbounded exact total past saturation.
 
 ## 2. Risks and integration concerns
 
@@ -38,11 +38,11 @@ IDs in parentheses; the clauses are the normative statements.
   saturation is a fault rather than a design point.
 - **Sole producer is load-bearing, not style (H1–H2, X4, H-decision).**
   The no-wrap / B1 proof depends on one active producer: two raisers
-  could both observe `u32::MAX - 1` and the second `fetch_add` would
-  wrap. Shareable or multi-producer signalling needs a **separate**
-  type, contract, algorithm, and evidence case — not a weakened reading
-  of this one. `&self` on the hot path is a receiver choice; it does
-  not permit sharing a handle (`Send + !Sync` remains).
+  could both observe `u32::MAX - 1` and the second commit would wrap.
+  Shareable or multi-producer signalling needs a **separate** type,
+  contract, algorithm, and evidence case — not a weakened reading of
+  this one. `&self` on the hot path is a receiver choice; it does not
+  permit sharing a handle (`Send + !Sync` remains).
 - **No payload, no per-occurrence identity (X1, X2).** Only the count in
   a take interval is retained. Ordering between individual increments
   is intentionally absent; unrelated data gains no publication fence
@@ -54,9 +54,10 @@ IDs in parentheses; the clauses are the normative statements.
   destructors, or a forgotten handle, leaves the role held. There is
   deliberately no out-of-band forced release.
 - **Algorithmic bounds are not wall-clock claims (B1–B3, X5).**
-  `increment` and `take_count` are statically bounded (no retry loop,
-  no wait, no panic on the hot path). Instruction and latency numbers
-  are environment-specific measurements; cite them with the pinned
+  `increment` allows at most one contention retry from the sole
+  consumer reset; `take_count` has no retry loop. Neither waits or
+  panics on the hot path. Instruction and latency numbers are
+  environment-specific measurements; cite them with the pinned
   toolchain and QEMU stamp, never as universal cycle truths.
 - **Constrained-target atomics are measured, not free.** On thumbv6m /
   thumbv8m.base the RMW path uses the portable-atomic single-core
@@ -70,29 +71,33 @@ IDs in parentheses; the clauses are the normative statements.
 | Exact accumulate + take clears; no fabricated/duplicated counts (I1, T1, T4, A1) | `increments_accumulate_and_take_clears`; threaded `concurrent_takes_do_not_lose_increments` sum check (100,000 increments) | Proven |
 | Saturates at `u32::MAX`, never wraps; sticky until take (I2–I3, T2, A2–A3) | `saturates_instead_of_wrapping`; Loom `counted_signal_saturation_boundary_is_linearizable` | Proven |
 | Concurrent increment belongs to exactly one take interval (T1–T3, A1) | Loom `counted_signal_take_partitions_increments`; threaded take stress | Proven |
-| Wait-free bounded hot paths: load + ≤1 `fetch_add`; `swap(0)` take (B1–B2) | Source review (no loops); pinned Cortex-M3: 8 retired instructions `increment`, 7 `take_count` (rustc 1.92.0 / QEMU 10.0.11) | Measured |
+| Post-take increment after saturated take is not dropped by a stale MAX observe (T3, A1) | Loom `counted_signal_post_take_increment_observes_reset_epoch` (Relaxed gate only) | Proven |
+| Wait-free bounded hot paths: load + `fetch_add`, sentinel CAS + ≤1 follow-up `fetch_add`; `swap(0)` take (B1–B2) | Source review; eight-target code size blessed after intentional +16…+36 B growth; Cortex-M3 cycles pending re-measure (was 8 / 7 pre-fix) | Measured (cycles pending) |
 | No panic reachable from hot paths (B3) | Source review; normal, Miri, Loom, and embedded-target executions | Proven |
 | Sole-role exclusive handles; reacquisition continues state (H1, H3) | `handles_are_exclusive_and_reusable_after_drop` | Proven |
 | Handles are `Send + !Sync` (H2) | `handles_are_send`; compile-fail doctests pin `!Sync` on both roles | Pinned |
 | Constructible in static storage (H4) | `const_new_works_in_static_context` | Proven |
-| Cost claims per target | Eight-target gated code-size rows (proposal §3.1); architecture split exposed for M0+/M23 vs M3/M4/M33 vs RV32 | Measured |
+| Cost claims per target | Eight-target gated code-size rows (proposal §3.1); re-bless if CAS grows any gated row beyond +16 B | Measured |
 
 Full CI for the lane (`0a22ada` admission package; `f26d4c3` H
 finalization): complete pinned `./scripts/verify.sh` matrix with zero
-skips — 75 unit tests, 11 doctests, 5 compile-fail, 93.75% line
-coverage, Miri host and proxy targets, all seven Loom models,
-eight-target code size, embedded checks, QEMU cycles.
+skips — unit tests, 11 doctests, 5 compile-fail, coverage, Miri host
+and proxy targets, Loom models, eight-target code size, embedded
+checks, QEMU cycles. Re-run after the MAX short-circuit fix.
 
 ## 4. The record
 
 **Decision history (closed on `candidate/counted-signal`, canonical text
 in contract §8 and proposal §3.1–§3.2):**
 
-- **Bounded exact saturation: sole-producer load + conditional
-  `fetch_add`.** Below `u32::MAX`, one Relaxed load and at most one
-  Relaxed `fetch_add`; at the sentinel, a no-op that already linearizes
-  into the saturated snapshot. Rejected for this type: an unbounded CAS
-  loop (fails B1), silent wrap (fails A2/I3 and the crate's
+- **Bounded exact saturation: sole-producer `fetch_add` with stale-MAX
+  confirmation.** Below `MAX`, one Relaxed load and one Relaxed
+  `fetch_add`. Observed `MAX` is confirmed with `compare_exchange(MAX,
+  MAX)`; success is a saturated no-op, failure falls through to one
+  `fetch_add` into the post-take epoch (at most one contention retry).
+  Rejected for this type: a load-and-skip-on-`MAX` short-circuit (fails
+  T3/A1 after a completed take under Relaxed observation), an unbounded
+  CAS loop (fails B1), silent wrap (fails A2/I3 and the crate's
   saturate-don't-wrap convention), and shareable/multiple raisers
   (invalidates the intervening-writer argument). Closure set the
   disclosure standard: the no-wrap proof is an ownership proof — state
@@ -116,15 +121,17 @@ in contract §8 and proposal §3.1–§3.2):**
   own caller and evidence. Width genericity would create
   target-dependent contracts.
 
-**Review history:** issue #30 closed with the lane PROPOSED; draft PR
-#33 carries the complete admission package. Cross-lane handle decision
-recorded against #29; cycle decision matrix remains #26. Contract clause
-IDs (I/T/A/B/H/X) are load-bearing for tests and models — do not
-renumber.
+**Review history:** issue #30 closed with the lane PROPOSED; PR #33
+carries the admission package. Bugbot high finding (stale MAX load drops
+increments) agreed and fixed with the CAS path + Loom litmus. Codex
+P2 (qualify README Sink/Source claim) agreed. Cross-lane handle
+decision recorded against #29; cycle decision matrix remains #26.
+Contract clause IDs (I/T/A/B/H/X) are load-bearing for tests and models
+— do not renumber.
 
 **Where the numbers live:** proposal §3.1 (eight-target `increment` /
-`take_count` code-size table; pinned Cortex-M3 8 / 7 instruction
-regions under rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11);
-contract §9 evidence map; tracking: issue #30, PR #33; completion
+`take_count` code-size table; pinned Cortex-M3 instruction regions under
+rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — re-measure after
+CAS); contract §9 evidence map; tracking: issue #30, PR #33; completion
 commits `0a22ada` (clause-numbered contract + pinned costs) and
 `f26d4c3` (H closed, promotion finalized).

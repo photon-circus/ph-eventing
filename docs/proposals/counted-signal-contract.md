@@ -78,8 +78,9 @@ Algorithmic bounds live here; instruction counts remain measured claims tied
 to a target, toolchain, and reference environment.
 
 - **B1.** `increment` performs a statically bounded amount of work independent
-  of signal history and consumer activity: no retry loop, no dynamic
-  allocation, no user code, and no wait for the consumer.
+  of signal history and consumer activity: at most one contention retry from
+  the sole consumer's reset (no unbounded retry loop), no dynamic allocation,
+  no user code, and no wait for the consumer.
 - **B2.** `take_count` performs a statically bounded amount of work independent
   of the number of increments in the interval and producer activity: no retry
   loop, no dynamic allocation, no user code, and no wait for the producer.
@@ -115,10 +116,12 @@ to a target, toolchain, and reference environment.
 The accepted answer shared with EventFlags is H1–H4: sole-role
 `Send + !Sync` handles with `&self` hot-path operations and state resident in
 the signal. For CountedSignal, this is a correctness choice rather than an API
-style preference. The bounded candidate implementation reads the state and
-then conditionally increments it. Sole-producer ownership means the consumer
-is the only possible intervening writer and can only reset the state; a second
-raiser would invalidate the no-wrap proof and the current evidence for B1.
+style preference. The bounded candidate implementation confirms saturation with
+a compare-exchange and advances below the sentinel the same way. Sole-producer
+ownership means the consumer is the only possible intervening writer and can
+only reset the state, so there is at most one contention retry and the RMW
+cannot wrap; a second raiser would invalidate the no-wrap proof and the current
+evidence for B1.
 
 The independent LatestBuf A.3 decision currently recommends the same handle
 shape. This closes H for EventFlags and CountedSignal only. Whether the
@@ -132,17 +135,19 @@ a separate maintainer decision on issue #26.
 | I1, T1, T4, A1 | `increments_accumulate_and_take_clears`; the threaded `concurrent_takes_do_not_lose_increments` sum check |
 | I2–I3, T2, A2–A3 | `saturates_instead_of_wrapping`; Loom's `counted_signal_saturation_boundary_is_linearizable` model |
 | T1–T3, A1 | Loom's `counted_signal_take_partitions_increments` model; threaded take stress |
-| B1–B2 | Source review (no loops); eight-target gated code-size rows; pinned Cortex-M3 probe: 8 retired instructions for `increment`, 7 for `take_count` under rustc 1.92.0 (`ded5c06cf`) and QEMU 10.0.11 |
+| T3, A1 (post-take / stale MAX) | Loom's `counted_signal_post_take_increment_observes_reset_epoch` model (seeded at `MAX`; Relaxed gate only) |
+| B1–B2 | Source review (≤1 contention retry under H1); eight-target gated code-size rows blessed post-fix (46–76 B `increment`); Cortex-M3 cycles pending re-measure after sentinel CAS |
 | B3 | Source review plus normal, Miri, Loom, and embedded-target executions of both hot paths |
 | H1, H3 | `handles_are_exclusive_and_reusable_after_drop`, including state continuation after reacquisition |
 | H2 | `handles_are_send`; producer and consumer compile-fail doctests pin `!Sync` |
 | H4 | `const_new_works_in_static_context` |
 
-The candidate's relaxed atomic orderings and its load-plus-conditional-RMW
-proof are implementation evidence for this abstract contract. They remain in
+The candidate's relaxed atomic orderings and its sole-producer CAS proof are
+implementation evidence for this abstract contract. They remain in
 [`counted-signal.md`](counted-signal.md) §3.1 and the module documentation,
 not in the semantic clauses above.
 
 The candidate tree passed the complete pinned reference matrix with zero skips
 on 2026-08-11: CI/features/docs/deny/coverage, Miri host and proxy targets, all
-seven Loom models, eight-target code size, embedded checks, and QEMU cycles.
+Loom models, eight-target code size, embedded checks, and QEMU cycles. Re-run
+after the MAX short-circuit fix before treating that stamp as current.

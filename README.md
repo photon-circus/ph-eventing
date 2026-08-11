@@ -136,8 +136,9 @@ assert!(producer.push(3).is_ok());     // space freed
 ### CountedSignal
 
 A saturating count for repeated events whose payload and ordering do not
-matter. The sole producer is load-bearing: it permits exact saturation
-with a bounded load plus conditional `fetch_add`, without a CAS retry loop.
+matter. The sole producer is load-bearing: it permits exact saturation with a
+bounded compare-exchange that treats observed `u32::MAX` as maybe-stale, with
+at most one contention retry from the consumer reset.
 
 ```rust
 use ph_eventing::CountedSignal;
@@ -155,8 +156,10 @@ assert!(!snapshot.is_saturated());
 
 ### Common Traits
 
-All producers implement `Sink<T>` and all consumers implement `Source<T>`,
-so you can write generic code that works with any combination:
+Payload-buffer producers implement `Sink<T>` and their consumers implement
+`Source<T>`, so you can write generic code that works across `RingBuf`,
+`SeqRing`, and `EventBuf`. Signal types such as `CountedSignal` are outside
+that stream vocabulary (no `T` payload).
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};

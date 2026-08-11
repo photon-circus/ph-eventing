@@ -3,17 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Fixed
+- `CountedSignal::increment`: replace the load-and-skip-on-`MAX` short-circuit
+  with a sole-producer–bounded CAS that treats observed `MAX` as maybe-stale
+  (`MAX → MAX` confirms saturation; failure retries once into the post-take
+  epoch). A completed `take_count` followed by a later `increment` can no
+  longer lose the occurrence under Relaxed observation (contract T3/A1). Loom
+  litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
 ### Documentation
-- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned 8/7 Cortex-M3 rows, and the H closure record.
+- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (re-measure after CAS), and the H closure record.
+- CountedSignal contract B1: at most one contention retry from the sole
+  consumer reset; proposal §3.1 linearization claim corrected; README Sink/Source
+  claim qualified to payload-buffer handles.
 ### Added
 - `CountedSignal`: a payload-free SPSC counter with a bounded
   `increment`, atomic `take_count`, exact `u32` saturation, and observable
-  saturation. Loom models pin both ordinary take partitioning and the
-  saturation-boundary interleaving; its frozen contract maps citable clauses
-  to unit, threaded, Loom, Miri, code-size, and QEMU evidence. The reference
-  Cortex-M3 probe measures 8 retired instructions for `increment` and 7 for
-  `take_count`. Exact bounded saturation depends on retaining a sole
-  `Send + !Sync` producer handle.
+  saturation. Loom models pin take partitioning, the saturation-boundary
+  interleaving, and the post-take stale-`MAX` litmus; its frozen contract maps
+  citable clauses to unit, threaded, Loom, Miri, code-size, and QEMU evidence.
+  Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
+  handle. Cortex-M3 instruction counts require re-measure after the CAS path.
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.

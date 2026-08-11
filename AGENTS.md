@@ -164,7 +164,7 @@ ph-eventing/
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `CountedSignal` | Saturating count for payload-free SPSC events |
-| `counted_signal::Producer<'a>` | Sole incrementing handle; bounded load plus conditional RMW |
+| `counted_signal::Producer<'a>` | Sole incrementing handle; `fetch_add` below MAX, CAS-confirmed sentinel |
 | `counted_signal::Consumer<'a>` | Sole taking handle; `swap(0)` partitions count epochs |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
@@ -186,13 +186,19 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 
 - The semantic contract and stable clause IDs live in
   `docs/proposals/counted-signal-contract.md`.
-- The sole producer performs a Relaxed load and, below `u32::MAX`, one Relaxed
-  `fetch_add`. The consumer performs a Relaxed `swap(0)`.
+- The sole producer loads the counter (Relaxed). Below `u32::MAX` it
+  `fetch_add`s once (Relaxed). Observed `u32::MAX` is maybe-stale: a
+  `compare_exchange(MAX, MAX)` success is a saturated no-op; failure means a
+  completed take reset the epoch and the producer `fetch_add`s once into it.
+  Under sole-producer ownership that is at most one contention retry and the
+  RMW cannot wrap.
+- The consumer performs a Relaxed `swap(0)`.
 - Relaxed is sufficient because there is no payload publication; the atomic's
   modification order alone partitions increments between take epochs.
-- Producer exclusivity is load-bearing. Between its load and RMW, only the
-  consumer can write and it can only lower the count, so the RMW cannot wrap.
-  Never make the producer handle `Sync` without replacing this algorithm.
+- Producer exclusivity is load-bearing. Never make the producer handle `Sync`
+  without replacing this algorithm. Do not restore a load-and-skip-on-`MAX`
+  short-circuit — after a completed take it can drop an occurrence from both
+  intervals (T3/A1).
 
 ### Memory Ordering Strategy (EventBuf)
 
@@ -692,7 +698,7 @@ Cross-environment diffs of ±1 are noise; compare inside the image.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
-| `CountedSignal::increment` / `take_count` | 8 / 7 | | |
+| `CountedSignal::increment` / `take_count` | 8 / 7 (pre-CAS; re-measure) | | |
 
 Three results carry the argument:
 
@@ -807,7 +813,9 @@ Individual checks are also available as cargo aliases (see
 
 ## Testing
 
-Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`, and `src/traits.rs` in their respective `tests` modules. They require std and use the standard Rust test framework.
+Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`,
+`src/counted_signal.rs`, and `src/traits.rs` in their respective `tests`
+modules. They require std and use the standard Rust test framework.
 
 **Run tests:**
 ```bash
@@ -845,6 +853,14 @@ cargo test
 - `peek_copies_without_advancing` — `peek` vs `pop`
 - `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
 - `static_buf_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` buffer
+
+**`counted_signal::tests`:**
+- `increments_accumulate_and_take_clears` — Exact accumulate + take clears (I1, T1, T4, A1)
+- `saturates_instead_of_wrapping` — Boundary at `u32::MAX` (I2–I3, T2, A2–A3)
+- `handles_are_exclusive_and_reusable_after_drop` — Role exclusivity and state continuation (H1, H3)
+- `handles_are_send` — Producer/Consumer are Send (H2); compile-fail doctests pin `!Sync`
+- `const_new_works_in_static_context` — `static` / const `new()` (`#[cfg(not(loom))]`) (H4)
+- `concurrent_takes_do_not_lose_increments` — Threaded no-loss stress (T3, A1)
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
@@ -908,6 +924,14 @@ two pin the CountedSignal handles' `!Sync` contract.
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
 - `CountedSignal` handles are `Send + !Sync`; the producer's `!Sync` property
   is part of the saturation proof, not merely API uniformity
+- `CountedSignal`: `increment` uses `fetch_add` below `MAX` and confirms the
+  sentinel with `compare_exchange(MAX, MAX)` (or one follow-up `fetch_add` after
+  a take reset) — never a plain load-and-skip on `MAX`, which drops post-take
+  occurrences under Relaxed observation (T3/A1)
+- `CountedSignal`: under sole producer, at most one contention retry from the
+  consumer's `swap(0)`; the counter never wraps
+- `CountedSignal`: `take_count` is a single Relaxed `swap(0)` that partitions
+  every increment into exactly one take epoch
 - No panics in hot paths. All three `new()` reject `N == 0` with a **const**
   assertion, so a zero-capacity buffer fails the build rather than panicking —
   which also means no test can cover the rejection, and the const assertion is
@@ -959,6 +983,11 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `CountedSignal`: Producer and Consumer handles are `Send + !Sync`; producer
+  exclusivity is load-bearing for wrap-free saturation (B1)
+- `CountedSignal`: never restore a load-and-skip-on-`MAX` short-circuit; the
+  CAS path exists so a post-take increment cannot vanish under Relaxed
+  observation of a stale sentinel
 - `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` were deprecated in 0.2.0 and
   **removed in 0.3.0**. `try_producer()` / `try_consumer()` are the only handle-acquisition API;
   a panic is a reset on the targets this crate exists for. Do not reintroduce a panicking
