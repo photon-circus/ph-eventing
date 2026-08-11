@@ -1,6 +1,9 @@
 # BlockBuf: complete window handoff (exploratory design document)
 
-- **Status:** EXPLORATORY — design exploration vehicle, not yet PROPOSED.
+- **Status:** DECISION-COMPLETE (2026-08-11) — D3 confirmed (composition)
+  and cycle decision **P** closed as **Copy composition**; every input to
+  promotion is settled, and promotion to PROPOSED awaits the #34
+  acceptance review. Prior status: EXPLORATORY.
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §2 (received
   2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
@@ -281,9 +284,21 @@ no block-specific evidence; Loom remains required for the selected transport.
    scheduling decision rather than separate sample/block primitive designs.
    **Done 2026-08-11** — D3 closed as composition (contract §9, PR #37).
 2. Compare the completed section 6 matrix against named budgets; choose Copy
-   composition or SlotPool/grants from the result. The measurement is complete;
-   naming the instruction/time and RAM budgets remains a maintainer decision.
+   composition or SlotPool/grants from the result. **Done 2026-08-11** —
+   cycle decision **P** closed as **Copy composition**, with the deliberate
+   budget posture that the per-shape measured rows *are* the budget
+   statement (no library-wide threshold; planning-record P/S closure).
+   SlotPool is deferred by decision **S** with an adopter-gated reopening
+   trigger.
 3. Run standard CI and Miri; run Loom for the selected transport.
+   **Satisfied for the selected transport** — Copy composition is the
+   measured, fully green configuration (the block layer adds no atomics;
+   §8's Loom position stands).
 4. If Copy wins, decide which completed matrix rows become release baselines.
-   If SlotPool wins, specify grant teardown and ownership proof before
-   PROPOSED.
+   **Directed 2026-08-11**: all nine shapes ride into the release baselines
+   at promotion via the deliberate, reviewed `--bless` (mechanics rule 8);
+   the pinned instruction regions stay committed. One documentation
+   obligation rides to promotion with them: the **double-copy hazard**
+   guidance for DMA integrations — make the builder the DMA target, or
+   publish from task context — stated in the block-payload docs, not left
+   for integrators to discover.
