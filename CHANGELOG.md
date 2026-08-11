@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+### Documentation
+- `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
+  deliberately rejected (its data loss would be unreportable under overwrite; see the worked
+  rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so
+  the `0.2.0` docs on docs.rs carry the sentence; the fix rides out with the next publish.
+
 ## 0.2.0 - 2026-08-10
 
 **What this release delivers.** 0.1.x was correct: verified lock-free buffers with no way to
