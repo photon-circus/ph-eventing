@@ -164,7 +164,7 @@ ph-eventing/
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `CountedSignal` | Saturating count for payload-free SPSC events |
-| `counted_signal::Producer<'a>` | Sole incrementing handle; `fetch_add` below MAX, CAS-confirmed sentinel |
+| `counted_signal::Producer<'a>` | Sole incrementing handle; `fetch_add` below MAX, no-op-RMW-confirmed sentinel |
 | `counted_signal::Consumer<'a>` | Sole taking handle; `swap(0)` partitions count epochs |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
@@ -990,8 +990,9 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `CountedSignal`: Producer and Consumer handles are `Send + !Sync`; producer
   exclusivity is load-bearing for wrap-free saturation (B1)
 - `CountedSignal`: never restore a load-and-skip-on-`MAX` short-circuit; the
-  CAS path exists so a post-take increment cannot vanish under Relaxed
-  observation of a stale sentinel
+  no-op `fetch_or(0)` re-read exists so a post-take increment cannot vanish
+  under Relaxed observation of a stale sentinel (and never becomes a
+  compare-exchange, which lowers to an unbounded LR/SC loop on RISC-V)
 - `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` were deprecated in 0.2.0 and
   **removed in 0.3.0**. `try_producer()` / `try_consumer()` are the only handle-acquisition API;
   a panic is a reset on the targets this crate exists for. Do not reintroduce a panicking
