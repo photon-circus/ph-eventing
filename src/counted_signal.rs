@@ -1,0 +1,310 @@
+//! A saturating count for payload-free events.
+//!
+//! [`CountedSignal`] is an exploratory SPSC primitive for events whose
+//! multiplicity matters but whose payload and ordering do not. Its producer
+//! performs at most one load and one read-modify-write per increment; its
+//! consumer atomically takes the accumulated count.
+//!
+//! The single-producer handle is load-bearing. A producer first observes that
+//! the counter is below [`u32::MAX`] and then increments it with `fetch_add`.
+//! Between those operations the sole consumer may reset the counter to zero,
+//! but no other operation can increase it. Consequently `fetch_add` cannot
+//! wrap: it either advances the value observed by the producer or advances a
+//! newly reset epoch. Multiple producers would invalidate that proof.
+
+use core::cell::Cell;
+use core::marker::PhantomData;
+
+use crate::sync::{AtomicBool, AtomicU32, Ordering};
+
+/// A saturating SPSC counter for payload-free events.
+///
+/// Exactly one [`Producer`] and one [`Consumer`] may be active at a time.
+/// Handles are `Send + !Sync`: each can move to another execution context,
+/// but cannot be shared between contexts. Dropping a handle releases its slot.
+///
+/// `u32::MAX` is the saturation sentinel. Counts below it are exact; a
+/// saturated snapshot means that at least `u32::MAX` increments occurred
+/// since the preceding take.
+pub struct CountedSignal {
+    count: AtomicU32,
+    producer_taken: AtomicBool,
+    consumer_taken: AtomicBool,
+}
+
+impl CountedSignal {
+    /// Create an empty counted signal.
+    #[cfg(not(loom))]
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            count: AtomicU32::new(0),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Create an empty counted signal under Loom.
+    #[cfg(loom)]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            count: AtomicU32::new(0),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(all(loom, test))]
+    pub(crate) fn with_count_for_model(count: u32) -> Self {
+        Self {
+            count: AtomicU32::new(count),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Try to acquire the sole producer handle.
+    ///
+    /// Returns `None` while another producer handle is active.
+    #[inline]
+    pub fn try_producer(&self) -> Option<Producer<'_>> {
+        if self.producer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Producer {
+                signal: self,
+                _not_sync: PhantomData,
+            })
+        }
+    }
+
+    /// Try to acquire the sole consumer handle.
+    ///
+    /// Returns `None` while another consumer handle is active.
+    #[inline]
+    pub fn try_consumer(&self) -> Option<Consumer<'_>> {
+        if self.consumer_taken.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Consumer {
+                signal: self,
+                _not_sync: PhantomData,
+            })
+        }
+    }
+}
+
+impl Default for CountedSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl core::fmt::Debug for CountedSignal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("CountedSignal")
+            .field("count", &self.count.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+/// The sole incrementing handle for a [`CountedSignal`].
+///
+/// This handle is `Send + !Sync`. Its exclusivity is what makes exact,
+/// bounded saturation possible without a compare-exchange loop.
+pub struct Producer<'a> {
+    signal: &'a CountedSignal,
+    _not_sync: PhantomData<Cell<()>>,
+}
+
+impl Producer<'_> {
+    /// Record one occurrence.
+    ///
+    /// This operation is bounded to one atomic load and, unless the counter
+    /// was already saturated, one atomic `fetch_add`. It never loops and the
+    /// counter never wraps.
+    #[inline]
+    pub fn increment(&self) {
+        // Only this handle may increase `count`; the consumer can only reset it
+        // to zero. If this load is below MAX, the later fetch_add therefore
+        // observes either a value no greater than this one or a post-take
+        // value. In both cases adding one cannot wrap.
+        if self.signal.count.load(Ordering::Relaxed) != u32::MAX {
+            self.signal.count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for Producer<'_> {
+    fn drop(&mut self) {
+        self.signal.producer_taken.store(false, Ordering::Release);
+    }
+}
+
+impl core::fmt::Debug for Producer<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("counted_signal::Producer").finish()
+    }
+}
+
+/// The sole taking handle for a [`CountedSignal`].
+///
+/// This handle is `Send + !Sync` and may atomically take counts while its
+/// paired producer increments from another context.
+pub struct Consumer<'a> {
+    signal: &'a CountedSignal,
+    _not_sync: PhantomData<Cell<()>>,
+}
+
+impl Consumer<'_> {
+    /// Atomically take the count accumulated since the preceding take.
+    ///
+    /// A concurrent increment belongs wholly to this snapshot or wholly to
+    /// the next one. [`CountSnapshot::is_saturated`] distinguishes the
+    /// saturation sentinel from an exact count.
+    #[inline]
+    pub fn take_count(&self) -> CountSnapshot {
+        CountSnapshot::from_raw(self.signal.count.swap(0, Ordering::Relaxed))
+    }
+}
+
+impl Drop for Consumer<'_> {
+    fn drop(&mut self) {
+        self.signal.consumer_taken.store(false, Ordering::Release);
+    }
+}
+
+impl core::fmt::Debug for Consumer<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("counted_signal::Consumer").finish()
+    }
+}
+
+/// The result of atomically taking a [`CountedSignal`] count.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
+pub struct CountSnapshot {
+    count: u32,
+}
+
+impl CountSnapshot {
+    #[inline(always)]
+    const fn from_raw(raw: u32) -> Self {
+        Self { count: raw }
+    }
+
+    /// Return the exact count, or `u32::MAX` when saturated.
+    #[inline(always)]
+    #[must_use]
+    pub const fn count(self) -> u32 {
+        self.count
+    }
+
+    /// Whether at least `u32::MAX` increments accumulated before the take.
+    #[inline(always)]
+    #[must_use]
+    pub const fn is_saturated(self) -> bool {
+        self.count == u32::MAX
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn increments_accumulate_and_take_clears() {
+        let signal = CountedSignal::new();
+        let producer = signal.try_producer().unwrap();
+        let consumer = signal.try_consumer().unwrap();
+
+        producer.increment();
+        producer.increment();
+
+        assert_eq!(consumer.take_count(), CountSnapshot { count: 2 });
+        assert_eq!(consumer.take_count().count(), 0);
+    }
+
+    #[test]
+    fn saturates_instead_of_wrapping() {
+        let signal = CountedSignal::new();
+        signal.count.store(u32::MAX - 1, Ordering::Relaxed);
+        let producer = signal.try_producer().unwrap();
+        let consumer = signal.try_consumer().unwrap();
+
+        producer.increment();
+        producer.increment();
+
+        let snapshot = consumer.take_count();
+        assert_eq!(snapshot.count(), u32::MAX);
+        assert!(snapshot.is_saturated());
+        assert_eq!(consumer.take_count().count(), 0);
+    }
+
+    #[test]
+    fn handles_are_exclusive_and_reusable_after_drop() {
+        let signal = CountedSignal::new();
+        let producer = signal.try_producer().unwrap();
+        let consumer = signal.try_consumer().unwrap();
+        assert!(signal.try_producer().is_none());
+        assert!(signal.try_consumer().is_none());
+
+        drop(producer);
+        drop(consumer);
+        assert!(signal.try_producer().is_some());
+        assert!(signal.try_consumer().is_some());
+    }
+
+    #[test]
+    fn handles_are_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<Producer<'static>>();
+        assert_send::<Consumer<'static>>();
+    }
+
+    #[cfg(not(loom))]
+    #[test]
+    fn const_new_works_in_static_context() {
+        static SIGNAL: CountedSignal = CountedSignal::new();
+        let producer = SIGNAL.try_producer().unwrap();
+        let consumer = SIGNAL.try_consumer().unwrap();
+        producer.increment();
+        assert_eq!(consumer.take_count().count(), 1);
+    }
+
+    #[cfg(not(loom))]
+    #[test]
+    fn concurrent_takes_do_not_lose_increments() {
+        use core::sync::atomic::{AtomicBool, Ordering as CoreOrdering};
+
+        let signal = CountedSignal::new();
+        let producer = signal.try_producer().unwrap();
+        let consumer = signal.try_consumer().unwrap();
+        let done = AtomicBool::new(false);
+
+        let total = std::thread::scope(|scope| {
+            let done_for_producer = &done;
+            scope.spawn(move || {
+                for _ in 0..crate::test_support::iterations(100_000) {
+                    producer.increment();
+                }
+                done_for_producer.store(true, CoreOrdering::Release);
+            });
+
+            let done_for_consumer = &done;
+            let taker = scope.spawn(move || {
+                let mut total = 0u64;
+                while !done_for_consumer.load(CoreOrdering::Acquire) {
+                    total += u64::from(consumer.take_count().count());
+                    std::thread::yield_now();
+                }
+                total + u64::from(consumer.take_count().count())
+            });
+
+            taker.join().unwrap()
+        });
+
+        assert_eq!(total, u64::from(crate::test_support::iterations(100_000)));
+    }
+}

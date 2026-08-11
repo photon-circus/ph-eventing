@@ -7,8 +7,10 @@
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+//! | [`CountedSignal`] | Saturating SPSC count for identical, payload-free events. |
 //!
-//! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
+//! All four are fixed-size and zero-allocation. The buffer types are generic
+//! over `T: Copy`; [`CountedSignal`] carries no payload.
 //!
 //! # Common traits
 //!
@@ -200,12 +202,14 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 #[macro_use]
 mod macros;
 
+pub mod counted_signal;
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
+pub use counted_signal::{CountSnapshot, CountedSignal};
 pub use event_buf::EventBuf;
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};

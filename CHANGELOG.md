@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- Exploratory `CountedSignal`: a payload-free SPSC counter with a bounded
+  `increment`, atomic `take_count`, exact `u32` saturation, and observable
+  saturation. Loom models pin both ordinary take partitioning and the
+  saturation-boundary interleaving; cycle and code-size probes expose the
+  remaining cost decision. The proposal records why exact bounded saturation
+  depends on retaining a sole `Send + !Sync` producer handle.
+
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked

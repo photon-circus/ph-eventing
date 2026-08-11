@@ -16,8 +16,10 @@ Stack-allocated ring buffers for no-std embedded targets.
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+| [`CountedSignal`](#countedsignal) | Saturating SPSC count for identical, payload-free events. |
 
-All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All four are fixed-size, `#![no_std]`, and zero-allocation. The buffers are
+generic over `T: Copy`; `CountedSignal` carries no payload.
 
 ## What this optimises for
 
@@ -131,6 +133,26 @@ assert_eq!(consumer.pop(), Some(1));
 assert!(producer.push(3).is_ok());     // space freed
 ```
 
+### CountedSignal
+
+An exploratory saturating count for repeated events whose payload and ordering
+do not matter. The sole producer is load-bearing: it permits exact saturation
+with a bounded load plus conditional `fetch_add`, without a CAS retry loop.
+
+```rust
+use ph_eventing::CountedSignal;
+
+let signal = CountedSignal::new();
+let producer = signal.try_producer().expect("no producer taken yet");
+let consumer = signal.try_consumer().expect("no consumer taken yet");
+
+producer.increment();
+producer.increment();
+let snapshot = consumer.take_count();
+assert_eq!(snapshot.count(), 2);
+assert!(!snapshot.is_saturated());
+```
+
 ### Common Traits
 
 All producers implement `Sink<T>` and all consumers implement `Source<T>`,
@@ -211,15 +233,21 @@ them is a runtime step and always will be.
 - `drain(max, hook)` consumes up to `max` items through a callback and returns the count.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
 
+### CountedSignal
+- Counts below `u32::MAX` are exact; the counter saturates rather than wrapping.
+- `take_count` atomically clears the counter and reports whether it saturated.
+- A concurrent increment belongs wholly to the current take or the next one.
+- The sole `Send + !Sync` producer handle is part of the correctness contract.
+
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
-- `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
+- `SeqRing`, `EventBuf`, and `CountedSignal` are SPSC by design: exactly one producer and one consumer may be
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
   The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
   0.3.0. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
   undefined behavior.
-- `T: Copy` is required by all types to avoid allocation and return values by copy.
+- `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.
 - `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
@@ -242,8 +270,8 @@ them is a runtime step and always will be.
 The typical embedded shape is a producer in an interrupt handler and a consumer
 in a task loop. That works, with three things to know:
 
-- **The buffer is shared; the handles are owned.** `SeqRing<T, N>` and
-  `EventBuf<T, N>` are `Sync` when `T: Send`, so `&buf` can be handed to both
+- **The primitive is shared; the handles are owned.** `SeqRing<T, N>` and
+  `EventBuf<T, N>` are `Sync` when `T: Send`, and `CountedSignal` is `Sync`, so the primitive can be handed to both
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
   There is no way to get a second `Producer` while one is live: `producer()`
@@ -293,7 +321,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 69 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
+| 75 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for all concurrent types; `N == 0` rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

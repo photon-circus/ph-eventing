@@ -26,7 +26,7 @@
 use core::hint::black_box;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug;
-use ph_eventing::{EventBuf, RingBuf, SeqRing};
+use ph_eventing::{CountedSignal, EventBuf, RingBuf, SeqRing};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -37,7 +37,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Declares region markers.
 ///
 /// Each body embeds a **unique immediate**, and that is load-bearing: with
-/// identical `nop`-only bodies the linker folded all nineteen markers onto a
+/// identical `nop`-only bodies the linker folded every marker onto a
 /// single address, the runner saw one label, and the output was silently empty.
 /// `r12` is call-clobbered under AAPCS, so writing it in a `-> ()` function is
 /// free and harmless.
@@ -83,6 +83,23 @@ markers! {
     17 => m_rb_get,
     18 => m_rb_latest,
     19 => m_sr_poll_lagged_far,
+    // CountedSignal -- payload-free SPSC
+    20 => m_cs_increment,
+    21 => m_cs_take_count,
+}
+
+fn counted_signal_costs() {
+    let signal = CountedSignal::new();
+    let tx = signal.try_producer().expect("producer");
+    let rx = signal.try_consumer().expect("consumer");
+
+    m_cs_increment();
+    tx.increment();
+    m_end();
+
+    m_cs_take_count();
+    let _ = black_box(rx.take_count());
+    m_end();
 }
 
 fn event_buf_costs() {
@@ -207,6 +224,7 @@ fn main() -> ! {
     event_buf_costs();
     seq_ring_costs();
     ring_buf_costs();
+    counted_signal_costs();
 
     debug::exit(debug::EXIT_SUCCESS);
     loop {}

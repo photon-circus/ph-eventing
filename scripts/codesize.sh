@@ -31,9 +31,10 @@
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
-# attributes to a single API shape rather than to a whole binary. `bss` is the
-# `static EventBuf<u32, 64>`; it should be identical on every target and `data`
-# should be 0 -- that pair is the const-`new` claim.
+# attributes to a single API shape rather than to a whole binary. `cs_incr` and
+# `cs_take` isolate the two CountedSignal hot paths. `bss` is the `static
+# EventBuf<u32, 64>`; it should be identical on every target and `data` should
+# be 0 -- that pair is the const-`new` claim.
 
 set -u
 
@@ -114,8 +115,8 @@ fn_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
-printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+printf '%-30s %10s %8s %8s %8s %8s %6s\n' TARGET two_calls cs_incr cs_take split bss data
+printf '%-30s %10s %8s %8s %8s %8s %6s\n' '------------------------------' '---------' '-------' '-------' '-----' '---' '----'
 
 skipped=0
 failed=0
@@ -161,17 +162,21 @@ for entry in $TARGETS; do
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
     two="$(fn_size "$ar" bringup_two_calls)"
+    cs_inc="$(fn_size "$ar" counted_increment)"
+    cs_take="$(fn_size "$ar" counted_take)"
     spl="$(fn_size "$ar" bringup_split)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
     dat="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.data\./ { s += $2 } END { print s + 0 }')"
 
-    printf '%-30s %10s %8s %8s %6s\n' \
-        "$target" "${two:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
+    printf '%-30s %10s %8s %8s %8s %8s %6s\n' \
+        "$target" "${two:--}" "${cs_inc:--}" "${cs_take:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
 
     # Xtensa is never gated: it needs a toolchain fork, so making it a hard gate
     # would make that fork mandatory for every contributor.
     case "$target" in xtensa-*) continue ;; esac
     [ -n "$two" ] && printf '%s\ttwo_calls\t%s\n' "$target" "$two" >> "$RESULTS"
+    [ -n "$cs_inc" ] && printf '%s\tcounted_increment\t%s\n' "$target" "$cs_inc" >> "$RESULTS"
+    [ -n "$cs_take" ] && printf '%s\tcounted_take\t%s\n' "$target" "$cs_take" >> "$RESULTS"
     [ -n "$bss" ] && printf '%s\tbss\t%s\n' "$target" "$bss" >> "$RESULTS"
     printf '%s\tdata\t%s\n' "$target" "${dat:-0}" >> "$RESULTS"
 done

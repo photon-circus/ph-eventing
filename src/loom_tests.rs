@@ -19,9 +19,63 @@
 // they remain public API until 0.3.0, so their orderings still need proving.
 #![allow(deprecated)]
 
-use crate::{EventBuf, SeqRing};
+use crate::{CountedSignal, EventBuf, SeqRing};
 use loom::sync::Arc;
 use loom::thread;
+
+/// Concurrent takes partition increments between snapshots without losing or
+/// duplicating them.
+#[test]
+fn counted_signal_take_partitions_increments() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::new());
+
+        let producer_signal = Arc::clone(&signal);
+        let producer = thread::spawn(move || {
+            let producer = producer_signal.try_producer().unwrap();
+            producer.increment();
+            producer.increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer = thread::spawn(move || {
+            let consumer = consumer_signal.try_consumer().unwrap();
+            u64::from(consumer.take_count().count()) + u64::from(consumer.take_count().count())
+        });
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(early + u64::from(final_count), 2);
+    });
+}
+
+/// At the saturation boundary, a take between the producer's load and
+/// `fetch_add` moves the increment into the new epoch; it cannot make the RMW
+/// wrap or lose the increment.
+#[test]
+fn counted_signal_saturation_boundary_is_linearizable() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::with_count_for_model(u32::MAX - 1));
+
+        let producer_signal = Arc::clone(&signal);
+        let producer = thread::spawn(move || {
+            producer_signal.try_producer().unwrap().increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer =
+            thread::spawn(move || consumer_signal.try_consumer().unwrap().take_count().count());
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(
+            u64::from(early) + u64::from(final_count),
+            u64::from(u32::MAX)
+        );
+    });
+}
 
 /// Every item the producer pushes is popped exactly once, in order, with no
 /// duplicates and no losses — under every interleaving.

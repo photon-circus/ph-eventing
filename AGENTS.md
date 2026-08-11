@@ -26,10 +26,13 @@ prose when it disagrees.
 
 **ph-eventing** provides stack-allocated ring buffers for no-std embedded targets.
 
-It ships three primitives:
+It ships four primitives:
 - **`RingBuf<T, N>`** — a single-owner ring buffer (no atomics, `&mut` access). Ideal for local event logs, sample windows, and single-context collection.
 - **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
+- **`CountedSignal`** — an exploratory saturating SPSC count for identical,
+  payload-free events. The sole producer handle makes exact bounded saturation
+  possible without a CAS retry loop.
 
 **Key characteristics:**
 - Zero runtime dependencies (`portable-atomic` is optional; `loom` is a dev-dependency gated on `--cfg loom`). Verify with `cargo tree` — it must print the crate alone.
@@ -138,6 +141,7 @@ ph-eventing/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
+    ├── counted_signal.rs   # Saturating payload-free SPSC counter
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
     ├── sync.rs             # Atomic/cell shim — swaps in Loom's primitives under --cfg loom
@@ -159,6 +163,9 @@ ph-eventing/
 | `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
+| `CountedSignal` | Saturating count for payload-free SPSC events |
+| `counted_signal::Producer<'a>` | Sole incrementing handle; bounded load plus conditional RMW |
+| `counted_signal::Consumer<'a>` | Sole taking handle; `swap(0)` partitions count epochs |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
@@ -174,6 +181,16 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - **Sequence arithmetic:** use `seq_distance`, not raw `wrapping_sub` — the latter over-counts by one across the wrap because `push` skips the reserved `0`.
 
 `RingBuf` uses no atomics — it is a plain struct with `&mut self` mutation.
+
+### Memory Ordering Strategy (CountedSignal)
+
+- The sole producer performs a Relaxed load and, below `u32::MAX`, one Relaxed
+  `fetch_add`. The consumer performs a Relaxed `swap(0)`.
+- Relaxed is sufficient because there is no payload publication; the atomic's
+  modification order alone partitions increments between take epochs.
+- Producer exclusivity is load-bearing. Between its load and RMW, only the
+  consumer can write and it can only lower the count, so the RMW cannot wrap.
+  Never make the producer handle `Sync` without replacing this algorithm.
 
 ### Memory Ordering Strategy (EventBuf)
 
@@ -657,7 +674,7 @@ measures the other half of the determinism claim — that the hot paths cost a
 Measured in the reference environment — `scripts/verify/Dockerfile`
 (rustc 1.92.0, Debian trixie qemu-system-arm 10.0.x, thumbv7m / Cortex-M3),
 reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
-environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
+environment*, not universal: a 10.2 QEMU build shifted two measured regions
 regions by exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
 
@@ -698,7 +715,7 @@ verified deterministic by diffing two runs.
 **Two traps, both hit during development:**
 
 - **Markers must embed a unique immediate.** With identical `nop`-only bodies
-  the linker folded all nineteen onto one address, the runner saw a single
+  the linker folded all markers onto one address, the runner saw a single
   label, and the output was silently empty — it looked like the probe measured
   nothing rather than like a bug. `cycles.sh` now fails loudly if the count of
   distinct marker addresses does not match the count of markers.
@@ -865,7 +882,7 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
+and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 3 `compile_fail`
 doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions
@@ -883,6 +900,8 @@ doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- `CountedSignal` handles are `Send + !Sync`; the producer's `!Sync` property
+  is part of the saturation proof, not merely API uniformity
 - No panics in hot paths. All three `new()` reject `N == 0` with a **const**
   assertion, so a zero-capacity buffer fails the build rather than panicking —
   which also means no test can cover the rejection, and the const assertion is
