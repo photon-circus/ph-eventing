@@ -98,8 +98,9 @@ obvious.
 > answered by D3's closure — composition over payload-agnostic
 > primitives, no new named types (contract §9). The fill-side,
 > `Copy`-vs-`SlotPool`, and stamp questions are answered in the developed
-> document on `candidate/block-buf` (`BlockBuilder`, the deferred **P**
-> decision, and stamps-inside-`T` respectively). Retained unedited as the
+> document on `candidate/block-buf` (`BlockBuilder`, decision **P** —
+> closed 2026-08-11 as Copy composition, see the planning record's P/S
+> closure — and stamps-inside-`T` respectively). Retained unedited as the
 > seed record.
 
 - Is `LatestBlockBuf` a new type or `LatestBuf<Block<T, Stamp, N>>` plus a

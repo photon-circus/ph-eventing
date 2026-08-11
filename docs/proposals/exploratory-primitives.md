@@ -84,7 +84,10 @@ occurred. Likely one of the strongest additions for embedded DSP.
 ## 3. SlotPool: bounded zero-copy ownership transfer
 
 **Design document: [`slot-pool.md`](slot-pool.md)** (the substantive design
-text has moved there; this entry is the summary).
+text has moved there; this entry is the summary). **Deferred** (decision
+S, 2026-08-11): evaluated in full, evidence banked on
+`candidate/slot-pool`, adopter-gated reopening trigger registered — see
+the design document's status header.
 
 For payloads large enough that copying dominates transfer cost, a
 statically allocated pool transfers ownership instead: slots move through
