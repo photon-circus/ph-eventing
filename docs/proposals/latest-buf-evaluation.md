@@ -21,7 +21,7 @@ permanent decision and is listed here as closed.
 | D1, generation ambiguity — **CLOSED** (maintainer, 2026-08-11, PR #37) as this default plus the payload escape hatch | Exact within one non-zero `u32` span. Beyond that span use the documented approximation `generation_distance(last, current).saturating_sub(1)`; a repeated generation after exactly one full cycle therefore reports zero rather than panicking. Applications requiring a longer identity span carry a wider producer-assigned sequence in `T`. | Closed — contract §9 records the decision, C3/C5/O2 carry the beyond-span text, and non-promise X6 states the adopter disclosure, including why a `Gap::Unknown`-style API was rejected (hot-path cost; "unknown" cannot recover the lost count). |
 | D2, `Source<T>` — **CLOSED** (maintainer, 2026-08-11, PR #37) as this default | No `Source<T>` implementation. Provide `LatestSource<T>` so replacement evidence remains structural — the maintainer's articulation: the new traits were designed as the type's contract surface, solving what the existing traits structurally could not. | Closed — contract §9 and non-promise X7 record the decision; a convenience `Source` impl remains an additive, adopter-evidence-gated future decision, and a `compile_fail` doctest on `Consumer` pins the absent impl against silent regression. |
 | D3, sample or block — **CLOSED** (maintainer, 2026-08-11, PR #37) as this default | Implement generic `LatestBuf<T>` first. A complete block is a `T`; the BlockBuf candidate demonstrates `LatestBuf<Block<T, N>>` for latest and `EventBuf<Block<T, N>, Q>` for queued delivery. | Closed — contract §9 records the decision with the joint matrix (`8593b4a`) as the acceptance measurement set for both shapes. The reopening condition is registered there unchanged: a separate block transport must enforce a guarantee composition cannot, such as direct-to-granted-slot filling with a measured copy/RAM win (behind cycle decisions P/S). |
-| A.3, role continuation | Compare channel-resident role state with handle-resident state persisted on `Drop`. Keep H2/H4 in both candidates. | Narrow H2 only if both candidates fail the evidence bar; reacquisition must not silently restart. |
+| A.3, role continuation — **CLOSED** (maintainer, 2026-08-11, PR #37) as channel-resident | Channel-resident role state, stateless handles — the crate precedent and the decision-H doctrine. Continuation by construction; full-column evidence in §7. | Closed — persist-on-drop is considered and not selected (its §7 column stays as the preserved partial evidence); narrowing H2's condition (both candidates failing) was not met. Contract non-promise X8 states the role-recovery boundary for integrators. |
 | A.1, empty poll | Acquire-load the ready bit and return when false; a true load still proceeds through the `AcqRel` ownership swap. | Revert to the unconditional swap only if a target regresses beyond the code-size tolerance or the Loom equivalence model fails. Neither occurred in the recorded matrix. |
 
 The BlockBuf branch also makes `DropBlockBuf` a caller policy over the block
@@ -212,11 +212,18 @@ An implementation is ready to compare only when its PR can fill every cell:
 Correctness removes a candidate; measurements select between candidates that
 remain. Ergonomics is evaluated only after those results.
 
-The channel-state prototype is the integration default because it follows the
-crate's stateless-handle precedent and has no Drop-time state-copying path.
-The persist-on-drop prototype remains on its independent comparison branch;
-it is not rejected, but its possible register-residency advantage must be
-measured and its L3 model repaired before it can displace the default.
+The channel-state prototype is the **closed A.3 decision** (maintainer,
+2026-08-11, PR #37), not merely the integration default: it follows the
+crate's stateless-handle precedent, has no Drop-time state-copying path,
+and its column above is complete. The persist-on-drop prototype is
+**considered and not selected**; its column stands as the preserved
+partial evidence (its Drop-time state copy is a permanent failure surface,
+its joined L3 does not isolate the taken-flag handoff, and its
+register-residency claim was never measured). Its comparison work was
+never pushed to the shared remote, so this record is its surviving
+artifact; if the branch still exists in a development environment it
+should be archive-tagged per the `archive/*` convention rather than
+deleted.
 
 For the channel-state mutation run, Loom rejects producer `Acquire`/`Relaxed`
 and consumer `Release`/`Relaxed` exchange orderings, plus both roles' weakened

@@ -43,8 +43,16 @@
 //! sample-versus-block is release scheduling and RAM, and no separate
 //! latest-block type exists (contract §9).
 //!
-//! All three contract decision points (D1–D3) are closed; the contract's
-//! §9 carries each record.
+//! Review caveat A.3 (handle-state continuation) is **closed** the same
+//! way this implementation works: role state is channel-resident in
+//! role-owned storage and handles are stateless, so a drop-and-reacquire
+//! continues by construction (contract H4; proposal Appendix A.3).
+//! Contract non-promise X8 states the role-recovery boundary: the role is
+//! held until the handle is dropped, handle lifetime is an application
+//! property, and there is deliberately no out-of-band role reset.
+//!
+//! Every LatestBuf decision (D1–D3, A.3) is closed; the contract §9 and
+//! proposal Appendix A.3 carry the records.
 //!
 //! # Example
 //!
@@ -209,6 +217,15 @@ impl<T: Copy> LatestBuf<T> {
     ///
     /// Returns `None` while another producer handle is active. Dropping the
     /// active handle makes the role available without resetting its state.
+    ///
+    /// The role is held until the active handle is *dropped* — a handle
+    /// that is forgotten, or owned by an execution context destroyed
+    /// without running destructors, leaves the role held with channel
+    /// state intact. There is deliberately no out-of-band role reset: a
+    /// forced release could free a role while a live handle still exists,
+    /// defeating the exclusive ownership that soundness rests on
+    /// (contract non-promise X8). Handle lifetime is the application's
+    /// property; the channel observes only acquisition and drop.
     #[inline]
     pub fn try_producer(&self) -> Option<Producer<'_, T>> {
         if self.producer_taken.swap(true, Ordering::AcqRel) {
@@ -225,6 +242,10 @@ impl<T: Copy> LatestBuf<T> {
     ///
     /// Returns `None` while another consumer handle is active. Dropping the
     /// active handle makes the role available without resetting its state.
+    ///
+    /// Role recovery follows the same boundary as [`Self::try_producer`]:
+    /// held until dropped, no out-of-band reset, handle lifetime owned by
+    /// the application (contract non-promise X8).
     #[inline]
     pub fn try_consumer(&self) -> Option<Consumer<'_, T>> {
         if self.consumer_taken.swap(true, Ordering::AcqRel) {
