@@ -24,10 +24,15 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 `no_std` and no-alloc are the entry fee. What this crate offers past that is
 **behaviour you can predict and cost you can measure**:
 
-- **Predictability first.** No unbounded loops, no hidden allocation, no panic
-  reachable from a hot path, and no data loss that cannot be observed — every
-  drop is either reported (`SeqRing`) or prevented (`EventBuf`).
-- **Cost measured on every target, not one.** `scripts/codesize.sh` reports the
+- **Predictability first.** No unbounded loops, no hidden allocation, and no
+  panic reachable from a hot path. For the two SPSC types, no data loss that
+  cannot be observed either — every drop is reported (`SeqRing`) or prevented
+  (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
+  window that overwrites silently, with no drop counter and no backpressure.
+  Reach for it when losing the oldest entry is the point, not when delivery
+  matters.
+- **Cost measured on every target, not one.** `scripts/codesize.sh` (added
+  alongside this release) reports the
   flash cost of each API shape across 11 targets and 4 ISA families, because a
   design that wins on Cortex-M4 can cost 40–60% more on Cortex-M0+ or ESP32-S2,
   where every atomic becomes an interrupt-disable critical section.
