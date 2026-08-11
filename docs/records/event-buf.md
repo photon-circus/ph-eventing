@@ -36,8 +36,13 @@ it outright. It refuses to be: lossy (that is `SeqRing`), freshness-first
   cannot make; too small converts load spikes into rejection storms.
 - **Fixed RAM, `N` slots always** — const-constructed into `.bss` (no
   flash image, no startup copy, measured in the 0.2.0 268-byte/11-target
-  result). With block payloads that is `Q × size_of::<Block<T, N>>()`
-  on top of the fill-side builder — state the per-shape number.
+  result). With block payloads budget
+  `size_of::<EventBuf<Block<T, N>, Q>>()` on top of the fill-side
+  builder — not `Q × size_of::<Block<T, N>>()`, which omits the two
+  cursors, the two taken flags, and layout padding; the probe static
+  itself shows the undercount (an `EventBuf<u32, 64>` measures 268
+  bytes against 256 bytes of payload slots). State the `size_of`
+  number for your shape.
 - **Role lifecycle follows the crate doctrine:** sole-role
   `Send + !Sync` handles, `try_*`-only acquisition since 0.3.0, roles
   held until the handle drops, deliberately no out-of-band reset (the
@@ -51,9 +56,9 @@ it outright. It refuses to be: lossy (that is `SeqRing`), freshness-first
 | Race-free — no data race on slots or cursors, no deviation | Miri with the race detector on (full pass, no accommodation); Loom models incl. the full-buffer backpressure path | Proven |
 | No silent loss — every failed delivery is observable at the call site | `push` returns `Err(val)`; the type has no overwrite path; unit + threaded stress incl. lossless-and-ordered Loom model | Proven |
 | Bounded operations, no CAS retry loop | Lamport single-owner cursors: one Relaxed load + one Acquire load + one Release store per side | Proven by construction; cycle rows measured in 0.2.0 |
-| `len` reads a consistent cursor pair | The bracketed `tail`/`head`/`tail` sampling documented in the module docs | Pinned |
+| `len` is bounded and wait-free; a successful bracketed sample is a consistent snapshot | The `tail`/`head`/`tail` bracket documented in the module docs: a `t1 == t2` attempt is a consistent pair; if the consumer moves during both bounded attempts, `len` returns a clamped estimate instead of retrying further | Pinned — consistency holds for successful brackets, boundedness always |
 | Const-constructs into `.bss` | 0.2.0 measurement across 11 targets; codesize baseline gated in CI | Measured on 11 targets; regression-gated on the eight upstream baseline targets only — the three Xtensa rows are opt-in (esp-rs toolchain) and deliberately never baseline-gated |
-| Queued block transport (D3) adds no new concurrency contract | The block layer adds no atomics; existing EventBuf clauses apply with `T = Block<…>`; publication-cost matrix at `bc54a9a` | Measured |
+| Queued block transport (D3) adds no new concurrency contract | The block layer adds no atomics; existing EventBuf clauses apply with `T = Block<…>`; publication-cost matrix in `docs/proposals/block-buf-measurements.md` (developed at `bc54a9a` on `candidate/block-buf`; the document rides PR #34 to `master`, which is what makes this row verifiable from the repository after promotion) | Measured |
 
 ## 4. The record
 
