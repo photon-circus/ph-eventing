@@ -331,6 +331,10 @@ The producer handle is stateless — a reference plus the `!Sync` marker:
 ```rust
 pub struct Producer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
+    // The channel is Sync (shared statics), so a marker-free handle
+    // would be auto-Sync. Cell<()> is Send + !Sync: it keeps the handle
+    // movable into an ISR while denying shared references (H2).
+    _not_sync: PhantomData<Cell<()>>,
 }
 ```
 
@@ -346,6 +350,7 @@ The consumer handle is likewise stateless:
 ```rust
 pub struct Consumer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
+    _not_sync: PhantomData<Cell<()>>, // same H2 marker as the producer
 }
 ```
 
@@ -420,6 +425,15 @@ fn take_latest(&mut self) -> Option<LatestItem<T>> {
     // consumer_state cell is exclusively ours (A.3, closed).
     let st = self.buffer.consumer_state_mut();
 
+    // A.1 (measured, selected): an Acquire load answers the empty poll
+    // with no RMW — on portable-atomic targets the idle path never
+    // enters the critical section. Ready is cleared only by this sole
+    // consumer, so a publication observed ready stays ready until the
+    // exchange below claims it.
+    if !self.buffer.state.load(Ordering::Acquire).ready() {
+        return None;
+    }
+
     let previous = self
         .buffer
         .state
@@ -443,17 +457,20 @@ fn take_latest(&mut self) -> Option<LatestItem<T>> {
 }
 ```
 
-This exchange is unconditional.
-
-If no publication is ready, the consumer simply trades one privately owned
-spare slot for another and returns `None`. This remains safe because it does
-not read the unready slot.
+If no publication is ready, the `Acquire` load answers the poll with no
+exchange and no slot movement — the A.1 measurement selected this fast
+path (it removes the RMW from every idle poll; on thumbv6m and ESP32-S2
+that is the portable-atomic critical section the idle path no longer
+enters).
 
 If a publication is ready, the exchange gives the consumer exclusive
-ownership before it reads the payload.
+ownership before it reads the payload. The defensive `ready` re-check
+after the swap costs nothing: only this sole consumer clears the ready
+bit, so a publication observed ready cannot vanish before the exchange.
 
 There is no compare-and-exchange retry loop. Both producer and consumer
-perform one atomic exchange per operation.
+perform at most one atomic exchange per operation, and the consumer's
+empty poll performs none.
 
 ## 9. Proposed API
 
@@ -1108,6 +1125,17 @@ transferred on the fast path (the consumer performs no slot access).
 
 The unconditional-swap form stays the reference semantics; the fast path is
 an optimisation and must be observationally equivalent.
+
+**Decision (A.1, measured and selected 2026-08-11):** the `Acquire`-load
+fast path is the accepted algorithm, and §8 now sketches it. The
+validation above exists: the Loom equivalence model passes, the ordering
+mutation run covers it, and the pinned measurements show the fast path
+removes 7–8 instructions from every empty poll at a cost of 5–6 on
+pending Cortex-M3 paths, with thumbv6m/ESP32-S2 avoiding the idle
+portable-atomic critical section entirely. Reverting to the unconditional
+swap is warranted only if a target regresses beyond the code-size
+tolerance or the equivalence model fails — neither occurred in the
+recorded matrix.
 
 ### A.2 `generation_gap` off-by-one and wrap arithmetic
 
