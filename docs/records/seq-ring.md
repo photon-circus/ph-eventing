@@ -19,11 +19,12 @@ newest (`latest`), and losses on the ordered path are counted. A consumer
 that falls more than `N` behind skips ahead and is told exactly how many
 items it lost (`PollStats::dropped`; the saturating `dropped_accum` is the
 origin of the crate's observable-loss convention). The exactness promise
-belongs to the ordered `poll_*` paths only: `latest()` samples without
-advancing the cursor or reporting a gap, and `skip_to_latest()` discards
-the backlog *without* adding to the dropped counter — both are deliberate
-sampling/fast-forward semantics, disclosed in §2 so they are chosen, not
-discovered. It refuses to be: a delivery
+belongs to the ordered `poll_*` paths only, and is exact for inter-poll
+gaps shorter than one sequence span (`2^32 − 1` publications; §2):
+`latest()` samples without advancing the cursor or reporting a gap, and
+`skip_to_latest()` discards the backlog *without* adding to the dropped
+counter — both are deliberate sampling/fast-forward semantics, disclosed
+in §2 so they are chosen, not discovered. It refuses to be: a delivery
 guarantee (`EventBuf` is), a race-free primitive (see §2 — this is the
 crate's one deliberate formal-soundness trade), or a latest-value-only
 channel (`LatestBuf` is, with a race-free ownership argument).
@@ -49,6 +50,23 @@ channel (`LatestBuf` is, with a race-free ownership argument).
   the lag alone requires (bounded, `N`-dependent, documented in the
   module docs). Realignment was analysed and left referential (C2, in
   the planning record) — reopen it with a real adopter, not by default.
+- **Whole-span aliasing bounds both headline guarantees — known
+  limitation.** Sequence arithmetic is modular over the `2^32 − 1`
+  nonzero span. A poll gap of exactly one whole span (or any multiple)
+  aliases to "nothing new" and reports zero reads *and zero drops* —
+  loss accounting is exact only for gaps shorter than one span, and
+  silence after an extreme stall is not evidence that nothing was lost.
+  The same modularity bounds the seqlock re-check: a consumer preempted
+  mid-copy for one whole span of publications passes both sequence
+  checks against a rewritten slot (counter-width ABA), so the torn-copy
+  discard argument holds for reads that complete within a span. One
+  span is ~4.29 billion publications (~71.6 minutes at a sustained
+  1 MHz push rate; ~5 days at 10 kHz). The module docs carry the full
+  disclosure — span, silent-zero case, reachability arithmetic — and
+  the structural escape hatches: bound the interval between ordered
+  polls (`poll_*`/`skip_to_latest` resynchronize; the non-advancing
+  `latest` does not), bound mid-read preemption, or use `EventBuf`,
+  which has no sequence wrap.
 - **Loss is designed behaviour.** Overwrite is the overload policy; the
   counters report it, nothing prevents it. Consumers that must see every
   event belong on `EventBuf`.
@@ -68,10 +86,10 @@ channel (`LatestBuf` is, with a race-free ownership argument).
 
 | Claim | Evidence | Status |
 |---|---|---|
-| No torn value ever materialises as `T` (racy copies discarded before use) | Volatile access + `MaybeUninit` holding + re-check discipline; Loom models; the dedicated seqlock Miri pass | Proven within the documented deviation |
+| No torn value ever materialises as `T` (racy copies discarded before use) | Volatile access + `MaybeUninit` holding + re-check discipline; Loom models; the dedicated seqlock Miri pass | Proven within the documented deviation, for reads completing within one sequence span (counter-width ABA bound, §2) |
 | Fence placement is necessary (Release before value write; Acquire before re-check) | Module-doc argument; Loom; ordering discipline enforced by AGENTS' rerun-after-atomic-change rule | Proven |
 | Recovery cost is constant w.r.t. lag | 0.2.0 measurement: a consumer 2,000 sequences behind recovers in the same 115 instructions as one 16 behind | Measured |
-| Loss accounting is exact and saturating (`read + dropped` accounts for every sequence; `dropped_accum` saturates, never wraps) | Unit set incl. `lag_across_wrap_counts_drops_exactly`, `dropped_accum_saturates_instead_of_overflowing`; `seq_distance` wrap tests (0.1.3 fix pinned) | Pinned |
+| Loss accounting is exact and saturating (`read + dropped` accounts for every sequence within one span; `dropped_accum` saturates, never wraps) | Unit set incl. `lag_across_wrap_counts_drops_exactly`, `dropped_accum_saturates_instead_of_overflowing`; `seq_distance` wrap tests (0.1.3 fix pinned) | Pinned, for inter-poll gaps shorter than one sequence span (§2) |
 | Const-constructs into `.bss` — no flash image, no startup copy | By construction (`const fn new`); the 0.2.0 codesize probe demonstrates the crate's `.bss` discipline on an `EventBuf` static (268 B) — **no dedicated SeqRing static is probed or baseline-gated**, and SeqRing's RAM adds `N` per-slot sequence atomics over the payload array, `size_of`-computable per shape | By construction; probe coverage is EventBuf's |
 
 ## 4. The record

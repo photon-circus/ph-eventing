@@ -112,6 +112,36 @@
 //! if a burst of drops at a predictable interval would matter to you. If no loss is acceptable at
 //! all, [`crate::EventBuf`] applies backpressure instead and has no wrap boundary of this kind.
 //!
+//! # Known limitation: whole-span sequence aliasing
+//!
+//! Sequence arithmetic is modular. `push` skips the reserved value `0`, so the counter cycles
+//! through `2^32 - 1` distinct nonzero values, and every comparison and distance the consumer
+//! computes is exact only up to that span. Two consequences follow — both inherent to any
+//! fixed-width seqlock at its counter width:
+//!
+//! - **A whole-span poll gap reports nothing.** If exactly `2^32 - 1` publications (or any whole
+//!   multiple of that) land between two ordered polls, the published sequence returns to the
+//!   consumer's resume point and `poll_one`/`poll_up_to` take their nothing-new early return:
+//!   zero reads and zero drops. Longer gaps report only the remainder modulo the span. The
+//!   `read + dropped` conservation promise is therefore exact for inter-poll gaps *shorter than
+//!   one span*, and silence after an extreme stall is not evidence that nothing was lost.
+//! - **A whole-span mid-read stall defeats the sequence re-check.** The torn-copy guard compares
+//!   the slot's sequence before and after the copy. A consumer preempted *inside* that copy for
+//!   exactly one whole span of publications sees the same sequence value on both sides of a slot
+//!   that was rewritten in between — counter-width ABA — and a mixed copy would be accepted as
+//!   `T`. The discard argument for the documented deviation is therefore bounded: it holds for
+//!   any read that completes in less than one full span of producer publications.
+//!
+//! Reachability arithmetic, so the bound is a decision rather than a surprise: one span is
+//! ~4.29 billion publications. At a sustained 1 MHz push rate a poll gap must exceed ~71.6
+//! minutes — and the mid-read stall must hold the consumer *between two instructions of one
+//! copy* for that long — before either case is reachable; at 10 kHz it is ~5 days. The escape
+//! hatch is structural: bound the interval between ordered polls (any `poll_*` or
+//! [`Consumer::skip_to_latest`] resynchronizes the resume point; the non-advancing
+//! [`Consumer::latest`] does not) below one span, and bound consumer preemption during a single
+//! read to less than a span of publications. If neither bound can be stated for your system,
+//! [`crate::EventBuf`] has no sequence wrap of any kind.
+//!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.
 //! - The `&T` passed to hooks is a reference to a local copy made during the read.
