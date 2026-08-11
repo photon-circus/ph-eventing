@@ -1,8 +1,17 @@
 # SlotPool: bounded zero-copy ownership transfer (exploratory design document)
 
-- **Status:** EVALUATION COMPLETE — implementation remains behind
-  `experimental-slot-pool`; admission decisions **P** and **S** are still
-  deferred, so this is not yet PROPOSED.
+- **Status:** **DEFERRED** (maintainer decision S, 2026-08-11) —
+  evaluation complete, evidence banked, implementation behind
+  `experimental-slot-pool` on this branch; not admitted this cycle. With
+  cycle decision **P** closed as Copy composition there is no in-release
+  consumer, and standalone admission would commit the crate's first
+  non-`Copy` RAII surface with no adopter to shape the grant/claim API.
+  **Reopening trigger** (any one suffices): a named adopter whose
+  measured budget the Copy path breaches at a supported shape; a
+  direct-to-granted-slot (DMA-class) requirement composition cannot
+  satisfy; a standalone zero-copy adopter. On trigger the lane resumes
+  from this banked evidence with BlockBuf-over-SlotPool as the
+  demonstration path. Full rationale: the planning record's P/S closure.
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §3 (received
   2026-08-11); triaged Tier 2 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.

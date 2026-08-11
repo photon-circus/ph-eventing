@@ -1,10 +1,14 @@
 # SlotPool — engineering record
 
-- **Status:** candidate, EXPLORATORY (Tier 2) — evaluation evidence
-  complete on `candidate/slot-pool` (draft PR #32); both branches of
-  admission decision S carry measured evidence; **admission path waits
-  on cycle decisions P then S** (P names the budget; S chooses
-  standalone vs foundation-via-BlockBuf).
+- **Status:** **DEFERRED** (decision S, 2026-08-11) — evaluation
+  evidence complete and banked on `candidate/slot-pool`; not admitted
+  this cycle. **P closed as Copy composition** (no in-release consumer);
+  standalone admission refused without a real adopter to shape the
+  grant/claim API. **Reopening trigger** (any one): a measured budget
+  breach at a supported shape; a direct-to-granted-slot (DMA-class)
+  requirement composition cannot satisfy; a standalone zero-copy
+  adopter. Draft PR #32 closed as deferred; branch preserved and
+  archive-tagged.
 - **Normative sources:** [proposal](../proposals/slot-pool.md)
   (SP clause IDs cited below) ·
   [target-cost record](../proposals/slot-pool-measurements.md) ·
@@ -24,8 +28,9 @@ never observes uninitialized bytes. It is the crate's first deliberate
 departure from all-`Copy` payloads: RAII grants and claims carry drop
 obligations that every shipped primitive today refuses. It owns the
 `ReservableSink`/`ClaimSource` (GAT) sketches, refuses to be a DMA
-cache authority, and does not claim — until P then S close — that it
-beats `Copy` composition or that this cycle should admit it.
+cache authority, and never claimed this cycle should admit it — a
+posture the closures vindicated: P closed as Copy, and S deferred the
+pool with its evidence banked and an adopter-gated trigger registered.
 
 ## 2. Risks and integration concerns
 
@@ -84,27 +89,30 @@ not an admission decision.
 | Representative zero-copy block handoff without publication copy | `representative_block_handoff_fills_and_claims_the_same_storage` (pointer identity) | Pinned |
 | Cost claims per target (`d3f252e`) | 8 gated code-size targets: 30–84 B; pinned QEMU 10.0.11 Cortex-M3: 3–16 instructions per state path | Measured |
 
-Evaluation evidence is complete for the exploratory bar; **P and S are
-not closed**, so this table does not claim admission or superiority to
-`Copy` composition.
+Evaluation evidence is complete for the exploratory bar. P and S are
+closed (Copy; deferred), so this table claims exactly what survives the
+closures: measured costs and proven properties, banked for the trigger —
+not admission, and not superiority to `Copy` composition on any named
+budget.
 
 ## 4. The record
 
-**Decision history (evaluation complete; admission decisions open):**
+**Decision history (evaluation complete; P and S closed 2026-08-11):**
 
-- **P — budget reading: open.** Compare Copy-composition cost against a
-  *named* ISR/task instruction/time budget and RAM envelope. The
-  measurement record (`d3f252e`) makes that reading concrete (reserve
-  14 / full 13 / commit 4 / claim 16 / release 3 / init+commit 13
-  instructions; 30–84 B across the eight gated targets) without
-  inventing an application-wide threshold. Closing P is a maintainer
-  budget call, not more prototyping.
-- **S — admission path: open, sequenced after P.** Choose standalone
-  primitive, BlockBuf foundation, or not in this cycle. The
-  representative complete-block integration test answers the
-  development item (same storage, no publication copy, DMA/cache still
-  caller policy) but **does not close S**. Both branches of S already
-  carry measured evidence; the missing artifact is the decision.
+- **P — CLOSED as Copy composition** (planning-record P/S closure).
+  This pool's measured rows (reserve 14 / full 13 / commit 4 / claim
+  16 / release 3 / init+commit 13 instructions; 30–84 B across the
+  eight gated targets, `d3f252e`) sit banked beside the Copy rows so
+  the eventual trigger reading needs no new measurement. Copy's one
+  unserved corner (large-block × slow-core × ISR × high-rate) is the
+  registered road back here.
+- **S — CLOSED as DEFERRED.** Not standalone (no adopter to shape the
+  grant/claim API), not foundation (no in-release consumer with P =
+  Copy), not rejected (the evidence is banked, the branch preserved
+  and archive-tagged, draft PR #32 closed as deferred). The trigger is
+  adopter-gated — a measured budget breach, a direct-to-granted-slot
+  requirement, or a standalone zero-copy adopter — and on trigger,
+  BlockBuf-over-SlotPool is the demonstration path.
 - **Initialization witness: type-state, not runtime flag.**
   `VacantGrant::write(T) → Grant → commit` is the evaluated shape;
   prefix-count tracking (one pool-wide `u32`) replaces a per-slot
@@ -118,8 +126,9 @@ not closed**, so this table does not claim admission or superiority to
   crate's trait rule they wait for admission *and* a second concrete
   implementation; admission alone does not publish them.
 - **Does not claim:** cycle admission, PROPOSED status, or that
-  SlotPool beats `Copy` composition on any named budget — those wait
-  on P then S.
+  SlotPool beats `Copy` composition on any named budget — P and S
+  closed against admission this cycle, and any future claim rides the
+  registered trigger with fresh comparison evidence.
 
 **Review history:** evaluation implementation and evidence landed on
 `candidate/slot-pool` (draft PR #32), culminating in the target-cost
