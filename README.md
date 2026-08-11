@@ -251,8 +251,8 @@ them is a runtime step and always will be.
 - `SeqRing`, `EventBuf`, and `CountedSignal` are SPSC by design: exactly one producer and one consumer may be
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
-  The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
-  0.3.0. Using unsafe to bypass `SeqRing`/`EventBuf` ownership can be undefined
+  The panicking `producer()`/`consumer()`, deprecated since 0.2.0, **were removed in
+  0.3.0**. Using unsafe to bypass `SeqRing`/`EventBuf` ownership can be undefined
   behavior. Forging or concurrently sharing a `CountedSignal` producer breaks
   its bounded no-wrap contract; the handle is `!Sync` to prevent that in safe Rust.
 - `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
