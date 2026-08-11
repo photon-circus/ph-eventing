@@ -142,6 +142,16 @@ for entry in $TARGETS; do
 
     printf '%-30s %10s %8s %8s %6s\n' \
         "$target" "${two:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
+
+    # An empty measurement means llvm-size could not read the archive, or a
+    # toolchain change renamed a section. stderr is suppressed and the awk still
+    # succeeds, so without this the row prints "-" and the run reports success --
+    # an incomplete measurement treated as a valid one.
+    if [ -z "$two" ] || [ -z "$bss" ]; then
+        printf '%-30s %s\n' "" 'ERROR: required section missing (two_calls/bss)'
+        failed=$((failed + 1))
+        continue
+    fi
 done
 
 printf '\n'
