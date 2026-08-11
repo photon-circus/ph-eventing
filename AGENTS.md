@@ -835,8 +835,6 @@ cargo test
 - `drain_returns_count` — Drain with callback
 - `drain_on_empty_returns_zero` — Empty drain
 - `producer_consumer_can_be_recreated` — Handle drop/recreate
-- `double_producer_panics` — SPSC enforcement
-- `double_consumer_panics` — SPSC enforcement
 - `wraps_around_correctly` — Multi-round wrap exercise
 - `default_is_new` — Default impl
 - `len_and_full_track_state` — len/is_empty/is_full tracking
@@ -889,7 +887,7 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 5 `compile_fail`
+and `src/traits.rs`. Total: 73 unit tests + 11 doctests, plus 5 `compile_fail`
 doctests: three pin the `N == 0` rejection (`E0080`) on the buffer types, and
 two pin the CountedSignal handles' `!Sync` contract.
 
@@ -961,11 +959,10 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
-- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
-  and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
-  reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because
-  the old API is still public and still needs coverage — do **not** move that allow to the crate
-  root, which would silence the warning where it should bite
+- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` were deprecated in 0.2.0 and
+  **removed in 0.3.0**. `try_producer()` / `try_consumer()` are the only handle-acquisition API;
+  a panic is a reset on the targets this crate exists for. Do not reintroduce a panicking
+  acquisition path — the refusal case is pinned by the `try_producer_and_try_consumer` tests
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision

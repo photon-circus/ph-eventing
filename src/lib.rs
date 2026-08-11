@@ -115,10 +115,11 @@
 //!   rules apply. It stores slots as `MaybeUninit<T>` and reads only live
 //!   entries, so it does contain `unsafe`.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
-//!   consumer must be active. Use `try_producer()` / `try_consumer()`, which
-//!   return `None` rather than panicking — on a microcontroller a panic is a
-//!   reset. The panicking `producer()` / `consumer()` are deprecated since
-//!   0.2.0. Using unsafe to bypass these constraints is undefined behavior.
+//!   consumer must be active. Handle acquisition is `try_producer()` /
+//!   `try_consumer()`, which return `None` rather than panicking — on a
+//!   microcontroller a panic is a reset. (The panicking `producer()` /
+//!   `consumer()`, deprecated since 0.2.0, were removed in 0.3.0.) Using
+//!   unsafe to bypass these constraints is undefined behavior.
 //!
 //!   The examples here use `.expect(...)` for brevity, which is a panic. That
 //!   is fine in a doctest on a host; in firmware, branch on the `None`:
