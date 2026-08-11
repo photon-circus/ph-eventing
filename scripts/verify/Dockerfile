@@ -108,4 +108,11 @@ RUN mkdir -p /tmp/fetch/src /tmp/fetch/scripts/codesize/src /tmp/fetch/scripts/c
  && cd /tmp/fetch/scripts/cycles && cargo fetch --locked \
  && rm -rf /tmp/fetch
 
+# OCI metadata, so registries can link the image back to its source and
+# licence without anyone having to pull it first.
+LABEL org.opencontainers.image.title="ph-eventing-verify" \
+      org.opencontainers.image.description="Reference verification environment for the ph-eventing crate: pinned rustc, Miri nightly, QEMU." \
+      org.opencontainers.image.source="https://github.com/photon-circus/ph-eventing" \
+      org.opencontainers.image.licenses="MIT"
+
 WORKDIR /work
