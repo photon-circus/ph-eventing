@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Removed
+- **Breaking:** the panicking `SeqRing::{producer, consumer}` and
+  `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.
+  `try_producer()` / `try_consumer()` (added in 0.1.4) are now the only handle-acquisition
+  API: on the targets this crate exists for a panic is a reset, and the panic machinery costs
+  flash — a 0.2.0 code-size probe showed no panic strings reach the binary when only the
+  `try_*` constructors are used. The `double_producer_panics` / `double_consumer_panics` tests
+  are gone with the behaviour they pinned; SPSC enforcement (a second acquisition is refused
+  while a handle is live) remains pinned by `try_producer_and_try_consumer` in both modules,
+  and the Loom models now drive the `try_*` path directly, so the proven orderings are the
+  shipped orderings.
+
 ### Documentation
 - BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows, and an honest status header that **promotion still waits on decision P**.
 ### Added
