@@ -15,10 +15,6 @@
 //!
 //! [Loom]: https://github.com/tokio-rs/loom
 
-// The models drive the deprecated `producer()` / `consumer()` deliberately:
-// they remain public API until 0.3.0, so their orderings still need proving.
-#![allow(deprecated)]
-
 use crate::{EventBuf, SeqRing};
 use loom::sync::Arc;
 use loom::thread;
@@ -35,7 +31,7 @@ fn event_buf_spsc_is_lossless_and_ordered() {
 
         let producer_buf = Arc::clone(&buf);
         let producer = thread::spawn(move || {
-            let p = producer_buf.producer();
+            let p = producer_buf.try_producer().unwrap();
             for i in 0..3u32 {
                 let mut val = i;
                 // Retry on backpressure so the stream stays complete; any gap
@@ -48,7 +44,7 @@ fn event_buf_spsc_is_lossless_and_ordered() {
         });
 
         let consumer = thread::spawn(move || {
-            let c = buf.consumer();
+            let c = buf.try_consumer().unwrap();
             let mut seen = 0u32;
             while seen < 3 {
                 match c.pop() {
@@ -80,14 +76,14 @@ fn event_buf_len_never_exceeds_capacity() {
 
         let producer_buf = Arc::clone(&buf);
         let producer = thread::spawn(move || {
-            let p = producer_buf.producer();
+            let p = producer_buf.try_producer().unwrap();
             let _ = p.push(1);
             let _ = p.push(2);
         });
 
         let consumer_buf = Arc::clone(&buf);
         let consumer = thread::spawn(move || {
-            let c = consumer_buf.consumer();
+            let c = consumer_buf.try_consumer().unwrap();
             c.pop();
             c.pop();
         });
@@ -113,13 +109,13 @@ fn event_buf_pop_never_sees_unpublished_data() {
 
         let producer_buf = Arc::clone(&buf);
         let producer = thread::spawn(move || {
-            let p = producer_buf.producer();
+            let p = producer_buf.try_producer().unwrap();
             let _ = p.push(0xAAAA_AAAA);
             let _ = p.push(0xBBBB_BBBB);
         });
 
         let consumer = thread::spawn(move || {
-            let c = buf.consumer();
+            let c = buf.try_consumer().unwrap();
             while let Some(val) = c.pop() {
                 assert!(
                     val == 0xAAAA_AAAA || val == 0xBBBB_BBBB,
@@ -148,7 +144,7 @@ fn seq_ring_consumer_never_outruns_the_producer() {
 
         let producer_ring = Arc::clone(&ring);
         let producer = thread::spawn(move || {
-            let p = producer_ring.producer();
+            let p = producer_ring.try_producer().unwrap();
             let first = p.push(10);
             let second = p.push(20);
             assert_eq!(first, 1, "first push must take sequence 1");
@@ -156,7 +152,7 @@ fn seq_ring_consumer_never_outruns_the_producer() {
         });
 
         let consumer = thread::spawn(move || {
-            let mut c = ring.consumer();
+            let mut c = ring.try_consumer().unwrap();
             let mut last = 0u32;
 
             for _ in 0..3 {
@@ -193,13 +189,13 @@ fn seq_ring_latest_is_never_ahead_of_published() {
 
         let producer_ring = Arc::clone(&ring);
         let producer = thread::spawn(move || {
-            let p = producer_ring.producer();
+            let p = producer_ring.try_producer().unwrap();
             p.push(10);
             p.push(20);
         });
 
         let consumer = thread::spawn(move || {
-            let c = ring.consumer();
+            let c = ring.try_consumer().unwrap();
             let mut seen = None;
             c.latest(|seq, val| seen = Some((seq, *val)));
 
