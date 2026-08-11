@@ -2,3 +2,10 @@
 
 # Shell scripts must keep LF endings so they run on POSIX checkouts.
 *.sh text eol=lf
+
+# Machine-parsed by scripts/codesize.sh. With text=auto a Windows checkout
+# carries CRLF, and that same working tree bind-mounted into a Linux container
+# (scripts/verify.sh) parses the header with a trailing \r -- the gate then
+# reports a rustc mismatch between two identical commit hashes and skips.
+# One canonical ending removes the failure mode entirely.
+scripts/codesize/baseline.tsv text eol=lf

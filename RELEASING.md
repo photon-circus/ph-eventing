@@ -29,17 +29,27 @@ git switch master && git pull
 git status --short          # must be empty before you branch
 git switch -c release/X.Y.Z
 git push -u origin release/X.Y.Z
-gh pr create --base master --head release/X.Y.Z --draft --title "release: X.Y.Z"
 ```
 
 A dirty tree risks publishing files that are not in any commit —
 `--allow-dirty` exists but should not be used for a real release.
 
-Open the merge-back PR now, as a draft, rather than at the end. It is where the
-release's verification output goes as you accumulate it, it makes the release
-visible to anyone looking at the PR list, and creating it early means step 10
-cannot forget it. Draft is load-bearing: this PR must not merge until the tag
-exists.
+Then open the merge-back PR as a draft:
+
+```bash
+gh pr create --base master --head release/X.Y.Z --draft --title "release: X.Y.Z"
+```
+
+**This fails with "No commits between master and release/X.Y.Z" until the
+branch has at least one commit of its own.** A freshly cut branch is identical
+to `master`, and GitHub will not open a PR on an empty diff. Either open it
+after the first change lands on the branch, or make the version bump in step 4
+the branch's first commit and open it immediately after.
+
+Open it early rather than at the end. It is where the release's verification
+output goes as you accumulate it, it makes the release visible to anyone looking
+at the PR list, and creating it early means step 10 cannot forget it. Draft is
+load-bearing: this PR must not merge until the tag exists.
 
 ## 2. Route the PRs — judgement call
 
@@ -144,6 +154,17 @@ cargo install cargo-deny cargo-llvm-cov
 rustup component add --toolchain nightly miri
 ```
 
+Or run everything inside the reference environment, which has all of it plus
+QEMU, guarantees zero SKIPs, and stamps the exact versions the evidence was
+gathered with (see `scripts/verify/Dockerfile`):
+
+```bash
+./scripts/verify.sh      # ci + miri + loom + cycles, in one pinned image
+```
+
+Record the printed toolchain and QEMU versions in the release PR alongside the
+results — a verdict without its environment is not reproducible evidence.
+
 ## 7. Check what will actually ship
 
 ```bash
@@ -159,11 +180,19 @@ dry-run listing is where you find out you forgot.
 ## 8. Tag and push
 
 ```bash
-git add -A
+# Stage the release files EXPLICITLY. Never `git add -A` in this repo: the
+# probe workspaces build into scripts/*/target, which the root .gitignore
+# does not cover on every setup, and -A has swept ~500 build artifacts into
+# a release commit before (AGENTS.md, "Never git add -A here").
+git add Cargo.toml Cargo.lock CHANGELOG.md scripts/codesize/Cargo.lock scripts/cycles/Cargo.lock
+git status --short   # must show ONLY the files above; investigate anything else
 git commit -m "Release X.Y.Z"
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin release/X.Y.Z --follow-tags
 ```
+
+(The probe lockfiles are in the list because they record the ph-eventing
+version through their path dependency, so the bump touches them too.)
 
 Tag after the verification passes, so the tag names a state you actually
 checked.

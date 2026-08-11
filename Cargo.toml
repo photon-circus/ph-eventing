@@ -1,17 +1,25 @@
 [package]
 name = "ph-eventing"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.92.0"
-description = "Stack-allocated ring buffers for no-std embedded targets"
+# no-std and zero-allocation are the entry fee, not the value -- plenty of
+# crates clear that bar. Lead with what is actually on offer: predictable
+# behaviour and a cost you can measure. See AGENTS.md § What this crate
+# optimises for.
+description = "Deterministic zero-allocation ring buffers for no-std embedded targets: bounded behaviour, no hidden cost, Loom-verified orderings"
 authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
 license = "MIT"
 repository = "https://github.com/photon-circus/ph-eventing"
 documentation = "https://docs.rs/ph-eventing"
 homepage = "https://github.com/photon-circus/ph-eventing"
 readme = "README.md"
-keywords = ["embedded", "no-std", "lock-free", "spsc", "ring-buffer"]
-categories = ["embedded", "no-std", "concurrency"]
+# crates.io caps both at 5. `realtime` replaces `embedded` here because
+# `embedded` is already a category below and appears in the description, while
+# nothing else signalled the determinism guarantee that is the actual reason to
+# pick this crate.
+keywords = ["realtime", "no-std", "lock-free", "spsc", "ring-buffer"]
+categories = ["embedded", "no-std", "concurrency", "data-structures"]
 publish = true
 
 # An allowlist, not a denylist. `exclude` silently ships every new top-level

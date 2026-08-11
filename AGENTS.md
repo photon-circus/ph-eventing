@@ -41,6 +41,80 @@ It ships three primitives:
 - Common `Sink`/`Source`/`Link` traits unify producers and consumers across buffer types
 - `forward()` utility bridges any `Source` into any `Sink`
 
+## What this crate optimises for — read before proposing an API
+
+`no_std` and `no_alloc` are the entry fee, not the value. Plenty of crates
+clear that bar. What this one offers beyond it is **behaviour you can predict
+and cost you can measure**, backed by tooling that stops both from regressing.
+
+The developer reaching for this crate is writing firmware where a missed
+deadline or an unexplained reset is the failure. They will trade ergonomics for
+predictability without hesitating. **Assume that trade in every design
+decision.**
+
+### The priority order
+
+When two of these conflict, the higher one wins. This is the whole decision
+procedure:
+
+1. **Predictability.** Bounded, knowable behaviour. No unbounded loops, no
+   hidden allocation, no panics reachable from a hot path (a panic is a reset),
+   bounded interrupt latency, and — just as important — **behaviour the caller
+   can observe**. Data loss that cannot be reported is a predictability
+   failure even when execution time is perfectly bounded.
+2. **Efficiency.** Flash, RAM, and cycles, on *every* supported target.
+   Measured with `scripts/codesize.sh`, never assumed from one build.
+3. **Regression resistance.** A property that is not pinned by `ci.sh`, Miri,
+   Loom, or a code-size row will drift. If a change adds a guarantee, it must
+   also add the thing that keeps it true.
+4. **Ergonomics.** Last. Never bought with any of the above.
+
+### When the right design is ergonomically bad
+
+Do not fix it by compromising 1–3. Reach for **compile-time** tooling instead —
+macros, type-state, `const fn`, builders that vanish after monomorphisation.
+Ergonomics recovered at compile time costs nothing at runtime, which is the
+only currency that matters here. A `macro_rules!` wrapper that makes an awkward
+but optimal API pleasant is strictly better than a pleasant API that allocates,
+panics, or hides a cost.
+
+Ask in this order: *can a macro fix the ergonomics?* → *can documentation fix
+it?* → *is the awkwardness actually load-bearing?* Only then consider changing
+the runtime design.
+
+### Worked examples — the rule applied
+
+These are real decisions, kept because the reasoning is the guidance:
+
+- **`RingBuf::pop` + `Source` was rejected.** Execution is O(1) and bounded, so
+  it passes a naive determinism test. It fails rule 1 anyway: `push` still
+  overwrites, so the type would advertise `Source` while losing data that
+  `forward` structurally cannot report — no drop counter like `SeqRing`, no
+  backpressure like `EventBuf`. Unreportable loss is unpredictable behaviour.
+- **`try_split()` was rejected on measurement, not taste.** It is unambiguously
+  better ergonomics: one call, one error path. It cost flash on the targets
+  least able to spare it — ESP32-S2 +59% and Cortex-M0+ +43% on the *existing*
+  bring-up path — to save 4–16 bytes on well-provisioned cores. Rule 4 lost to
+  rule 2. Note this was invisible on Cortex-M4, where it looked like a clean
+  win; one target is not evidence.
+- **`const fn new` was accepted** even though its original justification was
+  wrong (`static mut` is a hard error under edition 2024). The feature stands on
+  measurement: the buffer lands in `.bss` on all 11 targets, so it costs no
+  flash, no startup copy, and no init code.
+
+### Known ergonomic debt, and why it is not a design failure
+
+Handles are `Send + !Sync`, and `!Sync` is exactly what makes it sound to move a
+producer into an ISR and a consumer into a task loop. A `static` requires
+`Sync`, so **handles can never live in a `static`** — no constructor design
+changes that. The buffer reaches `.bss` with zero init; the handle setup stays a
+runtime step, permanently.
+
+That is what the macro escape hatch above is for, and `static_spsc!` (0.2.0)
+is it: a declarative bring-up macro that hides the boilerplate without adding a
+single runtime instruction. It cannot remove the runtime `take()` — nothing
+can, for the `Sync` reason above — only the type spelling around it.
+
 ## Codebase Structure
 
 ```
@@ -53,13 +127,16 @@ ph-eventing/
 ├── scripts/
 │   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
 │   ├── miri.sh             # Miri UB/concurrency checks
-│   └── loom.sh             # Loom model checking
+│   ├── loom.sh             # Loom model checking
+│   ├── codesize.sh         # Per-target flash cost across 11 embedded targets
+│   └── codesize/           # no_std probe crate it measures (own workspace)
 ├── build.rs                # guards the mutually exclusive portable-atomic features
 ├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
+    ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
@@ -74,7 +151,7 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
-| `RingBuf<T: Copy + Default, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
+| `RingBuf<T: Copy, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
 | `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
 | `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
 | `seq_ring::Consumer<'a, T, N>` | SeqRing read handle with multiple polling modes |
@@ -177,9 +254,15 @@ Invariants that hold across the whole type:
   the whole skipped span. Breaking it makes the drop counter silently wrong,
   which no type check will catch.
 
-`RingBuf` requires `T: Default` while the other two do not: it initialises a
-real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
-front.
+All three buffers store slots as `MaybeUninit<T>` and require only `T: Copy`.
+`RingBuf` used to require `T: Default` because it initialised a real `[T; N]`;
+it no longer does. The trade is that `RingBuf` is no longer free of `unsafe` —
+one invariant now carries every read: **the `len` slots ending at `head` have
+all been written by `push`**. Every read goes through the private `index`,
+which addresses only that range, and every public accessor checks `len` first.
+A change that lets `len` outrun the number of writes is UB, not a logic bug.
+On the non-Loom path `SeqRing::new` / `EventBuf::new` are `const fn` so the
+buffers can live in a `static`.
 
 ### Conditional compilation map
 
@@ -266,6 +349,25 @@ at the end and the exit code is non-zero if anything failed. Skip the
 cross-compilation checks with `SKIP_EMBEDDED=1` / `-SkipEmbedded`, and stop at
 the first failure with `FAIL_FAST=1` / `-FailFast`.
 
+### The reference environment (Docker)
+
+`rust-toolchain.toml` pins the stable toolchain, but three tools sit outside
+what it can pin: QEMU (instruction counts are deterministic per build, not
+across builds), the Miri nightly (`+nightly` drifts daily), and the optional
+`ci.sh` gates (cargo-deny, cargo-llvm-cov, stable). `scripts/verify/Dockerfile`
+pins all three, and
+
+```bash
+./scripts/verify.sh            # ci + miri + loom + cycles, zero SKIPs
+./scripts/verify.sh cycles     # one script inside the image
+```
+
+runs the matrix inside it. The documented instruction counts are measured
+there; cite results together with the versions each run prints. The script
+refuses to run under `GITHUB_ACTIONS` — keeping the expensive checks off the
+hosted pipeline is a documented decision (see above), and reversing it should
+be an explicit change, not a side effect of a workflow edit.
+
 ### Concurrency checking (Miri)
 
 `cargo test` passing on x86 proves little about `SeqRing` and `EventBuf` — a
@@ -321,6 +423,90 @@ Two traps that look like bugs but are not:
   that just runs `cargo test` is silently testing the MSRV. Use an explicit
   `cargo +stable`, which does take precedence. Local CI has a `stable:` pass
   for exactly this reason — without it nothing would catch a new stable lint.
+
+### Git traps in this repo
+
+Every item here cost real rework in this repository. They cluster around three
+things: **Windows + Git Bash**, **worktrees**, and **nested cargo workspaces**.
+
+#### Never `git add -A` here
+
+The probes under `scripts/` are separate cargo workspaces, so they build into
+`scripts/*/target/` — which the root-anchored `/target` rule in `.gitignore`
+does not match. `git add -A` swept roughly 500 build artifacts into a commit
+**four separate times** before the ignore rules covered both probes, once
+reaching ~393 MB of proposed history.
+
+Stage explicit paths, and check before committing:
+
+```bash
+git add src/ AGENTS.md CHANGELOG.md          # not -A
+git diff --cached --name-only | grep -c 'target/'   # must print 0
+```
+
+The ignore rules now exist, but a **new** probe directory reintroduces the
+hazard immediately.
+
+#### `chmod +x` does not commit the executable bit on Windows
+
+Git Bash sets the working-tree bit, so the script runs locally and looks fine.
+The index still records `100644`, and it fails with `Permission denied` on
+every Unix checkout. Two scripts shipped that way and were caught in review, not
+by any local run.
+
+```bash
+git update-index --chmod=+x scripts/foo.sh
+git ls-files -s scripts/                     # confirm 100755
+```
+
+#### `git checkout -- <path>` destroys *all* uncommitted work in that path
+
+Used to undo one bad edit in `src/`, it also silently discarded a set of
+deprecation attributes added minutes earlier in the same directory. Prefer
+`git stash` (recoverable) or revert the specific hunk.
+
+#### Git does not work from WSL in this worktree
+
+The worktree's `.git` file holds a Windows absolute path that WSL cannot
+resolve, so any `git` command from WSL fails with a confusing "not a git
+repository" naming a doubled path. **Building and testing from WSL works
+fine** — only git is affected. Do git on the Windows side, builds on either.
+
+#### Scripted edits must normalise line endings first
+
+Git checks out CRLF here. A Python or `sed` edit whose anchor spans lines and
+uses `\n` silently matches nothing, and the "fix" reports success having
+changed no file. Read with `newline=""`, `.replace("\r\n", "\n")`, match, then
+write with `newline="\n"`.
+
+Related: inside a heredoc, `\n` in a Python string is collapsed before Python
+sees it. Use raw strings (`r"..."`) for any anchor containing a literal
+backslash-n, which every `printf` format string does.
+
+#### Stacked PRs desync the moment you touch a middle one
+
+Adding a commit to a PR partway down a stack invalidates every child. They do
+not conflict *with* it — they silently build on a stale parent until GitHub
+marks one `DIRTY`. Recovery is a cascade of merges from the bottom up, and each
+one is an opportunity to resolve wrongly. A seven-deep stack cost four
+conflict resolutions from a single mid-stack commit.
+
+Keep stacks shallow, and after editing a middle PR, sync every descendant
+immediately rather than at review time.
+
+#### Changelog ordering
+
+Closing the `## Unreleased` heading before the release's PRs merge turns every
+one of them `CONFLICTING` — their entries are anchored on that line. See
+RELEASING.md step 4; the manifest bump is safe early, the heading rename is not.
+
+#### This shell is POSIX sh, not PowerShell
+
+A PowerShell here-string (`-m @'...'@`) passed to `git commit` produced a commit
+whose subject line was a bare `@`. Use `git commit -F -` with a heredoc.
+
+Also: `grep -c` exits non-zero when it finds nothing, which silently breaks
+`&&` chains that look like they are just printing a count.
 
 ### Releasing
 
@@ -387,6 +573,162 @@ regression alarm for untested branches, not evidence of concurrency
 correctness. Miri and Loom are that evidence. Some uncovered lines are
 deliberately hard to reach single-threaded, such as the `EventBuf::len` clamp
 fallback, which needs the consumer to move during every retry.
+
+### Code size across targets
+
+`./scripts/codesize.sh` measures what an API shape costs in flash on every
+target this crate claims to support. It exists because **a design that wins on
+one MCU can lose badly on another**, and measuring one target hides that:
+
+| Architecture | Why it differs |
+|--------------|----------------|
+| Cortex-M0+ / M23 (`thumbv6m`, `thumbv8m.base`) | No native 32-bit atomics. Under portable-atomic every RMW is an interrupt-disable critical section, so an extra RMW costs flash *and* interrupt latency |
+| RISC-V (`riscv32imac`) | `fetch_or`/`swap` are single AMO instructions but `compare_exchange` is an LR/SC retry loop — the opposite cost ordering from ARM, where both are ldrex/strex |
+| Xtensa (ESP32) | Splits code between `.text.<fn>` and `.literal.<fn>`. Counting only `.text` undercounts it — 212 vs 220 bytes for the same function |
+| ESP32-S2 / S3 | Single-core Xtensa **without** the `S32C1I` compare-and-swap, so they need portable-atomic exactly like Cortex-M0+ |
+
+This is not hypothetical. A `try_split` prototype measured 32 bytes *cheaper*
+than two separate calls on Cortex-M3/M4/M7, 28 cheaper on M33, 8 bytes *more
+expensive* on RISC-V, and made the existing two-call path 60 bytes worse on
+Cortex-M0+. It was rejected on that evidence. Measure before concluding.
+
+`ci.sh` runs this as a gate. The baseline lives in
+`scripts/codesize/baseline.tsv` and the rules are deliberately asymmetric:
+
+- **Growth beyond +16 bytes on any row fails.** Absolute, not a percentage — at
+  100-200 bytes a percentage is noise, and the regression this exists to catch
+  was +60 bytes on Cortex-M0+ and +78 on ESP32-S2.
+- **Shrinkage never fails.** It is reported, with a nudge to re-bless.
+- **A `SKIP` is reported as `SKIP`, never as `PASS`.** The script exits `2` for
+  "could not run" and `ci.sh` maps that to a `SKIP` row plus a warning in the
+  summary. Exiting 0 on a skip is how a gate silently stops gating.
+- **A baseline row with no measurement fails the gate.** A row that is not
+  measured cannot regress, so treating it as a pass is a hole, not a success.
+- **`--bless` refuses to write after any skipped or failed target.** A partial
+  baseline silently drops rows, and a dropped row can never regress again.
+- **A toolchain mismatch `SKIP`s rather than fails.** The baseline records the
+  rustc commit hash; comparing codegen across compilers is noise, not signal.
+  A `SKIP` is not a pass — see RELEASING.md.
+- **Xtensa is measured but never gated.** Gating it would make the esp-rs fork
+  mandatory for every contributor.
+
+The baseline is committed because it is **host-independent**: verified
+byte-identical on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` for
+the same pinned rustc, across all eight gated targets. That is what
+`rust-toolchain.toml` pinning 1.92.0 buys, and it is why this gate is workable
+here when it would be flaky in a crate that floats its toolchain. **Re-verify
+that property if the pin ever moves.**
+
+Re-bless deliberately, never reflexively — the diff is the review:
+
+```bash
+./scripts/codesize.sh --bless
+```
+
+```bash
+./scripts/codesize.sh              # baseline, 8 upstream targets
+./scripts/codesize.sh split        # include try_split, on branches that have it
+XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
+```
+
+All eight gated targets are pinned in `rust-toolchain.toml`, including
+`thumbv8m.main-none-eabi` and `thumbv8m.base-none-eabi`, which the embedded
+`cargo check` matrix does not use. Without them a fresh checkout silently skips
+two of the eight rows while still printing a table, which reads as a complete
+matrix.
+
+Tooling is what `rust-toolchain.toml` already pins: `llvm-size` comes from the
+`llvm-tools` component declared there, so nothing extra is installed. **Xtensa
+is the exception** — upstream rustc has no Xtensa backend, so those rows need
+the esp-rs fork and `-Zbuild-std=core` (no precompiled `core` ships for them).
+They skip cleanly when it is absent.
+
+The probe in `scripts/codesize/` is deliberately **its own workspace** (empty
+`[workspace]` table in its manifest). Without that, cargo treats it as part of
+this package and the root stops reporting zero dependencies. It is not in the
+`include` allowlist, so it never ships.
+
+### Instruction cost (QEMU)
+
+Code size is a proxy; it says nothing about *time*. `./scripts/cycles.sh`
+measures the other half of the determinism claim — that the hot paths cost a
+**bounded, knowable number of instructions regardless of buffer state**.
+
+Measured in the reference environment — `scripts/verify/Dockerfile`
+(rustc 1.92.0, Debian trixie qemu-system-arm 10.0.x, thumbv7m / Cortex-M3),
+reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
+environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
+regions by exactly one instruction (trace boundary attribution, not codegen).
+Cross-environment diffs of ±1 are noise; compare inside the image.
+
+| | empty | loaded | rejected/empty |
+|---|---:|---:|---:|
+| `EventBuf::push` | 25 | **25** (7 of 8) | 19 (full, rejected) |
+| `EventBuf::pop` | — | 20 (full) | 13 (empty) |
+| `EventBuf::peek` / `len` | 13 / 14 | | |
+| `SeqRing::push` | 34 | **33** (overwriting) | |
+| `SeqRing::poll_one_value` | — | 92 | 24 (empty) |
+| `SeqRing` poll, lagged 2×N | | **115** | |
+| `SeqRing` poll, lagged ~2000 | | **115** | |
+| `SeqRing::latest_value` | — | 30 | |
+| `RingBuf::push` | 20 | **20** (overwriting) | |
+| `RingBuf::get` / `latest` | 22 / 16 | | |
+
+Two results carry the argument:
+
+1. **Every `push` is constant.** Empty vs loaded differs by at most one
+   instruction on all three types. Cost does not scale with occupancy or `N`.
+2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind and one
+   ~2000 behind both cost **115 instructions**. If recovery walked the backlog
+   the second would be two orders of magnitude larger. It is a jump, and now
+   that is measured rather than asserted.
+
+The rejected push is *cheaper* than an accepted one — backpressure is an early
+return, not extra work.
+
+**How it measures.** QEMU models neither `DWT_CYCCNT` nor SysTick on
+`lm3s6965evb` or `mps2-an385` (both read zero, verified on QEMU 10.2), and
+Ubuntu's `qemu-system-arm` ships no TCG plugins. What works without either is
+QEMU's execution trace: `-accel tcg,one-insn-per-tb=on -d exec` emits one line
+per retired instruction. Regions are bracketed by never-inlined markers whose
+**symbol names carry the labels**, so adding a measurement to the probe needs no
+change to the runner. `-icount shift=0` pins one instruction to one tick;
+verified deterministic by diffing two runs.
+
+**Two traps, both hit during development:**
+
+- **Markers must embed a unique immediate.** With identical `nop`-only bodies
+  the linker folded all nineteen onto one address, the runner saw a single
+  label, and the output was silently empty — it looked like the probe measured
+  nothing rather than like a bug. `cycles.sh` now fails loudly if the count of
+  distinct marker addresses does not match the count of markers.
+- **Build from inside `scripts/cycles/`.** Cargo resolves `.cargo/config.toml`
+  from the working directory, not from `--manifest-path`; building from the repo
+  root silently targets the host and fails to link against libc.
+
+#### Why this is not in `ci.sh`
+
+Deliberate, and the reasoning should survive anyone who thinks it is an
+oversight:
+
+- **It needs a system package.** Every other check is satisfied by
+  `rust-toolchain.toml` alone — `llvm-tools` supplies `llvm-size`/`llvm-nm`,
+  `loom` is a cfg-gated dev-dependency. QEMU is `apt-get install
+  qemu-system-arm`, with no equivalent on a stock Windows or macOS box.
+- **A check most contributors cannot run makes a green `ci.sh` mean less.** It
+  would report `SKIP` for nearly everyone, and this repo's own rule is that a
+  `SKIP` is not a pass. Fifteen checks that everybody runs is worth more than
+  sixteen where one is usually skipped.
+- **There is no blessed baseline to gate against.** The counts themselves are
+  now stable per environment — the probe lockfile is committed and the
+  reference image pins QEMU — so the old blocker (a floating `cortex-m-rt`)
+  is gone. What gating would still need is a committed baseline file with a
+  bless flow like `codesize.sh`'s, and it would inherit the QEMU-availability
+  problem above: the gate could only run inside the reference image, making
+  Docker a prerequisite for a green `ci.sh`.
+
+Run it by hand when changing a hot path, and paste the numbers into the PR the
+way `codesize.sh` output is pasted.
 
 ### Model checking (Loom)
 
@@ -456,7 +798,9 @@ cargo test
 - `iter_oldest_to_newest` — Iterator ordering
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
-- `zero_capacity_panics` — N=0 assertion
+- `works_without_default_bound` — `T: Copy` only, no `Default`
+- `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
+- `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
 
@@ -477,6 +821,8 @@ cargo test
 - `handles_are_send` — Producer/Consumer are Send
 - `try_producer_and_try_consumer` — Fallible handle creation
 - `peek_copies_without_advancing` — `peek` vs `pop`
+- `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
+- `static_buf_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` buffer
 
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
@@ -500,6 +846,8 @@ cargo test
 - `capacity_returns_n` — capacity() API
 - `try_producer_and_try_consumer` — Fallible handle creation
 - `poll_one_value_and_latest_value` — Value-returning poll APIs
+- `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
+- `static_ring_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` ring
 
 **`traits::tests`:**
 - `ringbuf_as_sink` — `RingBuf` implements `Sink`
@@ -514,7 +862,11 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 58 unit tests + 7 doctests.
+**Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
+`try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
+`SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
+and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
+doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions
 
@@ -529,10 +881,13 @@ cargo test
 ### Safety Requirements
 
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
-- `T: Default` additionally required by `RingBuf` for array initialisation
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
-- Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
-- No panics in hot paths; only assertions are in `::new()` for `N > 0`
+- Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- No panics in hot paths. All three `new()` reject `N == 0` with a **const**
+  assertion, so a zero-capacity buffer fails the build rather than panicking —
+  which also means no test can cover the rejection, and the const assertion is
+  the only thing enforcing it. Under `--cfg loom` the `SeqRing` / `EventBuf`
+  constructors are not `const`, so there the assertion is a runtime one
 
 ### Documentation Style
 
@@ -563,7 +918,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 
 ### Key Invariants to Preserve
 
-- `RingBuf` is fully safe — no unsafe code, no interior mutability
+- `RingBuf` has no atomics and no interior mutability; its `unsafe` is limited to reading `MaybeUninit` slots that `push` initialised
 - `RingBuf`: Ring capacity `N` must be > 0
 - `RingBuf.len` is always ≤ `N`; `head` is always < `N`
 - `SeqRing`: Sequence 0 is reserved for "empty" state
@@ -579,6 +934,11 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
+  and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
+  reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because
+  the old API is still public and still needs coverage — do **not** move that allow to the crate
+  root, which would silence the warning where it should bite
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision

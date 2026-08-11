@@ -1,0 +1,11 @@
+# Build context for scripts/verify/Dockerfile (built from the repo root so it
+# can COPY the toolchain pin and the manifests it preloads dependencies from).
+# Everything heavy is excluded so the context stays kilobytes.
+*
+!rust-toolchain.toml
+!Cargo.toml
+!Cargo.lock
+!scripts/codesize/Cargo.toml
+!scripts/codesize/Cargo.lock
+!scripts/cycles/Cargo.toml
+!scripts/cycles/Cargo.lock

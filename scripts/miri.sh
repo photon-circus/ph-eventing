@@ -22,6 +22,14 @@
 #   ./scripts/miri.sh                # 16 seeds, host + cross-targets
 #   SEEDS=64 ./scripts/miri.sh       # deeper schedule exploration
 #   HOST_ONLY=1 ./scripts/miri.sh    # skip the cross-target passes
+#   MIRI_TOOLCHAIN=nightly-2026-08-08 ./scripts/miri.sh   # pin a nightly
+#
+# Unlike everything else in scripts/, Miri cannot come from the toolchain
+# rust-toolchain.toml pins -- it needs nightly, and a bare `+nightly` drifts
+# daily. A verdict is only reproducible alongside the version that produced
+# it, so the run prints its exact toolchain below and MIRI_TOOLCHAIN lets a
+# reader replay under that same one. Record the printed version whenever a
+# Miri result is cited as release evidence.
 
 set -u
 
@@ -32,6 +40,9 @@ cd "$(dirname "$0")/.." || exit 1
 # on Windows run it under Git Bash.
 CARGO_INCREMENTAL=0
 export CARGO_INCREMENTAL
+
+MIRI_TOOLCHAIN="${MIRI_TOOLCHAIN:-nightly}"
+printf '==> miri toolchain: %s\n' "$(rustc "+$MIRI_TOOLCHAIN" --version)" || exit 1
 
 SEEDS="${SEEDS:-16}"
 BASE='-Zmiri-disable-isolation'
@@ -51,7 +62,7 @@ run_miri() {
 
     printf '\n==> %s\n' "$name"
 
-    if MIRIFLAGS="$flags" cargo +nightly miri test "$@"; then
+    if MIRIFLAGS="$flags" cargo "+$MIRI_TOOLCHAIN" miri test "$@"; then
         summary="${summary}  PASS  ${name}\n"
     else
         summary="${summary}  FAIL  ${name}\n"

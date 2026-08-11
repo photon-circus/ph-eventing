@@ -1,0 +1,26 @@
+[build]
+target = "thumbv7m-none-eabi"
+
+[target.thumbv7m-none-eabi]
+# `link.x` comes from cortex-m-rt; `memory.x` next to this file describes the
+# lm3s6965evb memory map.
+rustflags = ["-C", "link-arg=-Tlink.x"]
+
+# `-icount shift=0` makes one guest instruction take exactly one clock tick, so
+# guest time advances in lockstep with instructions retired and every run is
+# bit-identical rather than dependent on host speed. It does NOT make SysTick
+# usable as a counter -- QEMU models neither SysTick nor DWT_CYCCNT on this
+# machine and both read zero. The counts come from QEMU's own execution trace;
+# see the header of scripts/cycles.sh.
+#
+# This runner is for `cargo run` on the probe by hand. scripts/cycles.sh invokes
+# QEMU itself, because it needs `-d exec` and a log file that this cannot pass.
+runner = """
+qemu-system-arm
+  -cpu cortex-m3
+  -machine lm3s6965evb
+  -nographic
+  -semihosting-config enable=on,target=native
+  -icount shift=0
+  -kernel
+"""

@@ -34,6 +34,7 @@ CARGO_INCREMENTAL=0
 export CARGO_INCREMENTAL
 
 failed=0
+skipped=0
 summary=""
 
 run_check() {
@@ -42,7 +43,20 @@ run_check() {
 
     printf '\n==> %s\n' "$name"
 
-    if "$@"; then
+    "$@"
+    status=$?
+
+    # Exit 2 means the check could not run -- a missing baseline, or a toolchain
+    # it cannot compare against. That is a SKIP, and a SKIP is not a pass:
+    # reporting it as PASS is exactly how a gate stops gating without anyone
+    # noticing.
+    if [ "$status" -eq 2 ]; then
+        summary="${summary}  SKIP  ${name}\n"
+        skipped=$((skipped + 1))
+        return 0
+    fi
+
+    if [ "$status" -eq 0 ]; then
         summary="${summary}  PASS  ${name}\n"
     else
         summary="${summary}  FAIL  ${name}\n"
@@ -57,6 +71,10 @@ run_check() {
 report() {
     printf '\nSummary\n'
     printf '%b' "$summary"
+    if [ "$skipped" -gt 0 ]; then
+        printf '\n%s check(s) SKIPPED. A skipped check is not a passed check --\n' "$skipped"
+        printf 'see RELEASING.md before treating this run as verified.\n'
+    fi
 }
 
 run_check 'fmt' cargo fmt --all -- --check
@@ -82,6 +100,7 @@ if rustup toolchain list 2>/dev/null | grep -q '^stable'; then
 else
     printf '\n==> stable\nstable toolchain not installed; skipping (rustup toolchain install stable)\n'
     summary="${summary}  SKIP  stable (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
 # Supply chain: advisories, licences, bans, sources. Skipped with a notice
@@ -92,6 +111,7 @@ if command -v cargo-deny >/dev/null 2>&1; then
 else
     printf '\n==> deny\ncargo-deny not installed; skipping (cargo install cargo-deny)\n'
     summary="${summary}  SKIP  deny (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
 # Coverage floor. A gate, not a vanity number -- it fails only on a real drop,
@@ -104,9 +124,20 @@ if command -v cargo-llvm-cov >/dev/null 2>&1; then
 else
     printf '\n==> coverage\ncargo-llvm-cov not installed; skipping (cargo install cargo-llvm-cov)\n'
     summary="${summary}  SKIP  coverage (not installed)\n"
+    skipped=$((skipped + 1))
 fi
 
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
+    # Code size is a guarantee like any other: unpinned, it drifts. The gate is
+    # presence-gated on the baseline and skips loudly when the toolchain differs
+    # from the one that produced it, so it cannot become a source of noise.
+    #
+    # It belongs under SKIP_EMBEDDED because it cross-compiles all eight gated
+    # targets. Run outside this branch it would make the advertised host-only
+    # escape hatch fail for the one reason a caller sets it: not having the
+    # embedded toolchains.
+    run_check 'codesize (baseline gate)' ./scripts/codesize.sh
+
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
         --features portable-atomic-unsafe-assume-single-core
