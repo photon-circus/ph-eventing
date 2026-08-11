@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Documentation
+- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned 8/7 Cortex-M3 rows, and the H closure record.
 ### Added
 - `CountedSignal`: a payload-free SPSC counter with a bounded
   `increment`, atomic `take_count`, exact `u32` saturation, and observable
