@@ -50,7 +50,15 @@ if [ "$#" -gt 0 ]; then
 fi
 
 if RUSTFLAGS='--cfg loom' cargo test --lib "$filter" "$@"; then
-    printf '\nAll Loom models verified.\n'
+    # "cargo test" exits 0 when a filter matches nothing, so a misspelled
+    # model name would otherwise earn the success banner after running zero
+    # tests. List the matches (the build is already warm) and require one.
+    matched="$(RUSTFLAGS='--cfg loom' cargo test --lib "$filter" -- --list 2>/dev/null | grep -c ': test$')"
+    if [ "${matched:-0}" -eq 0 ]; then
+        printf '\nerror: filter "%s" matched no Loom models -- zero tests ran, nothing was verified.\n' "$filter" >&2
+        exit 1
+    fi
+    printf '\nAll %s matching Loom models verified.\n' "$matched"
 else
     printf '\nLoom found a failing execution. The output above replays the\n'
     printf 'exact interleaving -- it is deterministic, so re-running reproduces it.\n'

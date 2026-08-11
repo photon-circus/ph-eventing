@@ -999,11 +999,11 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventFlags`: Producer and Consumer handles are `Send + !Sync`; do not add
   peek operations or stream-trait implementations that blur destructive-take
   semantics
-- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` are deprecated since 0.2.0
-  and removed in 0.3.0. Library code must use `try_producer()` / `try_consumer()`; a panic is a
-  reset on the targets this crate exists for. Test modules carry `#![allow(deprecated)]` because
-  the old API is still public and still needs coverage — do **not** move that allow to the crate
-  root, which would silence the warning where it should bite
+- `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` were deprecated in 0.2.0
+  and are **removed** in 0.3.0 (#25). Library, test, and doc code use `try_producer()` /
+  `try_consumer()` exclusively — the old methods and the `#![allow(deprecated)]` test
+  allowances that covered them no longer exist. Do not reintroduce a panicking acquisition
+  path; a panic is a reset on the targets this crate exists for
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision

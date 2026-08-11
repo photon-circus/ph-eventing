@@ -99,6 +99,13 @@ extract_probe_object() {
 # Count instructions after the disable instruction through the architectural
 # restore/synchronization instruction. This is the maximum interval for which
 # a previously-enabled interrupt remains masked by the operation.
+#
+# The whole function is scanned, not just the first section: the claim is
+# exactly ONE masked critical section of the expected width, so a function
+# that grows a second disable/restore pair (or never restores) must fail the
+# comparison. Prints the width for exactly one complete section; prints
+# "multi:<n>" for more than one and "unterminated" for a disable with no
+# restore, both of which fail the callers' width checks with a readable value.
 masked_count() {
     file="$1"
     symbol="$2"
@@ -108,11 +115,16 @@ masked_count() {
         $0 ~ "<" symbol ">:" { in_fn = 1; next }
         in_fn && /^$/ { in_fn = 0 }
         in_fn && $0 ~ /^[[:space:]]*[0-9a-f]+:/ {
-            if ($0 ~ start) { masked = 1; next }
+            if ($0 ~ start) { sections++; masked = 1; count = 0; next }
             if (masked) {
                 count++
-                if ($0 ~ finish) { print count; exit }
+                if ($0 ~ finish) { masked = 0; width = count }
             }
+        }
+        END {
+            if (masked) { print "unterminated"; exit }
+            if (sections > 1) { print "multi:" sections; exit }
+            if (sections == 1) { print width }
         }
     ' "$file"
 }
