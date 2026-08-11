@@ -159,6 +159,21 @@ so leave slack rather than setting the floor at the best observed run.
 Deeper detail on all of the above, including the traps that silently invalidate
 the checkers, is in [AGENTS.md](AGENTS.md).
 
+## Design values
+
+Before proposing an API, read **[AGENTS.md](AGENTS.md) § What this crate
+optimises for**. The short version, in priority order:
+
+1. **Predictability** — bounded behaviour, and loss that can be observed.
+2. **Efficiency** — measured on every target, not inferred from one.
+3. **Regression resistance** — a guarantee not pinned by tooling will drift.
+4. **Ergonomics** — last, and never bought with the three above.
+
+If the right design is awkward to use, the fix is compile-time tooling — a
+macro, type-state, a `const fn` — not a friendlier API that costs something at
+runtime. Ergonomics recovered at compile time is free; ergonomics bought with
+cycles, flash, or predictability is not.
+
 ## What to Contribute
 
 Contributions of all kinds are welcome:
