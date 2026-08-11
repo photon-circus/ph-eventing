@@ -85,8 +85,12 @@ and all clauses below are stated against the sequence of those instants.
   104 yields `skipped = 2`. Beyond one wrap span the exact count is
   inherently unrecoverable; closing D1 defines what `skipped` reports
   there.
-- **C4.** Each publication is observed **at most once**. A taken generation
-  is never returned again.
+- **C4.** Each publication is observed **at most once** — the same
+  publication *instance* is never returned twice, unconditionally. Stated
+  per generation **value**, the claim carries C5's one-wrap-span scope: a
+  taken generation value does not reappear unless a full generation cycle
+  has passed and a genuinely newer publication reuses it, which is the
+  beyond-span case decided with D1.
 - **C5.** Observed generations are strictly increasing in wrap-aware order
   **within one wrap span** (the same scope as O2): while fewer than a full
   generation cycle of publications separates two takes, `take_latest`
@@ -111,11 +115,15 @@ and all clauses below are stated against the sequence of those instants.
   newest publication that existed at its linearization point. (This follows
   from P3 + C1 — `pending` always holds the newest — and is stated
   separately because it is the property the primitive exists for.)
-- **O2.** *(Conservation)* Over any consumer history within one wrap span
-  (see D1), every assigned generation is accounted exactly once: either
-  returned by some `take_latest` (C4/C5), counted in exactly one `skipped`
-  (C3), or still pending. No generation is double-counted and none
-  disappears unaccounted.
+- **O2.** *(Conservation)* Within one wrap span (see D1), every assigned
+  generation is at every instant in exactly one of four states: returned by
+  some `take_latest` (C4/C5), already counted in exactly one `skipped`
+  (C3), still pending, or **displaced and awaiting report** — a
+  publication displaced before any take is not lost from the accounting:
+  it lands in the `skipped` of the next successful take. No generation is
+  double-counted and none disappears; immediately after a successful take
+  the awaiting-report set is empty, so at those observation points the
+  first three states account for everything.
 - **O3.** *(No fabrication)* Every generation returned or counted was
   assigned by a real `publish` call. `skipped` never includes generations
   that were never assigned (in particular, never the reserved `0` — G3).
