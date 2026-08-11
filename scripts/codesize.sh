@@ -168,6 +168,16 @@ for entry in $TARGETS; do
     printf '%-30s %10s %8s %8s %6s\n' \
         "$target" "${two:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
 
+    # An empty measurement means llvm-size could not read the archive, or a
+    # toolchain change renamed a section. stderr is suppressed and the awk still
+    # succeeds, so without this the row prints "-" and the run reports success --
+    # an incomplete measurement treated as a valid one.
+    if [ -z "$two" ] || [ -z "$bss" ]; then
+        printf '%-30s %s\n' "" 'ERROR: required section missing (two_calls/bss)'
+        failed=$((failed + 1))
+        continue
+    fi
+
     # Xtensa is never gated: it needs a toolchain fork, so making it a hard gate
     # would make that fork mandatory for every contributor.
     case "$target" in xtensa-*) continue ;; esac
@@ -183,7 +193,6 @@ if [ "$skipped" -gt 0 ]; then
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Baseline gate
 #
 # Exit codes: 0 pass, 1 fail, 2 could-not-run. ci.sh maps 2 to SKIP -- and a
@@ -194,6 +203,22 @@ fi
 # target silently deletes those rows, and the gate then cannot regress on them
 # because it no longer knows they exist.
 if [ "$BLESS" = "1" ]; then
+    # Counting clean builds is not the same as counting rows: a target can build
+    # cleanly and still yield no measurement if a section name changes. Blessing
+    # then writes a baseline missing those rows, and a row absent from the
+    # baseline can never regress again.
+    gated=0
+    for entry in $TARGETS; do
+        t="$(printf '%s' "$entry" | cut -d'|' -f1)"
+        case "$t" in xtensa-*) continue ;; esac
+        gated=$((gated + 1))
+    done
+    got=$(awk -F'	' '$2 == "two_calls"' "$RESULTS" | wc -l)
+    if [ "$got" -ne "$gated" ]; then
+        printf 'refusing to bless: %s of %s gated targets produced a measurement.
+'             "$got" "$gated" >&2
+        exit 1
+    fi
     if [ "$failed" -gt 0 ] || [ "$skipped" -gt 0 ]; then
         printf 'refusing to bless: %s target(s) failed, %s skipped.
 '             "$failed" "$skipped" >&2

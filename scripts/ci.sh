@@ -127,7 +127,22 @@ fi
 # Code size is a guarantee like any other: unpinned, it drifts. The gate is
 # presence-gated on the baseline and skips loudly when the toolchain differs
 # from the one that produced it, so it cannot become a source of noise.
-run_check 'codesize (baseline gate)' ./scripts/codesize.sh
+#
+# Under SKIP_EMBEDDED it must not run at all: it cross-compiles eight embedded
+# targets, so leaving it unconditional would make the documented host-only run
+# slower than a full one, and would fail outright on a machine that has no
+# cross targets installed -- which is the reason to pass SKIP_EMBEDDED at all.
+if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
+    run_check 'codesize (baseline gate)' ./scripts/codesize.sh
+else
+    printf '
+==> codesize (baseline gate)
+skipped: SKIP_EMBEDDED is set
+'
+    summary="${summary}  SKIP  codesize (baseline gate)
+"
+    skipped=$((skipped + 1))
+fi
 
 if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     run_check 'thumbv6m-none-eabi' \

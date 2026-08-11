@@ -597,10 +597,12 @@ cargo test
 
 **Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 8 doctests, plus 2 `compile_fail` doctests.
 
-**Compile-fail coverage.** `N == 0` is a *const* assertion on all three types,
-so there is no runtime panic to catch and no way to write the negative case as
-a `#[test]` — `zero_capacity_panics` had to be deleted when the assertion moved
-to compile time. The gap is closed with `compile_fail` doctests on each `new`,
+**Compile-fail coverage.** `N == 0` is a *const* assertion on `SeqRing` and
+`EventBuf`, so for those two there is no runtime panic to catch and no way to
+write the negative case as a `#[test]`. `RingBuf` is **not** included here: on
+this branch its `new` still asserts at runtime and `zero_capacity_panics` still
+covers it. That test is deleted only on the branch that makes `RingBuf::new`
+const, and its `compile_fail` doctest is added there. The gap is closed with `compile_fail` doctests on each `new`,
 **with the error code pinned** (`compile_fail,E0080`). The code matters: a bare
 `compile_fail` also passes when the snippet fails for an unrelated reason, such
 as a typo in the type name, so it would silently stop testing what it claims to.
