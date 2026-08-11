@@ -21,17 +21,22 @@
 //! encoded as zero so a const-initialized channel lands in `.bss` rather than
 //! carrying its three payload slots in the flash-backed `.data` image.
 //!
-//! # Deferred-policy assumptions
+//! # Decision status
 //!
-//! This evaluable prototype makes the narrow choices requested by issue #27:
+//! Decision D1 (wrap-ambiguity policy) is **closed** as documented
+//! approximation plus payload escape hatch (contract §9, non-promise X6):
+//! skipped counts are exact while fewer than `u32::MAX` non-zero
+//! generations separate successful takes, and beyond that full wrap span
+//! the `u32` result is a documented modular approximation —
+//! [`LatestItem::skipped`] carries the full disclosure. The remaining
+//! narrow choices requested by issue #27 are still prototype defaults:
 //!
-//! - skipped counts are exact while fewer than `u32::MAX` non-zero
-//!   generations separate successful takes; beyond that full wrap span the
-//!   `u32` result is inherently ambiguous;
 //! - [`Consumer`] deliberately does not implement [`crate::Source`], because
-//!   doing so would discard replacement evidence; use [`crate::LatestSource`];
+//!   doing so would discard replacement evidence; use [`crate::LatestSource`]
+//!   (decision D2, open);
 //! - `T` is generic, so it can be one sample or a caller-defined complete
-//!   block without committing the first-deliverable policy.
+//!   block without committing the first-deliverable policy (decision D3,
+//!   open).
 //!
 //! # Example
 //!
@@ -109,10 +114,22 @@ pub struct LatestItem<T> {
     pub generation: u32,
     /// Publications assigned after the prior take and before this one.
     ///
-    /// This is exact within one complete non-zero `u32` generation span.
-    /// Beyond that span this prototype returns modular arithmetic's
-    /// approximation; a full cycle that reuses the prior generation reports
-    /// zero because the true count cannot be recovered from two `u32` values.
+    /// Exact while fewer than `u32::MAX` non-zero generations — one full
+    /// wrap span — separate two successful takes. Beyond that span the
+    /// count is modular arithmetic's approximation, and a gap of exactly
+    /// one full cycle reports zero: a silent under-count, accepted and
+    /// documented by decision D1 (contract non-promise X6).
+    ///
+    /// That boundary is reachable only through consumer stall, never
+    /// producer burst: crossing it means the consumer did not take while
+    /// `u32::MAX` publications occurred — roughly 49.7 days of continuous
+    /// 1 kHz publishing, or 72 minutes at 1 MHz. The channel deliberately
+    /// does not detect the crossing; detection would price wider hot-path
+    /// state into every operation and still could not recover the lost
+    /// count. If the count itself is the requirement (audit, metering,
+    /// loss accounting), carry a wider producer-assigned sequence inside
+    /// `T`; if consumer liveness is, use a watchdog — each catches its
+    /// condition sooner and correctly.
     pub skipped: u32,
 }
 
@@ -570,8 +587,9 @@ mod tests {
     #[test]
     fn full_generation_cycle_uses_documented_approximation() {
         // Equal endpoints are indistinguishable from no progress after a full
-        // generation cycle. D1 remains deferred, so this prototype documents
-        // and pins its modular approximation instead of claiming exactness.
+        // generation cycle. D1 is closed as documented approximation plus
+        // payload escape hatch (contract C3/X6); this test is the closure's
+        // named pin for the full-cycle modular result.
         assert_eq!(LatestBuf::<u32>::generation_distance(17, 17), 0);
     }
 

@@ -13,11 +13,12 @@
 ## 1. Decisions sufficient for an evaluable prototype
 
 These defaults make development possible without pretending the deferred
-choices have received a permanent API decision.
+choices have received a permanent API decision. D1 has since received its
+permanent decision and is listed here as closed.
 
 | Decision | Prototype default | Evidence or decision that would change it |
 |---|---|---|
-| D1, generation ambiguity | Exact within one non-zero `u32` span. Beyond that span use the documented approximation `generation_distance(last, current).saturating_sub(1)`; a repeated generation after exactly one full cycle therefore reports zero rather than panicking. Applications requiring a longer identity span carry a wider producer-assigned sequence in `T`. | Adopt an explicit `Gap::Unknown`-style API only with a concrete mechanism that can detect the wrap (extra epoch metadata, not inference from equal `u32` values), plus its RAM, flash, and cycle results. |
+| D1, generation ambiguity — **CLOSED** (maintainer, 2026-08-11, PR #37) as this default plus the payload escape hatch | Exact within one non-zero `u32` span. Beyond that span use the documented approximation `generation_distance(last, current).saturating_sub(1)`; a repeated generation after exactly one full cycle therefore reports zero rather than panicking. Applications requiring a longer identity span carry a wider producer-assigned sequence in `T`. | Closed — contract §9 records the decision, C3/C5/O2 carry the beyond-span text, and non-promise X6 states the adopter disclosure, including why a `Gap::Unknown`-style API was rejected (hot-path cost; "unknown" cannot recover the lost count). |
 | D2, `Source<T>` | No `Source<T>` implementation. Provide `LatestSource<T>` so replacement evidence remains structural. | A design that preserves loss evidence through generic `Source`/`forward`; documentation alone is insufficient. |
 | D3, sample or block | Implement generic `LatestBuf<T>` first. A complete block is a `T`; the BlockBuf candidate demonstrates `LatestBuf<Block<T, N>>` for latest and `EventBuf<Block<T, N>, Q>` for queued delivery. | A separate block transport must enforce a guarantee composition cannot, such as direct-to-granted-slot filling with a measured copy/RAM win. |
 | A.3, role continuation | Compare channel-resident role state with handle-resident state persisted on `Drop`. Keep H2/H4 in both candidates. | Narrow H2 only if both candidates fail the evidence bar; reacquisition must not silently restart. |
@@ -147,7 +148,7 @@ Sequential unit tests pin API semantics and arithmetic:
 - `(last, current) = (u32::MAX, 1)` gives distance 1 and skipped 0;
 - `(u32::MAX - 1, 1)` gives skipped 1; and
 - `last == current` at the full-cycle ambiguity seam does not underflow or
-  panic and matches the selected D1 approximation.
+  panic and matches the closed D1 approximation (contract C3/X6).
 
 A threaded stress test uses a patterned multiword payload and checks that a
 returned value belongs wholly to one generation. It is useful scale evidence,
