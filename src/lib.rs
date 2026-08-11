@@ -93,10 +93,22 @@
 //! # Safety and concurrency
 //! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
-//!   consumer must be active. `producer()`/`consumer()` will panic if called
-//!   while another handle of the same kind is active; `try_producer()` /
-//!   `try_consumer()` return `None` instead. Using unsafe to bypass these
-//!   constraints is undefined behavior.
+//!   consumer must be active. Use `try_producer()` / `try_consumer()`, which
+//!   return `None` rather than panicking — on a microcontroller a panic is a
+//!   reset. The panicking `producer()` / `consumer()` are deprecated since
+//!   0.2.0. Using unsafe to bypass these constraints is undefined behavior.
+//!
+//!   The examples here use `.expect(...)` for brevity, which is a panic. That
+//!   is fine in a doctest on a host; in firmware, branch on the `None`:
+//!
+//! ```
+//! # use ph_eventing::EventBuf;
+//! # let buf = EventBuf::<u32, 4>::new();
+//! let Some(tx) = buf.try_producer() else {
+//!     return; // already claimed -- report it, do not reset the device
+//! };
+//! # let _ = tx;
+//! ```
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
