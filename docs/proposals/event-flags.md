@@ -102,7 +102,7 @@ stand in for the publication test.
 
 ### 4.1 Behaviour, Loom, and Miri
 
-- 78 unit tests exercise empty/all masks, bit 31, checked index construction,
+- 77 unit tests exercise empty/all masks, bit 31, checked index construction,
   duplicate and multi-bit raises, clear-on-take, role acquisition, static
   construction, threaded take races, and publication.
 - Three EventFlags Loom models exhaustively cover one-raise and two-distinct-

@@ -257,8 +257,8 @@ them is a runtime step and always will be.
 - `SeqRing`, `EventBuf`, and `EventFlags` are SPSC by design: exactly one producer and one consumer may be
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
-  The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
-  0.3.0. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
+  The panicking `producer()`/`consumer()`, deprecated since 0.2.0, **were removed in
+  0.3.0**. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
   undefined behavior.
 - `T: Copy` is required by the three buffer types to avoid allocation and return values by copy.
 - `EventFlags` has no unsafe slot access and passes Miri with the race detector enabled.
