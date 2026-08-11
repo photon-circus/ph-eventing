@@ -180,11 +180,19 @@ dry-run listing is where you find out you forgot.
 ## 8. Tag and push
 
 ```bash
-git add -A
+# Stage the release files EXPLICITLY. Never `git add -A` in this repo: the
+# probe workspaces build into scripts/*/target, which the root .gitignore
+# does not cover on every setup, and -A has swept ~500 build artifacts into
+# a release commit before (AGENTS.md, "Never git add -A here").
+git add Cargo.toml Cargo.lock CHANGELOG.md scripts/codesize/Cargo.lock scripts/cycles/Cargo.lock
+git status --short   # must show ONLY the files above; investigate anything else
 git commit -m "Release X.Y.Z"
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin release/X.Y.Z --follow-tags
 ```
+
+(The probe lockfiles are in the list because they record the ph-eventing
+version through their path dependency, so the bump touches them too.)
 
 Tag after the verification passes, so the tag names a state you actually
 checked.

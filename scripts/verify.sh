@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
-# Run the offline verification matrix inside the reference environment.
+# Run the local verification matrix inside the reference environment.
+#
+# "Local", not "offline": crate sources are preloaded into the image, so the
+# builds run without network, but the cargo-deny advisory refresh is
+# time-varying by design and still wants one.
 #
 # Local runs of ci.sh / miri.sh / loom.sh / cycles.sh are only as reproducible
 # as the machine they run on: QEMU builds differ, `+nightly` drifts daily, and

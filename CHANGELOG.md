@@ -24,8 +24,12 @@ the feature.
   and three tools sit outside what `rust-toolchain.toml` can pin: QEMU (instruction counts are
   deterministic per build, not across builds), the Miri nightly (a bare `+nightly` drifts
   daily), and the optional `ci.sh` gates (cargo-deny, cargo-llvm-cov, stable). The image pins
-  all three; `./scripts/verify.sh` runs the full offline matrix — `ci.sh` with zero SKIPs,
-  Miri, Loom, cycles — inside it. Every run stamps its versions. Deliberately guarded against
+  all three; `./scripts/verify.sh` runs the full local matrix — `ci.sh` with zero SKIPs,
+  Miri, Loom, cycles — inside it. Crate sources are preloaded, so only the cargo-deny advisory
+  refresh needs network. A prebuilt copy is published as
+  [`stevegiacomelli/ph-eventing-verify`](https://hub.docker.com/r/stevegiacomelli/ph-eventing-verify),
+  each `0.x.y` tag frozen as that release's evidence environment.
+  Every run stamps its versions. Deliberately guarded against
   running in hosted CI: the expensive checks were taken off the remote pipeline on purpose, and
   reversing that should be an explicit, reviewed decision.
 - `scripts/miri.sh` accepts `MIRI_TOOLCHAIN` (e.g. `nightly-2026-08-08`) and prints the exact

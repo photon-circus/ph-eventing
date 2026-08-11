@@ -16,7 +16,13 @@
 #     toolchain). Absent, ci.sh reports SKIPs; inside this image the full
 #     15-check matrix runs with none.
 #
-# Build (from the repo root -- the context must include rust-toolchain.toml):
+# A prebuilt copy is published at hub.docker.com/r/stevegiacomelli/ph-eventing-verify;
+# each 0.x.y tag is the frozen environment of that release's evidence:
+#
+#   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.2.0 ./scripts/verify.sh
+#
+# Build locally instead (from the repo root -- the context must include
+# rust-toolchain.toml and the lockfiles):
 #
 #   docker build -t ph-eventing-verify -f scripts/verify/Dockerfile .
 #
@@ -36,6 +42,24 @@ FROM rust:1.92.0-slim-trixie
 RUN apt-get update \
  && apt-get install -y --no-install-recommends qemu-system-arm git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+# Apt cannot pin QEMU: Debian's archive rotates point releases out, so
+# `qemu-system-arm=<version>` breaks the build the day the version leaves the
+# index, and snapshot.debian.org trades that for a slow, sometimes-absent
+# mirror. The immutable pin is therefore the PUBLISHED image tag -- a release's
+# `0.x.y` tag is never retagged, and rebuilding this file later is NOT
+# guaranteed to reproduce it. This guard makes that loud instead of silent: if
+# a rebuild resolves a different QEMU series than the one the release evidence
+# used, the build fails here rather than producing an image that claims to be
+# the reference but measures differently.
+ARG QEMU_SERIES=10.0
+RUN qemu-system-arm --version | head -1 | grep -qF "version $QEMU_SERIES." || { \
+      echo "QEMU series drifted from $QEMU_SERIES -- this rebuild would not" ;  \
+      echo "reproduce the release evidence. Use the published image tag, or" ;  \
+      echo "re-measure and re-bless the documented counts with the new QEMU" ;  \
+      echo "(then update QEMU_SERIES)." ; \
+      qemu-system-arm --version | head -1 ; \
+      exit 1 ; }
 
 # The pinned toolchain, its components, and its targets, exactly as
 # rust-toolchain.toml declares them. Copying the file in and running a cargo
@@ -64,7 +88,24 @@ RUN rustup toolchain install stable --profile minimal \
       --component clippy
 
 # The optional ci.sh gates, pinned to the versions the release evidence used.
-RUN cargo install --locked cargo-deny@0.20.2 cargo-llvm-cov@0.8.7 \
- && rm -rf "$CARGO_HOME/registry"
+RUN cargo install --locked cargo-deny@0.20.2 cargo-llvm-cov@0.8.7
+
+# Preload every crate the matrix compiles -- the root workspace (loom is a
+# dev-dependency) and both probe workspaces -- so a container without outbound
+# network can still build and run everything except the cargo-deny advisory
+# refresh, which is time-varying by design and stays online. The manifests are
+# copied into a stub layout because the probes reach the root crate through a
+# `path = "../.."` dependency; `cargo fetch --locked` then resolves from the
+# committed lockfiles, so what is cached is exactly what a run will use.
+COPY Cargo.toml Cargo.lock /tmp/fetch/
+COPY scripts/codesize/Cargo.toml scripts/codesize/Cargo.lock /tmp/fetch/scripts/codesize/
+COPY scripts/cycles/Cargo.toml scripts/cycles/Cargo.lock /tmp/fetch/scripts/cycles/
+RUN mkdir -p /tmp/fetch/src /tmp/fetch/scripts/codesize/src /tmp/fetch/scripts/cycles/src \
+ && touch /tmp/fetch/src/lib.rs /tmp/fetch/scripts/codesize/src/lib.rs \
+ && printf 'fn main() {}\n' > /tmp/fetch/scripts/cycles/src/main.rs \
+ && cd /tmp/fetch && cargo fetch --locked \
+ && cd /tmp/fetch/scripts/codesize && cargo fetch --locked \
+ && cd /tmp/fetch/scripts/cycles && cargo fetch --locked \
+ && rm -rf /tmp/fetch
 
 WORKDIR /work

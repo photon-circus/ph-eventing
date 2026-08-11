@@ -174,9 +174,18 @@ anyone can reproduce the evidence rather than take the README's word for it:
 ```
 
 Requires Docker and nothing else; `scripts/verify/Dockerfile` documents
-exactly what is pinned and why. The matrix is deliberately local-only — the
-expensive checks were removed from hosted CI on purpose, and the script
-refuses to run there so that decision cannot be reversed by accident.
+exactly what is pinned and why. A prebuilt copy is published at
+[stevegiacomelli/ph-eventing-verify](https://hub.docker.com/r/stevegiacomelli/ph-eventing-verify)
+— same Dockerfile, saves you the build, and each `0.x.y` tag is frozen as the
+environment that release's evidence was gathered in:
+
+```bash
+VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.2.0 ./scripts/verify.sh
+```
+
+The matrix is deliberately local-only — the expensive checks were removed
+from hosted CI on purpose, and the script refuses to run there so that
+decision cannot be reversed by accident.
 
 ### Coverage
 
