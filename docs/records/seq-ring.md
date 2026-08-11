@@ -15,10 +15,15 @@
 overwrite ring for high-rate telemetry where the producer must never
 block and stale data is droppable — but unlike a latest-value snapshot,
 the consumer drains *in order* (`poll_one`/`poll_up_to`) or samples the
-newest (`latest`), and every loss is counted. A consumer that falls more
-than `N` behind skips ahead and is told exactly how many items it lost
-(`PollStats::dropped`; the saturating `dropped_accum` is the origin of
-the crate's observable-loss convention). It refuses to be: a delivery
+newest (`latest`), and losses on the ordered path are counted. A consumer
+that falls more than `N` behind skips ahead and is told exactly how many
+items it lost (`PollStats::dropped`; the saturating `dropped_accum` is the
+origin of the crate's observable-loss convention). The exactness promise
+belongs to the ordered `poll_*` paths only: `latest()` samples without
+advancing the cursor or reporting a gap, and `skip_to_latest()` discards
+the backlog *without* adding to the dropped counter — both are deliberate
+sampling/fast-forward semantics, disclosed in §2 so they are chosen, not
+discovered. It refuses to be: a delivery
 guarantee (`EventBuf` is), a race-free primitive (see §2 — this is the
 crate's one deliberate formal-soundness trade), or a latest-value-only
 channel (`LatestBuf` is, with a race-free ownership argument).
@@ -47,6 +52,12 @@ channel (`LatestBuf` is, with a race-free ownership argument).
 - **Loss is designed behaviour.** Overwrite is the overload policy; the
   counters report it, nothing prevents it. Consumers that must see every
   event belong on `EventBuf`.
+- **Two consumption modes bypass the loss accounting — by design.**
+  `latest()` peeks the newest value without advancing the cursor or
+  producing a skipped count, and `skip_to_latest()` fast-forwards past
+  the backlog without modifying the dropped counter. A consumer mixing
+  these with `poll_*` must not read `dropped`/`dropped_accum` as a total
+  loss ledger — it accounts only what the ordered path drained past.
 - **Role lifecycle follows the crate doctrine:** sole-role
   `Send + !Sync` handles, `try_*`-only acquisition (the panicking
   constructors are gone in 0.3.0), roles held until the handle drops,
@@ -61,7 +72,7 @@ channel (`LatestBuf` is, with a race-free ownership argument).
 | Fence placement is necessary (Release before value write; Acquire before re-check) | Module-doc argument; Loom; ordering discipline enforced by AGENTS' rerun-after-atomic-change rule | Proven |
 | Recovery cost is constant w.r.t. lag | 0.2.0 measurement: a consumer 2,000 sequences behind recovers in the same 115 instructions as one 16 behind | Measured |
 | Loss accounting is exact and saturating (`read + dropped` accounts for every sequence; `dropped_accum` saturates, never wraps) | Unit set incl. `lag_across_wrap_counts_drops_exactly`, `dropped_accum_saturates_instead_of_overflowing`; `seq_distance` wrap tests (0.1.3 fix pinned) | Pinned |
-| Const-constructs into `.bss` — no flash image, no startup copy | 0.2.0 measurement: 268 bytes, zero flash, across 11 targets / 4 ISA families; codesize baseline gated in CI | Measured, gated |
+| Const-constructs into `.bss` — no flash image, no startup copy | By construction (`const fn new`); the 0.2.0 codesize probe demonstrates the crate's `.bss` discipline on an `EventBuf` static (268 B) — **no dedicated SeqRing static is probed or baseline-gated**, and SeqRing's RAM adds `N` per-slot sequence atomics over the payload array, `size_of`-computable per shape | By construction; probe coverage is EventBuf's |
 
 ## 4. The record
 
