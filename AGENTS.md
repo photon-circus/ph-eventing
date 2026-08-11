@@ -187,11 +187,14 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - The semantic contract and stable clause IDs live in
   `docs/proposals/counted-signal-contract.md`.
 - The sole producer loads the counter (Relaxed). Below `u32::MAX` it
-  `fetch_add`s once (Relaxed). Observed `u32::MAX` is maybe-stale: a
-  `compare_exchange(MAX, MAX)` success is a saturated no-op; failure means a
-  completed take reset the epoch and the producer `fetch_add`s once into it.
-  Under sole-producer ownership that is at most one contention retry and the
-  RMW cannot wrap.
+  `fetch_add`s once (Relaxed). Observed `u32::MAX` is maybe-stale: the
+  producer re-reads through a no-op `fetch_or(0)` RMW — an RMW, unlike a load
+  or a failed compare-exchange, observes the latest value in modification
+  order. A `MAX` re-read confirms saturation; anything else means a completed
+  take reset the epoch and the producer `fetch_add`s once into it. No
+  compare-exchange, no retry: on RISC-V the sentinel is a single `amoor.w`,
+  where a strong CAS lowers to an unbounded LR/SC loop. Under sole-producer
+  ownership the follow-up `fetch_add` cannot wrap.
 - The consumer performs a Relaxed `swap(0)`.
 - Relaxed is sufficient because there is no payload publication; the atomic's
   modification order alone partitions increments between take epochs.
@@ -925,11 +928,12 @@ two pin the CountedSignal handles' `!Sync` contract.
 - `CountedSignal` handles are `Send + !Sync`; the producer's `!Sync` property
   is part of the saturation proof, not merely API uniformity
 - `CountedSignal`: `increment` uses `fetch_add` below `MAX` and confirms the
-  sentinel with `compare_exchange(MAX, MAX)` (or one follow-up `fetch_add` after
-  a take reset) — never a plain load-and-skip on `MAX`, which drops post-take
-  occurrences under Relaxed observation (T3/A1)
-- `CountedSignal`: under sole producer, at most one contention retry from the
-  consumer's `swap(0)`; the counter never wraps
+  sentinel with a no-op `fetch_or(0)` re-read (plus one follow-up `fetch_add`
+  after a take reset) — never a plain load-and-skip on `MAX`, which drops
+  post-take occurrences under Relaxed observation (T3/A1), and never a
+  compare-exchange, which lowers to an unbounded LR/SC retry loop on RISC-V
+- `CountedSignal`: under sole producer the instruction sequence is fixed —
+  no source-level operation retries; the counter never wraps
 - `CountedSignal`: `take_count` is a single Relaxed `swap(0)` that partitions
   every increment into exactly one take epoch
 - No panics in hot paths. All three `new()` reject `N == 0` with a **const**

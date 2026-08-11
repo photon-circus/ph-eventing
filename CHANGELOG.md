@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file.
   litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
 ### Documentation
 - CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 after the sentinel-RMW fix), and the H closure record.
+- CountedSignal saturated sentinel arm is now its own measured QEMU region
+  (`cs increment saturated`, 9 retired instructions on Cortex-M3), seeded via a
+  hidden `_cycles-probe` feature and a `#[doc(hidden)]` constructor — the arm is
+  unreachable through the public API in bounded time, and was previously a
+  source-review claim only. Hot-path rows are byte-identical with the region
+  isolated in its own frame.
 - CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-RMW
   fix (`./scripts/verify.sh cycles`, QEMU 10.0.11); pending-remeasure markers cleared.
 - CountedSignal contract B1: fixed instruction sequence with a no-op RMW

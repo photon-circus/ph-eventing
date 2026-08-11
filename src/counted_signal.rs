@@ -73,6 +73,25 @@ impl CountedSignal {
         }
     }
 
+    /// Probe-only seeding constructor. Not part of the public contract.
+    ///
+    /// The saturated `increment` arm is unreachable through the public API in
+    /// bounded time — it needs the counter at `u32::MAX`, which is
+    /// `u32::MAX` increments away — yet its cost is a measured claim
+    /// (contract B1/B2). The QEMU cycle probe enables the hidden
+    /// `_cycles-probe` feature to construct a saturated signal directly, the
+    /// same way the Loom models seed epochs via `with_count_for_model`.
+    #[cfg(feature = "_cycles-probe")]
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_count_for_probe(count: u32) -> Self {
+        Self {
+            count: AtomicU32::new(count),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
     /// Try to acquire the sole producer handle.
     ///
     /// Returns `None` while another producer handle is active.

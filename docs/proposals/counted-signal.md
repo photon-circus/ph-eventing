@@ -146,10 +146,10 @@ The isolated release-mode code-size rows on the pinned Rust 1.92.0 toolchain
 | Target family | `increment` | `take_count` |
 |---|---:|---:|
 | Cortex-M0 (`thumbv6m`) | 46 B | 24 B |
-| Cortex-M23 (`thumbv8m.base`) | 56 B | 22 B |
-| Cortex-M3/M4/M33 | 54 B | 22 B |
-| Armv7-R / Armv7-A | 76 B | 28 B |
-| RV32IMAC | 34 B | 8 B |
+| Cortex-M23 (`thumbv8m.base`) | 44 B | 22 B |
+| Cortex-M3/M4/M33 | 44 B | 22 B |
+| Armv7-R / Armv7-A | 64 B | 28 B |
+| RV32IMAC | 26 B | 8 B |
 
 The M0/M23 rows use the existing portable-atomic single-core probe backend.
 Versus the pre-fix load-and-skip path this remains a deliberate growth on
@@ -161,13 +161,22 @@ single `amoor.w` with no `lr.w`/`sc.w` pair in the disassembly.
 
 Re-measured in the pinned reference environment via `./scripts/verify.sh cycles`
 after the sentinel fix. The probe brackets the common below-`MAX` path
-(`load` + `fetch_add`) and a `swap(0)` take — the sentinel re-read only runs when
-the producer observes `MAX`, so these rows stay the hot-path cost:
+(`load` + `fetch_add`), a `swap(0)` take, and — via the hidden `_cycles-probe`
+seeding feature, since `u32::MAX` increments cannot be replayed under a
+per-instruction trace — the saturated sentinel arm (`load` observing `MAX`,
+no-op `fetch_or(0)` confirm, return):
 
-| Cortex-M3 hot path | Retired guest instructions |
+| Cortex-M3 path | Retired guest instructions |
 |---|---:|
-| `increment` | 8 |
+| `increment` (below `MAX`, the hot path) | 8 |
+| `increment` (saturated sentinel arm) | 9 |
 | `take_count` | 7 |
+
+The third arm — a stale `MAX` re-read below `MAX` after a completed take —
+needs a racing consumer a single-hart deterministic trace cannot express; it
+is the saturated arm plus one `fetch_add` by construction and is bounded by
+the gated whole-function code size. All three measured rows are uncontended
+single-pass counts.
 
 Environment stamp: rustc 1.92.0 (`ded5c06cf`), LLVM 21.1.3, QEMU 10.0.11
 (Debian trixie), release `opt-level = "z"` with LTO. The runner subtracts its
