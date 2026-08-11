@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 ### Documentation
 - `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
-  (a) + (c) — `skipped` is exact within one wrap span, a documented modular approximation
-  beyond it, and callers whose requirement is the count itself are pointed at a wider
-  producer-assigned payload sequence or a saturating counter. The wrap family (C3, C5, O2)
-  now carries its beyond-span text, and a new non-promise **X6** states the limitation for
-  adopters: the boundary is reachable only through consumer stall, the channel deliberately
-  does not detect the crossing, and a full-cycle gap reports zero. Option (b) — an explicit
+  (a) + (c) — `skipped` is one formula (wrap-aware distance minus one, saturated at zero):
+  exact within one wrap span, a documented under-count beyond it, and callers whose
+  requirement is the count itself are pointed at a wider producer-assigned payload sequence
+  or a saturating counter. The wrap family (C3, C5, O2) now carries its beyond-span text,
+  and a new non-promise **X6** states the limitation for adopters: the boundary is a
+  rate × take-interval property crossed exactly when a full span of publications separates
+  two takes, the channel deliberately does not detect the crossing, and a full-cycle gap
+  reports zero. Option (b) — an explicit
   "wrapped/unknown" state — is rejected on the record: it prices wrap detection into every
   hot-path operation and still cannot recover the lost count.
 - `LatestBuf` contract: decision **D2** (`Source<T>` policy) is closed as the proposal's

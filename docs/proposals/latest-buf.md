@@ -996,6 +996,13 @@ for implementation and never a substitute for the memory-model proof.
 
 ## 22. Open Questions
 
+**Update (2026-08-11):** several of these questions have since received
+decisions on the record — the wrap question is answered by D1's closure
+(contract §9, C3/X6), the `Source<T>` question by D2 (contract §9, X7),
+the sample-versus-block questions by D3 (payload-agnostic `LatestBuf<T>`;
+blocks are payloads), and the critical-section-versus-exchange question by
+the A.1 measurement. The remaining questions stay open as written.
+
 - Is retaining only the latest individual sample sufficient for realistic
   DSP consumers?
 - Should the first implementation publish fixed-size complete blocks instead?

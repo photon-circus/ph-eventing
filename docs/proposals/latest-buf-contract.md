@@ -77,17 +77,19 @@ and all clauses below are stated against the sequence of those instants.
   skipped })`, `pending` becomes `None`, and `last_taken` becomes `g`.
 - **C2.** If `pending = None` at the linearization point, `take_latest`
   returns `None` and changes no observable state.
-- **C3.** Within one wrap span (the same scope as C5 and O2 — see D1),
-  `skipped` equals the wrap-aware count (per G3) of generations assigned
-  after `last_taken` and before `g` — that is, publications that were
-  displaced before this consumer observed them. Taking the immediate
-  successor of `last_taken` yields `skipped = 0`; last-taken 101 and taken
-  104 yields `skipped = 2`. Beyond one wrap span the exact count is
-  inherently unrecoverable; per D1's closure, `skipped` reports the
-  wrap-aware modular approximation (the G3 distance between the two
-  endpoint generations). In particular, a gap of exactly one full
-  generation cycle reports `skipped = 0` — a documented silent under-count
-  in that case (X6).
+- **C3.** `skipped` is one formula in every case, fixed by D1's closure:
+  the wrap-aware G3 distance from `last_taken` to `g`, **minus one**
+  (the returned publication), saturated at zero. Within one wrap span
+  (the same scope as C5 and O2 — see D1) this equals exactly the count of
+  generations assigned after `last_taken` and before `g` — publications
+  displaced before this consumer observed them: taking the immediate
+  successor of `last_taken` yields `skipped = 0`; last-taken 101 and
+  taken 104 yields `skipped = 2` (G3 distance 3, minus one). Beyond one
+  wrap span the exact count is inherently unrecoverable from two endpoint
+  values, and the same formula **under-counts**: by an exact multiple of
+  the span size while the endpoints differ, and at coincident endpoints —
+  a gap of exactly one or more whole cycles — it reports `skipped = 0`,
+  a documented silent under-count (X6).
 - **C4.** Each publication is observed **at most once** — the same
   publication *instance* is never returned twice, unconditionally. Stated
   per generation **value**, the claim carries C5's one-wrap-span scope: a
@@ -128,10 +130,11 @@ and all clauses below are stated against the sequence of those instants.
   it lands in the `skipped` of the next successful take. No generation is
   double-counted and none disappears; immediately after a successful take
   the awaiting-report set is empty, so at those observation points the
-  first three states account for everything. Beyond one wrap span, per
-  D1's closure, conservation holds modulo the number of assignable
-  generations in one span: the four-state accounting stays internally
-  consistent, but `skipped` totals lose whole cycles (C3, X6).
+  first three states account for everything. Beyond one wrap span,
+  counting conservation is **not claimed**: the four-state partition
+  still describes every observed value, but `skipped` under-counts the
+  assigned generations exactly as C3 states — conservation in the
+  counting sense holds within one wrap span only (C3, X6).
 - **O3.** *(No fabrication)* Every generation returned or counted was
   assigned by a real `publish` call. `skipped` never includes generations
   that were never assigned (in particular, never the reserved `0` — G3).
@@ -195,15 +198,21 @@ the measured implementation, per environment.
   toolchain.
 - **X6.** Exact loss accounting beyond one wrap span. `skipped` is exact
   while fewer than a full generation cycle of publications separates two
-  consecutive takes; beyond that it is a modular approximation, and a gap
-  of exactly one full cycle reports zero (C3) — a silent under-count in
-  that case. Three facts frame this honestly for adopters:
-  - The boundary is reachable **only through consumer stall, never
-    producer burst**: publishing a full cycle between two takes at any
-    realistic take cadence requires a physically impossible publication
-    rate, so crossing it means the consumer did not run while a full
-    cycle of publications occurred (for a 32-bit generation: ~49.7 days
-    of continuous 1 kHz publishing, ~72 minutes at 1 MHz).
+  consecutive takes; beyond that the C3 formula under-counts — by whole
+  spans while the endpoints differ, and a gap of exactly one or more full
+  cycles reports zero (C3) — a silent under-count. Three facts frame this
+  honestly for adopters:
+  - The boundary is a property of the **publication-rate × take-interval
+    product**: it is crossed exactly when a full span of publications
+    occurs between two successful takes. The contract sets no rate and no
+    cadence (X5), so both roads to it are real — a consumer that stops
+    taking (fault), and a deployment that deliberately takes rarely
+    against a fast producer (design). For a 32-bit generation the
+    arithmetic is ~49.7 days between takes at continuous 1 kHz
+    publishing, ~72 minutes at 1 MHz; at millisecond-scale take cadences
+    the required rate is unattainable, which is why the common road is
+    the take interval — but the contract bounds neither, and adopters
+    own this arithmetic for their rates.
   - The channel deliberately does **not detect** the crossing. Detection
     would require widening hot-path state (a wider generation or a wrap
     epoch), and even a detected "unknown" cannot recover the lost count —
@@ -249,11 +258,11 @@ All three decision points are **closed** (2026-08-11, below).
 
 - **D1. Wrap-ambiguity policy — CLOSED (maintainer, 2026-08-11): options
   (a) + (c) together.** `skipped` is exact within one wrap span and reports
-  the documented modular approximation beyond it (a); callers whose
+  the documented under-counting C3 formula beyond it (a); callers whose
   requirement is the count itself are pointed at a wider producer-assigned
   sequence carried in the payload or a saturating-counter primitive (c).
   The whole wrap family closes with it: C3 (beyond-span gap reporting), C5
-  (no beyond-span ordering claim), O2 (modular conservation), and the new
+  (no beyond-span ordering claim), O2 (in-span-only conservation), and the new
   X6 (the non-promise, stated so a downstream user can decide against the
   type with full information). Option (b) — an explicit "unknown/wrapped"
   state — was rejected on two independent grounds recorded in X6: it
@@ -262,9 +271,9 @@ All three decision points are **closed** (2026-08-11, below).
   because "unknown" does not recover a count that exceeded the counter.
   **Documentation obligation, binding on the implementation:** the concrete
   type's public documentation must carry the X6 disclosure prominently —
-  the exactness span, the silent-zero full-cycle case, the stall-only
-  reachability arithmetic at representative rates, and the (c) escape
-  hatch. "Unreachable in practice" is a measured claim to be shown, never
+  the exactness span, the silent-zero full-cycle case, the
+  rate × take-interval reachability arithmetic at representative rates,
+  and the (c) escape hatch. "Unreachable in practice" is a measured claim to be shown, never
   a reason for silence.
 - **D2. `Source<T>` policy — CLOSED (maintainer, 2026-08-11): the
   proposal's option 1.** The consumer does not implement `Source<T>`;
@@ -329,7 +338,7 @@ without a row here is a clause nobody is keeping true.
 | B4 | `codesize.sh` panic-string probe (the 0.2.0 technique) |
 | H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation checks stated observably: after a drop in one context and reacquisition in another, the generation sequence resumes (G1) and skipped accounting still satisfies C3 — exercised under Loom and race-detector-on Miri, because a sequential test cannot exercise a cross-context handoff. How continuation state survives the drop is the implementation's concern, and validating that mechanism belongs to the proposal's evidence (Appendix A.3), not this map |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
-| C3/C5/O2 beyond-span, X6 (D1 closure) | Unit test pinning the full-cycle modular result (equal endpoints report zero — the prototype's `full_generation_cycle_uses_documented_approximation` is the template), alongside the G1–G3 wrap-boundary tests; a documentation check that the concrete type's public docs carry the X6 disclosure (span, silent-zero case, reachability arithmetic, escape hatch) |
+| C3/C5/O2 beyond-span, X6 (D1 closure) | Unit test pinning the full-cycle result of the C3 formula (equal endpoints report zero — the prototype's `full_generation_cycle_uses_documented_approximation` is the template), alongside the G1–G3 wrap-boundary tests; a documentation check that the concrete type's public docs carry the X6 disclosure (span, silent-zero case, reachability arithmetic, escape hatch) |
 | X7 (D2 closure) | Compile-fail test pinning that the consumer does **not** implement `Source<T>`, so the decision cannot regress via a later convenience impl; a documentation check that the public docs name `LatestSource` as the contract surface and state the adapter escape hatch |
 
 ## 11. Relationship to the design sketch
