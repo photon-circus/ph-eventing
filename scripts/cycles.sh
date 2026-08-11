@@ -25,14 +25,20 @@
 # host speed. The result is deterministic: the same ELF gives the same counts on
 # any machine.
 #
-# ## Requirements
+# ## Requirements and the reference environment
 #
-# qemu-system-arm, and the thumbv7m-none-eabi target. Unlike the rest of the
-# tooling this is NOT satisfied by rust-toolchain.toml alone -- QEMU is a system
-# package. On Debian/Ubuntu:  sudo apt-get install qemu-system-arm
+# qemu-system-arm >= 8.1 (for one-insn-per-tb), and the thumbv7m-none-eabi
+# target. Unlike the rest of the tooling this is NOT satisfied by
+# rust-toolchain.toml alone -- QEMU is a system package the toolchain file
+# cannot pin, and the counts are stable per QEMU build, not across builds:
+# two of the eighteen regions were observed to differ by one instruction
+# between a 10.0 and a 10.2 build. scripts/verify/Dockerfile pins the
+# environment the documented numbers were measured in; run this script inside
+# it via  ./scripts/verify.sh cycles  when comparing against those numbers.
 #
 # Usage:
-#   ./scripts/cycles.sh
+#   ./scripts/cycles.sh            # local qemu-system-arm
+#   ./scripts/verify.sh cycles     # same, inside the reference image
 
 set -u
 
@@ -48,9 +54,14 @@ LOG="$PROBE_DIR/target/qemu-exec.log"
 if ! command -v qemu-system-arm >/dev/null 2>&1; then
     printf 'SKIP: qemu-system-arm not installed.\n'
     printf '  Debian/Ubuntu:  sudo apt-get install qemu-system-arm\n'
+    printf '  or use the reference image:  ./scripts/verify.sh cycles\n'
     printf 'A SKIP is not a pass -- see RELEASING.md.\n'
     exit 0
 fi
+
+# Counts are stable per QEMU build, not across builds, so every run records
+# the build it came from.
+printf '==> %s\n' "$(qemu-system-arm --version | head -1)"
 
 if ! rustup target list --installed 2>/dev/null | grep -qx thumbv7m-none-eabi; then
     printf 'SKIP: rustup target add thumbv7m-none-eabi\n'
@@ -205,8 +216,10 @@ printf '\n%s\n' "$report"
 
 printf '\n'
 printf 'Instructions retired on the guest, marker overhead subtracted.\n'
-printf 'Deterministic: -icount shift=0 pins one instruction to one tick, so the\n'
-printf 'same ELF yields the same counts on any host.\n'
+printf 'Deterministic per environment: -icount shift=0 pins one instruction to\n'
+printf 'one tick, so the same ELF under the same QEMU build yields the same\n'
+printf 'counts on any host. Different QEMU builds can shift region boundaries\n'
+printf 'by an instruction -- compare inside the reference image (verify.sh).\n'
 
 rm -f "$SYMS"
 rm -f "$LOG"

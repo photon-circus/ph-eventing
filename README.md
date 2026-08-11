@@ -295,6 +295,12 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
 | 69 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
+| Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
+| QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |
+
+All of it is reproducible: `./scripts/verify.sh` runs the full matrix inside one
+pinned Docker environment (`scripts/verify/Dockerfile`), so the numbers above
+can be checked rather than believed.
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
 see [Safety and Concurrency](#safety-and-concurrency) above. `EventBuf` is

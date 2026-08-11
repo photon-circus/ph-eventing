@@ -100,6 +100,12 @@ Miri needs `rustup component add --toolchain nightly miri`. Loom needs nothing
 installed — it is a dev-dependency gated on `--cfg loom` that the script sets,
 and it never enters a normal build.
 
+A bare `+nightly` drifts daily, so a Miri verdict is only reproducible next to
+the toolchain that produced it: `miri.sh` prints its exact nightly every run,
+and `MIRI_TOOLCHAIN=nightly-2026-08-08 ./scripts/miri.sh` replays under a
+specific one. Or skip the setup entirely and use the reference environment
+below.
+
 What each pass is for:
 
 - **Miri** makes three host passes — full checking, the `SeqRing` overwrite test
@@ -148,7 +154,29 @@ cleanly without it. It is deliberately **not** part of `./scripts/ci.sh` —
 every other check is satisfied by the pinned toolchain alone, and a check most
 contributors cannot run would make a green `ci.sh` mean less rather than more.
 
+The counts are deterministic per QEMU build, not across builds (two of the
+eighteen regions were observed to shift by one instruction between builds), so
+when comparing against the documented numbers, run inside the reference
+environment below.
+
 Paste the numbers into your PR, as with `codesize.sh`.
+
+### The reference environment
+
+The documented numbers — instruction counts, Miri verdicts, the full `ci.sh`
+matrix with zero SKIPs — are measured in one pinned Docker image, so that
+anyone can reproduce the evidence rather than take the README's word for it:
+
+```bash
+./scripts/verify.sh            # ci + miri + loom + cycles, all inside the image
+./scripts/verify.sh cycles     # just one of them
+./scripts/verify.sh shell      # look around
+```
+
+Requires Docker and nothing else; `scripts/verify/Dockerfile` documents
+exactly what is pinned and why. The matrix is deliberately local-only — the
+expensive checks were removed from hosted CI on purpose, and the script
+refuses to run there so that decision cannot be reversed by accident.
 
 ### Coverage
 

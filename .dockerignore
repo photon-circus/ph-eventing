@@ -1,0 +1,5 @@
+# Build context for scripts/verify/Dockerfile (built from the repo root so it
+# can COPY rust-toolchain.toml). Only that file is copied in; everything heavy
+# is excluded so the context stays kilobytes.
+*
+!rust-toolchain.toml

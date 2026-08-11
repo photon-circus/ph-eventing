@@ -245,7 +245,12 @@ SKIP baseline gate: %s does not exist yet.
     exit 2
 fi
 
-BASE_ID="$(sed -n 's/^# rustc-commit: //p' "$BASELINE")"
+# tr -d '\r': .gitattributes pins this file to LF, but a checkout that predates
+# that pin (or an overriding local config) can still hand us CRLF -- and a \r
+# in the commit hash makes two identical rustc ids compare unequal, which
+# surfaced as the gate skipping inside the Linux reference image against a
+# Windows checkout. Belt and braces with the attribute.
+BASE_ID="$(sed -n 's/^# rustc-commit: //p' "$BASELINE" | tr -d '\r')"
 if [ "$BASE_ID" != "$RUSTC_ID" ]; then
     printf '
 SKIP baseline gate: baseline was recorded with rustc %s, this is %s.
@@ -269,7 +274,7 @@ BAD="$RESULTS.bad"
 MISSING="$RESULTS.missing"
 rm -f "$BAD" "$MISSING"
 
-grep -v '^#' "$BASELINE" | while IFS="$(printf '	')" read -r bt bm bv; do
+grep -v '^#' "$BASELINE" | tr -d '\r' | while IFS="$(printf '	')" read -r bt bm bv; do
     [ -z "$bt" ] && continue
     cur="$(awk -F'	' -v t="$bt" -v m="$bm" '$1==t && $2==m {print $3; exit}' "$RESULTS")"
     if [ -z "$cur" ]; then

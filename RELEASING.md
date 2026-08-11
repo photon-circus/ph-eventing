@@ -154,6 +154,17 @@ cargo install cargo-deny cargo-llvm-cov
 rustup component add --toolchain nightly miri
 ```
 
+Or run everything inside the reference environment, which has all of it plus
+QEMU, guarantees zero SKIPs, and stamps the exact versions the evidence was
+gathered with (see `scripts/verify/Dockerfile`):
+
+```bash
+./scripts/verify.sh      # ci + miri + loom + cycles, in one pinned image
+```
+
+Record the printed toolchain and QEMU versions in the release PR alongside the
+results — a verdict without its environment is not reproducible evidence.
+
 ## 7. Check what will actually ship
 
 ```bash

@@ -3,6 +3,34 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+
+**What this release delivers.** 0.1.x was correct: verified lock-free buffers with no way to
+show what they cost. 0.2.0 makes the costs part of the contract. Buffers now const-construct
+into `.bss` — 268 bytes, zero flash, zero startup copy, measured on 11 targets across 4 ISA
+families — and the panicking constructors are deprecated in favour of `try_*`, so no panic
+machinery reaches the binary. The hot paths carry measured instruction counts instead of
+adjectives: every `push` costs the same empty or full, and a `SeqRing` consumer 2000 sequences
+behind recovers in the same 115 instructions as one 16 behind. What was true before is now
+*checked*: a code-size baseline gates every `ci.sh` run, the instruction counts are
+reproducible by anyone via one pinned Docker environment, and the one ergonomic gap that
+couldn't be closed at runtime got a compile-time answer (`static_spsc!`) instead of a runtime
+cost. Two features were built, measured, and rejected for this release because the numbers said
+no — that reasoning ships in `AGENTS.md`, because on this crate the measurement discipline is
+the feature.
+
+### Added
+- `scripts/verify/Dockerfile` + `./scripts/verify.sh` — the **reference verification
+  environment**. The crate's claims are only claims if someone else can reproduce the evidence,
+  and three tools sit outside what `rust-toolchain.toml` can pin: QEMU (instruction counts are
+  deterministic per build, not across builds), the Miri nightly (a bare `+nightly` drifts
+  daily), and the optional `ci.sh` gates (cargo-deny, cargo-llvm-cov, stable). The image pins
+  all three; `./scripts/verify.sh` runs the full offline matrix — `ci.sh` with zero SKIPs,
+  Miri, Loom, cycles — inside it. Every run stamps its versions. Deliberately guarded against
+  running in hosted CI: the expensive checks were taken off the remote pipeline on purpose, and
+  reversing that should be an explicit, reviewed decision.
+- `scripts/miri.sh` accepts `MIRI_TOOLCHAIN` (e.g. `nightly-2026-08-08`) and prints the exact
+  toolchain every run, so a Miri verdict is always paired with the nightly that produced it.
+
 ### Changed
 - **Crate metadata now states what the crate is actually for.** The description led with
   "stack-allocated ring buffers for no-std embedded targets", which is the entry fee rather than
@@ -82,10 +110,12 @@ All notable changes to this project will be documented in this file.
   reason. No dev-dependency was added; rustdoc does this natively.
 - `scripts/cycles.sh` now covers all three types, and measures the claim rather than restating it.
   Every `push` is constant with respect to occupancy — `EventBuf` 25/25, `SeqRing` 34/33,
-  `RingBuf` 19/20 for empty vs loaded. `SeqRing` lag recovery is **O(1) in the lag**: a consumer
-  2×N behind costs 115 instructions, one ~2000 behind costs 114. Deliberately not wired into
-  `ci.sh` — it needs a system package (`qemu-system-arm`) that the pinned toolchain does not
-  supply, and a check most contributors cannot run would make a green `ci.sh` mean less.
+  `RingBuf` 20/20 for empty vs loaded. `SeqRing` lag recovery is **O(1) in the lag**: a consumer
+  2×N behind and one ~2000 behind both cost 115 instructions. (Measured in the reference
+  environment — see `scripts/verify/Dockerfile`; a different QEMU build was observed to shift two
+  regions by ±1 instruction.) Deliberately not wired into `ci.sh` — it needs a system package
+  (`qemu-system-arm`) that the pinned toolchain does not supply, and a check most contributors
+  cannot run would make a green `ci.sh` mean less.
 ### Added
 - `scripts/cycles.sh` — instruction-cost measurement under QEMU, covering the half of the
   determinism claim that code size cannot reach. `push` costs **25 instructions into an empty

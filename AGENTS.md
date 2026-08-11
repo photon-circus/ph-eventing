@@ -349,6 +349,25 @@ at the end and the exit code is non-zero if anything failed. Skip the
 cross-compilation checks with `SKIP_EMBEDDED=1` / `-SkipEmbedded`, and stop at
 the first failure with `FAIL_FAST=1` / `-FailFast`.
 
+### The reference environment (Docker)
+
+`rust-toolchain.toml` pins the stable toolchain, but three tools sit outside
+what it can pin: QEMU (instruction counts are deterministic per build, not
+across builds), the Miri nightly (`+nightly` drifts daily), and the optional
+`ci.sh` gates (cargo-deny, cargo-llvm-cov, stable). `scripts/verify/Dockerfile`
+pins all three, and
+
+```bash
+./scripts/verify.sh            # ci + miri + loom + cycles, zero SKIPs
+./scripts/verify.sh cycles     # one script inside the image
+```
+
+runs the matrix inside it. The documented instruction counts are measured
+there; cite results together with the versions each run prints. The script
+refuses to run under `GITHUB_ACTIONS` — keeping the expensive checks off the
+hosted pipeline is a documented decision (see above), and reversing it should
+be an explicit change, not a side effect of a workflow edit.
+
 ### Concurrency checking (Miri)
 
 `cargo test` passing on x86 proves little about `SeqRing` and `EventBuf` — a
@@ -635,6 +654,13 @@ Code size is a proxy; it says nothing about *time*. `./scripts/cycles.sh`
 measures the other half of the determinism claim — that the hot paths cost a
 **bounded, knowable number of instructions regardless of buffer state**.
 
+Measured in the reference environment — `scripts/verify/Dockerfile`
+(rustc 1.92.0, Debian trixie qemu-system-arm 10.0.x, thumbv7m / Cortex-M3),
+reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
+environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
+regions by exactly one instruction (trace boundary attribution, not codegen).
+Cross-environment diffs of ±1 are noise; compare inside the image.
+
 | | empty | loaded | rejected/empty |
 |---|---:|---:|---:|
 | `EventBuf::push` | 25 | **25** (7 of 8) | 19 (full, rejected) |
@@ -643,18 +669,18 @@ measures the other half of the determinism claim — that the hot paths cost a
 | `SeqRing::push` | 34 | **33** (overwriting) | |
 | `SeqRing::poll_one_value` | — | 92 | 24 (empty) |
 | `SeqRing` poll, lagged 2×N | | **115** | |
-| `SeqRing` poll, lagged ~2000 | | **114** | |
+| `SeqRing` poll, lagged ~2000 | | **115** | |
 | `SeqRing::latest_value` | — | 30 | |
-| `RingBuf::push` | 19 | **20** (overwriting) | |
+| `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
 
 Two results carry the argument:
 
 1. **Every `push` is constant.** Empty vs loaded differs by at most one
    instruction on all three types. Cost does not scale with occupancy or `N`.
-2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind costs
-   115 instructions; one ~2000 behind costs **114**. If recovery walked the
-   backlog this would grow by two orders of magnitude. It is a jump, and now
+2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind and one
+   ~2000 behind both cost **115 instructions**. If recovery walked the backlog
+   the second would be two orders of magnitude larger. It is a jump, and now
    that is measured rather than asserted.
 
 The rejected push is *cheaper* than an accepted one — backpressure is an early
@@ -833,7 +859,11 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail` doctests pinning the `N == 0` rejection (`E0080`) on all three types.
+**Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
+`try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
+`SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
+and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
+doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions
 
