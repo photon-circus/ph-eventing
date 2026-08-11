@@ -5,6 +5,14 @@
   triage and exploration, not designs ready for a contract.
 - **Received:** 2026-08-11 (0.3.0 cycle; triage in
   [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4)
+- **Structure note (2026-08-11):** the substantive design text for the
+  Tier 1/2 primitives has moved to per-primitive design documents —
+  [`block-buf.md`](block-buf.md), [`slot-pool.md`](slot-pool.md),
+  [`event-flags.md`](event-flags.md), [`counted-signal.md`](counted-signal.md)
+  — where exploration happens. This document remains the taxonomy: the
+  four questions, the table, the tiering rationale, the trait index, and
+  the standing filters. `LatestBuf` was already owned by its own proposal
+  and contract; its entry here is a cross-reference.
 
 The broader opportunity for ph-eventing is to become a small collection of
 explicitly bounded handoff mechanisms — not a general event bus or executor.
@@ -36,224 +44,82 @@ policy branches.
 
 ## 1. LatestBuf: latest complete state
 
-This is the triple-buffered ownership-transfer primitive already discussed
-(in full: [`latest-buf.md`](latest-buf.md), with its semantic contract in
-[`latest-buf-contract.md`](latest-buf-contract.md)).
+The triple-buffered ownership-transfer primitive already discussed. **This
+entry is a cross-reference, not a design:** the full proposal lives at
+[`latest-buf.md`](latest-buf.md) and its semantic contract at
+[`latest-buf-contract.md`](latest-buf-contract.md). Where this taxonomy and
+those documents differ, they are authoritative — contract clauses over
+prose.
 
 It fits data for which intermediate states have no independent value:
+orientation estimates, control setpoints, power measurements, GNSS fixes,
+actuator status, the newest decoded sensor frame.
 
-- most recent orientation estimate;
-- current control setpoint;
-- latest power measurement;
-- most recent GNSS fix;
-- current actuator status;
-- newest decoded sensor frame.
-
-Its contract would be:
-
-- producer always publishes in bounded time;
-- unread publication may be replaced;
-- consumer receives only a complete value;
-- delivered generations are monotonic;
-- skipped publications are reported;
-- producer and consumer never access the same slot concurrently.
+Its contract, by clause: bounded always-successful publication (P1–P2, B1);
+observable replacement of an unread publication (P4–P5); only complete
+values delivered (P6, C6); monotonic delivered generations (C5); skipped
+publications reported (C3); producer and consumer never access the same
+payload bytes concurrently (proposal §14).
 
 This is freshness-oriented but not a stream history. It complements rather
 than directly replaces `SeqRing`.
 
 ## 2. BlockBuf: complete window handoff
 
-A block primitive is likely one of the strongest additions for embedded DSP.
+**Design document: [`block-buf.md`](block-buf.md)** (the substantive design
+text has moved there; this entry is the summary).
 
-Many producers naturally operate in blocks:
-
-- IMU FIFO bursts;
-- ADC DMA half/full buffers;
-- audio frames;
-- vibration-analysis windows;
-- CAN receive batches;
-- sampled power waveforms;
-- image-sensor lines or tiles.
-
-Conceptually:
-
-```rust
-pub struct Block<T, Stamp, const N: usize> {
-    pub first_sequence: u32,
-    pub last_sequence: u32,
-    pub samples: [Timestamped<T, Stamp>; N],
-}
-```
-
-A producer fills a privately owned block. Once complete, ownership is
-published atomically. The consumer can never see a partially filled block.
-
-Possible overload policies should be separate types or modes fixed at
-compile time:
-
-- **`LatestBlockBuf`:** replace an unread block with the newest complete
-  block.
-- **`QueuedBlockBuf`:** reject publication when every block is owned.
-- **`DropBlockBuf`:** explicitly discard the newly completed block when
-  unavailable.
-
-This is particularly attractive for DSP because each delivered block can be
-internally contiguous even if whole blocks are skipped. The DSP sees:
-
-```
-block 100–131
-block 196–227
-```
-
-It knows exactly where the discontinuity occurred and can reset,
-interpolate, or classify that analysis window as incomplete.
-
-The synchronization operation is constant, although filling the block
-naturally takes N producer calls. Memory use is larger but fixed and
-obvious.
+Complete-window handoff for producers that naturally operate in blocks —
+IMU FIFO bursts, ADC DMA half/full buffers, audio frames, analysis windows.
+A producer fills a privately owned block; once complete, ownership is
+published atomically, so the consumer can never see a partially filled
+block. Overload policies (`Latest` / `Queued` / `Drop`) are separate
+compile-time types. Each delivered block is internally contiguous even when
+whole blocks are skipped, so a DSP knows exactly where a discontinuity
+occurred. Likely one of the strongest additions for embedded DSP; coupled
+to the LatestBuf contract's decision point D3.
 
 ## 3. SlotPool: bounded zero-copy ownership transfer
 
-For larger payloads, copying through a queue can dominate the transfer cost.
-A statically allocated slot pool could transfer ownership instead.
+**Design document: [`slot-pool.md`](slot-pool.md)** (the substantive design
+text has moved there; this entry is the summary).
 
-```
-free slot → producer reservation → committed slot
-                                   ↓
-                              consumer claim
-                                   ↓
-                              released slot
-```
-
-Representative uses include:
-
-- DMA buffers;
-- large FIFO bursts;
-- encoded packets;
-- audio blocks;
-- protocol frames;
-- diagnostic snapshots.
-
-The producer attempts to reserve a slot:
-
-```rust
-match producer.try_reserve() {
-    Some(grant) => {
-        // Fill exclusively owned memory.
-        grant.commit(metadata);
-    }
-    None => {
-        // Explicit overload policy.
-    }
-}
-```
-
-The consumer claims a committed slot and releases it when finished.
-
-The important safety property is that memory is transferred through
-ownership states:
-
-```
-Free → ProducerOwned → Published → ConsumerOwned → Free
-```
-
-No slot can be written while the consumer owns it. No slot can be read
-before the producer commits it.
-
-This would provide a reusable foundation for `BlockBuf`, DMA handoff, and
-potentially a future sound freshness-first queue.
-
-The difficult areas are:
-
-- cancellation when a producer drops an uncommitted grant;
-- consumer release on early return;
-- initialization tracking;
-- DMA memory visibility and target cache maintenance;
-- generation tags preventing stale-handle reuse; and
-- ensuring reservation never contains an unbounded scan.
-
-RAII grants can make cancellation safe, while the actual cache/DMA
-operations should remain outside ph-eventing because they are
-target-specific effects.
+For payloads large enough that copying dominates transfer cost, a
+statically allocated pool transfers ownership instead: slots move through
+`Free → ProducerOwned → Published → ConsumerOwned → Free`, with RAII grants
+on the producer side and claims on the consumer side. No slot can be
+written while the consumer owns it; none can be read before the producer
+commits it. A candidate foundation for `BlockBuf`, DMA handoff, and future
+zero-copy primitives. The hard parts — grant cancellation, initialization
+tracking, stale-handle generations, bounded reservation — are catalogued in
+the design document; DMA cache maintenance stays outside the crate.
 
 ## 4. EventFlags: coalesced condition notification
 
-Some producer-consumer communication is not a stream at all.
+**Design document: [`event-flags.md`](event-flags.md)** (the substantive
+design text has moved there; this entry is the summary).
 
-An interrupt may need to communicate conditions such as:
-
-- FIFO watermark reached;
-- DMA block complete;
-- peripheral error;
-- configuration changed;
-- shutdown requested;
-- watchdog warning;
-- data available.
-
-Repeated notification of the same condition may have no additional value. An
-atomic bitset is a natural primitive:
-
-```rust
-producer.raise(Event::DataReady);
-producer.raise(Event::Overflow);
-
-let events = consumer.take_all();
-```
-
-A possible representation is an `AtomicU32`:
-
-- producer uses `fetch_or`;
-- consumer uses `swap(0)`;
-- duplicate events coalesce;
-- producer work is constant;
-- no allocation or queue capacity is required.
-
-This is an excellent ISR-to-task primitive when ordering and multiplicity do
-not matter.
-
-Its contract must say explicitly:
-
-- conditions are unordered;
-- duplicate raises may coalesce;
-- each bit means "occurred at least once since the last take";
-- clearing and raising must not lose a concurrent event.
-
-This is much narrower and more predictable than adding a general semaphore
+Some producer-consumer communication is not a stream at all: an ISR
+signalling conditions (watermark reached, DMA complete, error, shutdown)
+where repeated notification adds no value. An atomic bitset —
+`fetch_or` to raise, `swap(0)` to take — coalesces duplicates, costs
+constant producer work, and needs no queue capacity. Contract in one line:
+conditions unordered, duplicates coalesce, each bit means "occurred at
+least once since the last take," and clearing must never lose a concurrent
+raise. Much narrower and more predictable than a general semaphore
 abstraction.
 
 ## 5. CountedSignal: multiplicity without payloads
 
-Sometimes duplicates matter, but their individual payloads do not.
+**Design document: [`counted-signal.md`](counted-signal.md)** (the
+substantive design text has moved there; this entry is the summary).
 
-Examples include:
-
-- encoder pulses;
-- timer expirations;
-- dropped packet counts;
-- completed conversions;
-- retry requests;
-- accumulated wakeups.
-
-A counted signal could use a saturating atomic counter:
-
-```rust
-producer.increment();
-
-let count = consumer.take_count();
-```
-
-Its contract might be:
-
-- increments are bounded;
-- the consumer atomically takes the current count;
-- overflow saturates instead of wrapping;
-- saturation is observable;
-- ordering between individual increments is intentionally absent.
-
-This avoids allocating a queue entry for every identical event.
-
-A multi-counter form could provide a fixed array of event classes, but it
-should remain statically sized and avoid a general dynamic registry.
+For events whose duplicates matter but whose individual payloads do not —
+encoder pulses, timer expirations, drop counts. A saturating atomic
+counter: bounded increments, atomic take, saturation instead of wrap (and
+saturation observable), with ordering between increments intentionally
+absent. Avoids allocating a queue entry per identical event. A multi-counter
+form stays statically sized; a dynamic registry is pre-rejected.
 
 ## 6. PriorityBuf: fixed-priority lanes
 
@@ -439,121 +305,16 @@ aspirational labels such as `RealTime` or `NonBlocking`.
 
 Rust cannot verify a marker trait's execution-time claim.
 
-### LatestSource
+Traits ride with the primitive that demonstrates their need, so the
+sketches live in the owning documents; this table is the index:
 
-```rust
-pub trait LatestSource<T> {
-    fn try_take_latest(&mut self) -> Option<LatestItem<T>>;
-}
-```
-
-For freshness-oriented channels that report skipped publications.
-
-### ObservedSource
-
-```rust
-pub trait ObservedSource<T> {
-    type Observation;
-
-    fn try_pop_observed(
-        &mut self,
-    ) -> Option<(T, Self::Observation)>;
-}
-```
-
-For sources that provide ordering, gaps, filtering, or transport-loss
-metadata.
-
-A standardized observation might eventually contain:
-
-```rust
-pub struct DeliveryObservation {
-    pub ordinal: u32,
-    pub skipped_before: u32,
-    pub filtered_before: u32,
-}
-```
-
-This should be introduced only if multiple primitives can implement the
-vocabulary honestly.
-
-### LatestSink
-
-```rust
-pub trait LatestSink<T> {
-    fn publish_latest(&mut self, value: T) -> PublishReport;
-}
-```
-
-For producers that always publish but may replace an unread value.
-
-### SignalSource and SignalSink
-
-```rust
-pub trait SignalSink<S> {
-    fn raise(&self, signal: S);
-}
-
-pub trait SignalSource<S> {
-    fn take_pending(&self) -> S;
-}
-```
-
-These describe coalesced conditions rather than event streams.
-
-### ReservableSink
-
-Conceptually:
-
-```rust
-pub trait ReservableSink<T> {
-    type Grant<'a>
-    where
-        Self: 'a;
-
-    fn try_reserve(&mut self) -> Option<Self::Grant<'_>>;
-}
-```
-
-The grant gives exclusive access to statically owned storage and must be
-committed or automatically cancelled.
-
-The concrete grant API requires careful design to keep initialization and
-cancellation safe.
-
-### ClaimSource
-
-```rust
-pub trait ClaimSource<T> {
-    type Claim<'a>
-    where
-        Self: 'a;
-
-    fn try_claim(&mut self) -> Option<Self::Claim<'_>>;
-}
-```
-
-A claim borrows or owns a queued slot until it is released. This supports
-zero-copy consumers without exposing raw shared storage.
-
-### Sequenced and Timestamped
-
-```rust
-pub trait Sequenced {
-    type Sequence: Copy;
-
-    fn sequence(&self) -> Self::Sequence;
-}
-
-pub trait Timestamped {
-    type Timestamp: Copy;
-
-    fn timestamp(&self) -> Self::Timestamp;
-}
-```
-
-These let generic consumers inspect producer-owned identity without
-prescribing sequence width, time units, or a clock source.
+| Trait | Owning document | Note |
+|-------|-----------------|------|
+| `LatestSink`, `LatestSource` | [`latest-buf.md`](latest-buf.md) §12 | Producers that always publish but may replace an unread value; freshness sources that report skips |
+| `ObservedSource` | [`latest-buf.md`](latest-buf.md) §12.3 | Cross-primitive vocabulary, gated on two honest implementations. **Known divergence:** this taxonomy originally sketched a wider `DeliveryObservation` (`ordinal`, `skipped_before`, `filtered_before`) than the proposal's (`sequence`, `skipped_before`); the `filtered_before` field earns its place only if the filtering adapters (§8) ship. Reconcile at the two-implementations gate, not before |
+| `SignalSink`, `SignalSource` | [`event-flags.md`](event-flags.md) §2 | Coalesced conditions, not streams; to be proven against both `EventFlags` and `CountedSignal` before the vocabulary freezes |
+| `ReservableSink`, `ClaimSource` | [`slot-pool.md`](slot-pool.md) §2 | Grant/claim lifecycles for zero-copy transfer |
+| `Sequenced`, `Timestamped` | [`latest-buf.md`](latest-buf.md) §12.4 | Optional payload-metadata conveniences: generic consumers inspect producer-owned identity without the crate prescribing sequence width, time units, or a clock |
 
 ## What should remain outside ph-eventing
 
@@ -585,10 +346,12 @@ integration application or endpoint crate.
 
 The strongest near-term candidates appear to be:
 
-1. `LatestBuf` for latest-complete-value handoff.
-2. `BlockBuf` for IMU, ADC, audio, and DMA windows.
-3. `SlotPool` as the ownership foundation for large zero-copy transfers.
-4. `EventFlags` and `CountedSignal` for bounded ISR notification.
+1. [`LatestBuf`](latest-buf.md) for latest-complete-value handoff.
+2. [`BlockBuf`](block-buf.md) for IMU, ADC, audio, and DMA windows.
+3. [`SlotPool`](slot-pool.md) as the ownership foundation for large
+   zero-copy transfers.
+4. [`EventFlags`](event-flags.md) and [`CountedSignal`](counted-signal.md)
+   for bounded ISR notification.
 5. `LatestSource` and carefully scoped observational metadata.
 6. Count-based batching and decimation adapters.
 
