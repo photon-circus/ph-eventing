@@ -73,7 +73,7 @@ panics, or hides a cost.
 
 A straightforward, single-owner ring buffer for collecting values when you
 don't need cross-thread access. When full, new pushes silently overwrite the
-oldest entry.
+oldest entry. Requires only `T: Copy` — no `Default`.
 
 ```rust
 use ph_eventing::RingBuf;
@@ -189,6 +189,7 @@ them is a runtime step and always will be.
 - `get(i)` returns the `i`-th element where `0` is the oldest.
 - `latest()` returns the most recently pushed element.
 - `iter()` yields elements oldest → newest.
+- `new()` is a `const fn`; `N == 0` fails at compile time.
 
 ### SeqRing
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".
@@ -211,7 +212,7 @@ them is a runtime step and always will be.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
 
 ## Safety and Concurrency
-- `RingBuf` is a plain struct with no interior mutability — standard Rust borrow rules apply.
+- `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
 - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
@@ -292,7 +293,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 67 unit + 11 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 69 unit + 11 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

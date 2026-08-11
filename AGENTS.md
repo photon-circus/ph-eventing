@@ -150,7 +150,7 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
-| `RingBuf<T: Copy + Default, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
+| `RingBuf<T: Copy, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
 | `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
 | `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
 | `seq_ring::Consumer<'a, T, N>` | SeqRing read handle with multiple polling modes |
@@ -253,6 +253,13 @@ Invariants that hold across the whole type:
   the whole skipped span. Breaking it makes the drop counter silently wrong,
   which no type check will catch.
 
+All three buffers store slots as `MaybeUninit<T>` and require only `T: Copy`.
+`RingBuf` used to require `T: Default` because it initialised a real `[T; N]`;
+it no longer does. The trade is that `RingBuf` is no longer free of `unsafe` —
+one invariant now carries every read: **the `len` slots ending at `head` have
+all been written by `push`**. Every read goes through the private `index`,
+which addresses only that range, and every public accessor checks `len` first.
+A change that lets `len` outrun the number of writes is UB, not a logic bug.
 `RingBuf` requires `T: Default` while the other two do not: it initialises a
 real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
 front. On the non-Loom path `SeqRing::new` / `EventBuf::new` are `const fn` so
@@ -767,6 +774,9 @@ cargo test
 - `iter_oldest_to_newest` — Iterator ordering
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
+- `works_without_default_bound` — `T: Copy` only, no `Default`
+- `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
+- `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
 - `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
@@ -829,7 +839,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 67 unit tests + 11 doctests, plus 2 `compile_fail` doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail` doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions
 
@@ -844,8 +854,13 @@ cargo test
 ### Safety Requirements
 
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
-- `T: Default` additionally required by `RingBuf` for array initialisation
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
+- Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- No panics in hot paths. `RingBuf::new` rejects `N == 0` with a **const**
+  assertion, so a zero-capacity ring fails the build rather than panicking —
+  which also means no test can cover the rejection, and the const assertion is
+  the only thing enforcing it
+- No panics in hot paths; only assertions are in `::new()` for `N > 0`
 - Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
 - No panics in hot paths; `N > 0` is a const assertion on the host `SeqRing` /
   `EventBuf` `new()` path (runtime assert under Loom); `RingBuf` still asserts at runtime
@@ -879,7 +894,7 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 
 ### Key Invariants to Preserve
 
-- `RingBuf` is fully safe — no unsafe code, no interior mutability
+- `RingBuf` has no atomics and no interior mutability; its `unsafe` is limited to reading `MaybeUninit` slots that `push` initialised
 - `RingBuf`: Ring capacity `N` must be > 0
 - `RingBuf.len` is always ≤ `N`; `head` is always < `N`
 - `SeqRing`: Sequence 0 is reserved for "empty" state
