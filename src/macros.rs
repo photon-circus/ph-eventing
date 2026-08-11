@@ -72,10 +72,13 @@ macro_rules! static_spsc {
         $vis:vis mod $name:ident : EventBuf<$t:ty, $n:tt>;
     ) => {
         $(#[$attr])*
-        // The expansion cannot know whether the caller's context makes these
-        // reachable; the crate denies `unreachable_pub` for its own code, which
-        // should not leak into generated code.
-        #[allow(unreachable_pub)]
+        // A macro cannot know its caller's context, so none of these lints can
+        // be judged from inside the expansion: whether the module is reachable,
+        // and whether a caller uses every item it generates. `dead_code` fires
+        // in the crate's own tests, which declare modules to exercise one item
+        // each. Allows are scoped to generated code only, so the lints keep
+        // biting for hand-written code.
+        #[allow(unreachable_pub, dead_code)]
         $vis mod $name {
             // Needed when `$t` names a type from the caller's scope; unused
             // when it is a primitive, which is the common case.
@@ -119,10 +122,13 @@ macro_rules! static_spsc {
         $vis:vis mod $name:ident : SeqRing<$t:ty, $n:tt>;
     ) => {
         $(#[$attr])*
-        // The expansion cannot know whether the caller's context makes these
-        // reachable; the crate denies `unreachable_pub` for its own code, which
-        // should not leak into generated code.
-        #[allow(unreachable_pub)]
+        // A macro cannot know its caller's context, so none of these lints can
+        // be judged from inside the expansion: whether the module is reachable,
+        // and whether a caller uses every item it generates. `dead_code` fires
+        // in the crate's own tests, which declare modules to exercise one item
+        // each. Allows are scoped to generated code only, so the lints keep
+        // biting for hand-written code.
+        #[allow(unreachable_pub, dead_code)]
         $vis mod $name {
             // Needed when `$t` names a type from the caller's scope; unused
             // when it is a primitive, which is the common case.
