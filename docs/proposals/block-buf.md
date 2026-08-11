@@ -303,8 +303,11 @@ no block-specific evidence; Loom remains required for the selected transport.
    at promotion via the deliberate, reviewed `--bless` (mechanics rule 8);
    the pinned instruction regions stay committed. One documentation
    obligation rides to promotion with them: the **double-copy hazard**
-   guidance for DMA integrations — make the builder the DMA target, or
-   publish from task context — stated in the block-payload docs, not left
-   for integrators to discover. **Landed:** the `src/block.rs` module
+   guidance for DMA integrations — the builder cannot be the DMA target
+   (its storage is deliberately private, with no address or writable-slice
+   API), so the choices are budgeting both copies or publishing from task
+   context, with a direct-to-granted-slot fill API routed to decision S's
+   registered reopening condition — stated in the block-payload docs, not
+   left for integrators to discover. **Landed:** the `src/block.rs` module
    docs now carry all four bound disclosures (per-shape RAM, small-`N`
    inversion, rejection cost, double-copy DMA guidance).

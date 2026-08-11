@@ -30,7 +30,9 @@ All notable changes to this project will be documented in this file.
   foundation is **Copy composition** for the supported shapes — no library-wide threshold is
   claimed; the per-shape measured rows are the budget statement, the nine-shape matrix rides
   into the release baselines at promotion, and the docs owe integrators the double-copy
-  hazard guidance (make the builder the DMA target, or publish from task context). **S**:
+  hazard guidance (the builder's storage is deliberately private — budget both copies, or
+  publish from task context; direct-to-granted-slot filling is decision S's registered
+  reopening condition). **S**:
   SlotPool is **deferred**, not rejected — full evaluation evidence banked on its branch,
   draft PR closed, and an adopter-gated reopening trigger registered (a measured budget
   breach, a direct-to-granted-slot requirement, or a standalone zero-copy adopter). Every
