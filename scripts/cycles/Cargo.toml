@@ -15,6 +15,11 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 cortex-m-semihosting = "0.5"
 
+[features]
+# Keep the larger LatestBuf payload matrix out of the standing probe so its
+# stack use and marker set remain independent.
+latest-matrix = []
+
 [profile.release]
 opt-level = "z"
 lto = true

@@ -5,12 +5,19 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 ### Added
 - Evaluable `LatestBuf<T>` prototype: a three-slot, freshness-first SPSC
-  snapshot channel with bounded single-swap publish/take operations,
+  snapshot channel with bounded single-swap publication and at-most-one-swap
+  take operations,
   replacement and skipped-generation evidence, and channel-resident endpoint
   state so handle reacquisition continues rather than restarting. Deferred
   assumptions are exact accounting within one non-zero `u32` wrap (approximate
   beyond it), no `Source<T>` implementation, and generic payloads supporting
   samples or complete blocks.
+- LatestBuf target/payload measurement mode for all 11 embedded targets plus
+  pinned QEMU instruction regions. The measured A.1 Acquire-load fast path
+  removes the atomic RMW from empty polls for +6-16 bytes of `take_latest`
+  flash, including +8 bytes on ESP32-S2. Private role indices now have an
+  all-zero encoding, moving const-initialized channels from `.data` to `.bss`
+  and removing 48-420 bytes of flash/startup copy in the measured payloads.
 
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was

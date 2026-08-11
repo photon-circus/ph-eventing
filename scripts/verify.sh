@@ -18,6 +18,7 @@
 #   ./scripts/verify.sh miri
 #   ./scripts/verify.sh loom
 #   ./scripts/verify.sh cycles
+#   ./scripts/verify.sh cycles latest-matrix
 #   ./scripts/verify.sh shell      # interactive shell in the image
 #
 # Requires Docker. Everything else is inside the image.
@@ -73,7 +74,10 @@ case "${1:-all}" in
     ci)     run sh scripts/ci.sh ;;
     miri)   run sh scripts/miri.sh ;;
     loom)   run sh scripts/loom.sh ;;
-    cycles) run sh scripts/cycles.sh ;;
+    cycles)
+        shift
+        run sh scripts/cycles.sh "$@"
+        ;;
     all)
         # Version stamp first, so any pasted output carries its environment.
         run sh -c 'rustc --version; rustc "+$MIRI_TOOLCHAIN" --version; qemu-system-arm --version | head -1'

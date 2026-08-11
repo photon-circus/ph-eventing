@@ -28,6 +28,7 @@
 # Usage:
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
+#   ./scripts/codesize.sh latest-matrix    # LatestBuf target/payload matrix
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
@@ -46,9 +47,14 @@ export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
 BLESS=0
+LATEST_MATRIX=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
+        latest-matrix)
+            PROBE_FEATURES="latest-matrix"
+            LATEST_MATRIX=1
+            ;;
         --bless) BLESS=1 ;;
         # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
         *) printf 'unknown argument: %s
@@ -111,14 +117,28 @@ fn_size() {
         END { if (found) print total }'
 }
 
+section_size() {
+    "$SIZE" -A "$1" 2>/dev/null | awk -v s="$2" '
+        $1 == s { total += $2; found = 1 }
+        END { if (found) print total }'
+}
+
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
-printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+if [ "$LATEST_MATRIX" = "1" ]; then
+    printf '%-30s %-10s %10s %10s %10s %6s\n' \
+        TARGET PAYLOAD publish_B take_B channel_B init
+    printf '%-30s %-10s %10s %10s %10s %6s\n' \
+        '------------------------------' '----------' '---------' '------' '---------' '----'
+else
+    printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
+    printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+fi
 
 skipped=0
 failed=0
+matrix_missing=0
 
 for entry in $TARGETS; do
     target="$(printf '%s' "$entry" | cut -d'|' -f1)"
@@ -160,6 +180,54 @@ for entry in $TARGETS; do
     fi
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
+
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        for shape in u32 w16 block128; do
+            case "$shape" in
+                u32)
+                    publish_fn=latest_u32_publish
+                    take_fn=latest_u32_take
+                    static_name=LATEST_U32_BUF
+                    ;;
+                w16)
+                    publish_fn=latest_w16_publish
+                    take_fn=latest_w16_take
+                    static_name=LATEST_W16_BUF
+                    ;;
+                block128)
+                    publish_fn=latest_block_publish
+                    take_fn=latest_block_take
+                    static_name=LATEST_BLOCK_BUF
+                    ;;
+            esac
+            publish="$(fn_size "$ar" "$publish_fn")"
+            take="$(fn_size "$ar" "$take_fn")"
+            channel_data="$(section_size "$ar" ".data.$static_name")"
+            channel_bss="$(section_size "$ar" ".bss.$static_name")"
+            if [ -n "$channel_data" ]; then
+                channel="$channel_data"
+                init=data
+            else
+                channel="$channel_bss"
+                init=bss
+            fi
+            [ -z "$publish" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$take" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$channel" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-10s %10s %10s %10s %6s\n' \
+                "$target" "$shape" "${publish:--}" "${take:--}" \
+                "${channel:--}" "${init:--}"
+        done
+
+        producer_role="$(fn_size "$ar" latest_producer_reacquire)"
+        consumer_role="$(fn_size "$ar" latest_consumer_reacquire)"
+        [ -z "$producer_role" ] && matrix_missing=$((matrix_missing + 1))
+        [ -z "$consumer_role" ] && matrix_missing=$((matrix_missing + 1))
+        printf '%-30s %-10s %10s %10s %10s %6s\n' \
+            "$target" roles "${producer_role:--}" "${consumer_role:--}" '-' '-'
+        continue
+    fi
+
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
@@ -182,6 +250,23 @@ if [ "$skipped" -gt 0 ]; then
     printf 'per-architecture differences this script exists to find.\n\n'
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
+
+if [ "$LATEST_MATRIX" = "1" ]; then
+    if [ "$matrix_missing" -gt 0 ]; then
+        printf '%s latest-matrix section(s) had no code-size measurement.\n' \
+            "$matrix_missing" >&2
+        exit 1
+    fi
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'publish_B and take_B are emitted flash for one operation monomorph.\n'
+    printf 'The roles row reports producer and consumer claim+release code size.\n'
+    printf 'channel_B is target-object RAM for three slots plus channel state.\n'
+    printf 'init reports whether that const-initialized image is .data or .bss;\n'
+    printf '.data also occupies flash and is copied during startup.\n'
+    printf 'Run scripts/cycles.sh latest-matrix for state-dependent paths.\n'
+    exit 0
+fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Baseline gate

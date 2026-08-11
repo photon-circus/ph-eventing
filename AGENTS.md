@@ -26,10 +26,11 @@ prose when it disagrees.
 
 **ph-eventing** provides stack-allocated ring buffers for no-std embedded targets.
 
-It ships three primitives:
+It ships four primitives:
 - **`RingBuf<T, N>`** — a single-owner ring buffer (no atomics, `&mut` access). Ideal for local event logs, sample windows, and single-context collection.
 - **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
+- **`LatestBuf<T>`** — a freshness-first SPSC snapshot channel that retains one newest unread publication and reports replacement/skipped evidence.
 
 **Key characteristics:**
 - Zero runtime dependencies (`portable-atomic` is optional; `loom` is a dev-dependency gated on `--cfg loom`). Verify with `cargo tree` — it must print the crate alone.
@@ -38,6 +39,7 @@ It ships three primitives:
 - `SeqRing`: producer never blocks; consumer drops old events when lagging
 - `SeqRing`: sequence-based tracking; a raced read is detected and discarded rather than returned
 - `EventBuf`: producer gets explicit backpressure; no data silently lost
+- `LatestBuf`: producer never waits; consumer receives only the newest complete value with observable loss
 - Common `Sink`/`Source`/`Link` traits unify producers and consumers across buffer types
 - `forward()` utility bridges any `Source` into any `Sink`
 
@@ -138,6 +140,7 @@ ph-eventing/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
+    ├── latest_buf.rs       # Three-slot freshness-first SPSC snapshot channel
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
     ├── sync.rs             # Atomic/cell shim — swaps in Loom's primitives under --cfg loom
@@ -157,6 +160,7 @@ ph-eventing/
 | `seq_ring::Consumer<'a, T, N>` | SeqRing read handle with multiple polling modes |
 | `PollStats` | Statistics returned from SeqRing poll operations |
 | `EventBuf<T: Copy, N>` | Bounded SPSC ring with backpressure (push returns `Result`) |
+| `LatestBuf<T: Copy>` | Three-slot SPSC snapshot channel with observable replacement and gaps |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
@@ -183,6 +187,26 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - The Release/Acquire on the cursor stores/loads act as the publication fence for slot data.
 - Producer and consumer never touch the same slot, so the slots themselves are race-free; only the cursors are shared.
 - `len()` is the one observer reading both cursors. It brackets its `head` load between two `tail` samples (Acquire load, then `fence(Acquire)`), retries a bounded number of times, then falls back to a clamped estimate so it is always wait-free.
+
+### Memory Ordering Strategy (LatestBuf)
+
+`LatestBuf` transfers three exclusive slot roles rather than validating a racy
+copy after the fact:
+
+- producer and consumer each own one private slot; the encoded exchange atomic
+  owns the third;
+- both endpoint swaps are `AcqRel`: Release relinquishes the offered slot and
+  Acquire makes the claimed slot's payload/ownership visible;
+- an empty consumer poll first Acquire-loads the ready bit. A false load can
+  linearize before a concurrent publication and returns without touching any
+  slot; a true load is only a hint and the `AcqRel` swap remains the ownership
+  transfer;
+- handle drop Release-clears the role's taken flag, and the next successful
+  `AcqRel` claim makes channel-resident continuation state visible; and
+- producer/consumer slot indices are XOR-encoded only in their private role
+  cells so the initial representation is all zero and static channels land in
+  `.bss`. Decode before slot access; encode only when saving a newly claimed
+  role. Encoded role values must never be written to the shared exchange.
 
 #### Why `EventBuf::len` cannot exceed capacity on a successful snapshot
 
@@ -628,6 +652,7 @@ Re-bless deliberately, never reflexively — the diff is the review:
 ```bash
 ./scripts/codesize.sh              # baseline, 8 upstream targets
 ./scripts/codesize.sh split        # include try_split, on branches that have it
+./scripts/codesize.sh latest-matrix # LatestBuf operations and payload layouts
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
 ```
 
@@ -673,6 +698,19 @@ Cross-environment diffs of ±1 are noise; compare inside the image.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
+
+LatestBuf uses a separate payload matrix (`./scripts/verify.sh cycles
+latest-matrix`) so the larger stack shapes do not disturb the standing probe:
+
+| payload | publish first/replacement | take pending/empty |
+|---|---:|---:|
+| `u32` | 41 / 40 | 46 / 15 |
+| 16 bytes | 70 / 70 | 51 / 17 |
+| 128 bytes | 482 / 483 | 185 / 18 |
+
+Role drop/reacquisition costs 5/15 instructions for the producer and 5/14 for
+the consumer. The target/code-size/RAM and A.1 comparison record is
+`docs/proposals/latest-buf-measurements.md`.
 
 Two results carry the argument:
 
@@ -948,6 +986,9 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `SeqRing`: Producer and Consumer handles are `Send + !Sync`
 - `SeqRing`: the seqlock data race is **known and documented**, not an oversight. Do not "fix" it by weakening the sequence guards, and do not silence it by disabling Miri's race detector globally — the split-pass structure in `scripts/miri.sh` exists so everything else stays fully checked
 - `EventBuf`: race-free by construction — producer and consumer never touch the same slot. If a change makes them share one, that is a design break, not a tuning decision
+- `LatestBuf`: the producer, consumer, and exchange state always name three distinct decoded slots; only an `AcqRel` exchange transfers ownership
+- `LatestBuf`: a false ready-bit load performs no role-state or slot access; a true load never replaces the ownership-transferring swap
+- `LatestBuf`: private role slot indices are XOR-encoded at rest so `new()` remains an all-zero `.bss` image; decode before indexing and never put an encoded index in `exchange`
 
 ### Common Tasks
 

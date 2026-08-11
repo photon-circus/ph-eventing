@@ -3,8 +3,9 @@
 - **Purpose:** implementation-independent comparison record for issue #27.
 - **Inputs:** [`latest-buf.md`](latest-buf.md),
   [`latest-buf-contract.md`](latest-buf-contract.md), and the BlockBuf candidate.
-- **Status:** evaluation scaffold; it does not select an implementation before
-  the evidence below exists.
+- **Status:** live evaluation record. Soundness, target/payload cost, A.1, and
+  channel-state layout evidence now exist; D3 and maintainer closure remain.
+- **Measurements:** [`latest-buf-measurements.md`](latest-buf-measurements.md).
 
 ## 1. Decisions sufficient for an evaluable prototype
 
@@ -17,6 +18,7 @@ choices have received a permanent API decision.
 | D2, `Source<T>` | No `Source<T>` implementation. Provide `LatestSource<T>` so replacement evidence remains structural. | A design that preserves loss evidence through generic `Source`/`forward`; documentation alone is insufficient. |
 | D3, sample or block | Implement generic `LatestBuf<T>` first. A complete block is a `T`; the BlockBuf candidate demonstrates `LatestBuf<Block<T, N>>` for latest and `EventBuf<Block<T, N>, Q>` for queued delivery. | A separate block transport must enforce a guarantee composition cannot, such as direct-to-granted-slot filling with a measured copy/RAM win. |
 | A.3, role continuation | Compare channel-resident role state with handle-resident state persisted on `Drop`. Keep H2/H4 in both candidates. | Narrow H2 only if both candidates fail the evidence bar; reacquisition must not silently restart. |
+| A.1, empty poll | Acquire-load the ready bit and return when false; a true load still proceeds through the `AcqRel` ownership swap. | Revert to the unconditional swap only if a target regresses beyond the code-size tolerance or the Loom equivalence model fails. Neither occurred in the recorded matrix. |
 
 The BlockBuf branch also makes `DropBlockBuf` a caller policy over the block
 returned by `EventBuf::push`, not a third synchronization primitive. A named
@@ -91,13 +93,14 @@ gap accounting resumes, and tracked cells report no overlapping ownership.
 Model producer and consumer roles separately so a failure identifies the
 broken handoff.
 
-### L4 — optional empty-poll fast path
+### L4 — empty-poll fast path
 
-If A.1 is implemented, interleave its ready-bit load with publication before,
-during, and after the load. A false load returns without touching a slot and
-can linearize before a concurrent publication. A true load must still use the
-normal `AcqRel` exchange; a pre-load is not an ownership transfer. Compare
-this model with the unconditional-swap reference before measuring it.
+Interleave its ready-bit load with publication before, during, and after the
+load. A false load returns without touching a slot and can linearize before a
+concurrent publication. A true load must still use the normal `AcqRel`
+exchange; a pre-load is not an ownership transfer. The implemented model also
+asserts that a publication concurrent with a false load remains pending for
+the next poll.
 
 ## 4. Ordering mutation matrix
 
@@ -161,13 +164,23 @@ Measure these regions separately:
 - channel-state and persist-on-drop steady-state operations;
 - handle drop and reacquisition for both candidates;
 - `u32`, 16-byte, and representative block payloads; and
-- unconditional empty swap versus A.1, if retained.
+- unconditional empty swap versus the A.1 fast path (completed in the linked
+  measurement record).
 
 Publication and take may scale with `size_of::<T>()`, but not with lag,
 occupancy, or history. Report handle size, channel size, and three-slot payload
 RAM explicitly. Run code size across the complete target matrix, with
 thumbv6m and ESP32-S2 treated as the kill-criterion rows because every RMW may
 become an interrupt-disabled critical section.
+
+The completed record is
+[`latest-buf-measurements.md`](latest-buf-measurements.md): all eleven targets,
+three payload shapes, pinned Cortex-M3 instruction regions, both A.1 variants,
+role drop/reacquisition, and target-object channel layout. A.1 selects the
+Acquire-load fast path. Private role indices are XOR-encoded so the all-zero
+initial channel lands in `.bss`; the small bounded operation cost removes
+48-420 bytes of payload-proportional flash and startup copy in the measured
+shapes.
 
 ## 7. Acceptance record
 
@@ -176,14 +189,14 @@ An implementation is ready to compare only when its PR can fill every cell:
 | Evidence | Channel state | Persist on drop |
 |---|---|---|
 | Unit semantics and wrap seam | pass: 9 focused tests | pass: 8 focused tests on comparison branch |
-| L1-L4 Loom models | partial: payload ownership plus producer and consumer L3 pass; L2 and optional L4 remain | partial: six models pass, but its joined L3 does not isolate the taken-flag handoff |
+| L1-L4 Loom models | pass: five focused models cover payload/slot reuse, both cross-context roles, and A.1 publication interleavings | partial: six models pass, but its joined L3 does not isolate the taken-flag handoff |
 | All applicable ordering mutations fail | pass: all six exchange and four role-handoff weakenings detected | partial: Drop `Release -> Relaxed` and claim `AcqRel -> Release` fail Loom; exchange matrix remains |
 | Miri race detector on | pass: 9 focused tests, including threaded patterned payload | pass: 8 focused tests on comparison branch |
 | Native patterned-payload stress | pass | not implemented |
 | Embedded compile matrix | pass: thumbv6m portable-atomic, thumbv7em, riscv32imac | pass: same library paths, candidate-specific rerun pending |
-| Full code-size matrix | pending | pending |
-| Cycle regions above | pending | pending |
-| Handle/channel/RAM sizes | pending | pending |
+| Full code-size matrix | pass: 11 targets × 3 payloads, including thumbv6m and ESP32-S2 | pending |
+| Cycle regions above | pass: first/replacement publish, empty/pending take, and both role handoffs in pinned QEMU | pending |
+| Handle/channel/RAM sizes | pass: 4-byte handles on shipped targets; 48/84/420-byte channels in `.bss` | pending |
 
 Correctness removes a candidate; measurements select between candidates that
 remain. Ergonomics is evaluated only after those results.

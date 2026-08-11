@@ -118,6 +118,45 @@ fn latest_buf_reused_slot_keeps_exclusive_ownership() {
     });
 }
 
+/// The empty-poll Acquire load either observes a pending publication and
+/// proceeds through the normal ownership swap, or returns before a concurrent
+/// publication. In the latter case that publication must remain pending for
+/// the next poll rather than being lost.
+#[test]
+fn latest_buf_empty_fast_path_preserves_concurrent_publication() {
+    loom::model(|| {
+        let channel = Arc::new(LatestBuf::<u32>::new());
+
+        let producer_channel = Arc::clone(&channel);
+        let producer = thread::spawn(move || {
+            let producer = producer_channel.try_producer().unwrap();
+            producer.publish(7)
+        });
+
+        let consumer_channel = Arc::clone(&channel);
+        let consumer = thread::spawn(move || {
+            let consumer = consumer_channel.try_consumer().unwrap();
+            consumer.take_latest()
+        });
+
+        assert_eq!(producer.join().unwrap().generation, 1);
+        let first = consumer.join().unwrap();
+
+        let consumer = channel.try_consumer().unwrap();
+        let second = consumer.take_latest();
+        match first {
+            Some(item) => {
+                assert_eq!((item.generation, item.value), (1, 7));
+                assert_eq!(second, None);
+            }
+            None => {
+                let item = second.expect("publication remains pending after an empty poll");
+                assert_eq!((item.generation, item.value), (1, 7));
+            }
+        }
+    });
+}
+
 /// Channel-resident producer state is published by handle drop and acquired
 /// by the next handle, so reacquisition in another context resumes generation.
 #[test]

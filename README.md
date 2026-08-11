@@ -119,7 +119,11 @@ replaced. Taking returns the newest complete value with generation and skipped
 counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap;
 beyond a full cycle the wrapped `u32` count is only an approximation. The
 consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
-is not silently discarded. `T` may be one sample or a complete block.
+is not silently discarded. `T` may be one sample or a complete block. Empty
+polls use an Acquire load rather than an atomic RMW; pending polls transfer
+ownership with one `AcqRel` swap. The all-zero initial representation keeps a
+const-initialized channel in `.bss` with no payload-proportional flash or
+startup-copy cost.
 
 ```rust
 use ph_eventing::LatestBuf;

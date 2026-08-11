@@ -15,6 +15,12 @@
 //! stateless and dropping/reacquiring one continues its slot ownership,
 //! generation sequence, and skipped accounting.
 //!
+//! An empty consumer poll first Acquire-loads the ready bit and returns without
+//! an atomic read-modify-write. A pending poll still performs the same `AcqRel`
+//! swap that transfers slot ownership. The private initial role indices are
+//! encoded as zero so a const-initialized channel lands in `.bss` rather than
+//! carrying its three payload slots in the flash-backed `.data` image.
+//!
 //! # Deferred-policy assumptions
 //!
 //! This evaluable prototype makes the narrow choices requested by issue #27:
@@ -49,6 +55,11 @@ use core::mem::MaybeUninit;
 
 const SLOT_MASK: u32 = 0b11;
 const READY_BIT: u32 = 0b100;
+// Encode the initially owned slots as zero so a const-initialized channel is
+// an all-zero image and lands in `.bss`. XOR is its own inverse, and these
+// role-owned fields never enter the shared exchange state.
+const PRODUCER_SLOT_XOR: u32 = 1;
+const CONSUMER_SLOT_XOR: u32 = 2;
 
 #[derive(Clone, Copy)]
 struct Entry<T: Copy> {
@@ -58,13 +69,13 @@ struct Entry<T: Copy> {
 
 #[derive(Clone, Copy)]
 struct ProducerState {
-    back: u32,
+    back_encoded: u32,
     next_generation: u32,
 }
 
 #[derive(Clone, Copy)]
 struct ConsumerState {
-    front: u32,
+    front_encoded: u32,
     last_generation: u32,
 }
 
@@ -109,7 +120,7 @@ pub struct LatestItem<T> {
 ///
 /// `LatestBuf<T>` has fixed storage for three `T` values and never allocates.
 /// Publishing always succeeds and takes one atomic exchange. Taking is also
-/// bounded to one exchange and at most one payload copy.
+/// bounded to one load, at most one exchange, and at most one payload copy.
 pub struct LatestBuf<T: Copy> {
     exchange: AtomicU32,
     slots: [TrackedCell<MaybeUninit<Entry<T>>>; 3],
@@ -138,11 +149,11 @@ impl<T: Copy> LatestBuf<T> {
             exchange: AtomicU32::new(0),
             slots: slot_array(),
             producer_state: TrackedCell::new(ProducerState {
-                back: 1,
+                back_encoded: 0,
                 next_generation: 0,
             }),
             consumer_state: TrackedCell::new(ConsumerState {
-                front: 2,
+                front_encoded: 0,
                 last_generation: 0,
             }),
             producer_taken: AtomicBool::new(false),
@@ -157,11 +168,11 @@ impl<T: Copy> LatestBuf<T> {
             exchange: AtomicU32::new(0),
             slots: slot_array(),
             producer_state: TrackedCell::new(ProducerState {
-                back: 1,
+                back_encoded: 0,
                 next_generation: 0,
             }),
             consumer_state: TrackedCell::new(ConsumerState {
-                front: 2,
+                front_encoded: 0,
                 last_generation: 0,
             }),
             producer_taken: AtomicBool::new(false),
@@ -217,6 +228,26 @@ impl<T: Copy> LatestBuf<T> {
     }
 
     #[inline(always)]
+    const fn producer_slot(encoded: u32) -> u32 {
+        encoded ^ PRODUCER_SLOT_XOR
+    }
+
+    #[inline(always)]
+    const fn encode_producer_slot(slot: u32) -> u32 {
+        slot ^ PRODUCER_SLOT_XOR
+    }
+
+    #[inline(always)]
+    const fn consumer_slot(encoded: u32) -> u32 {
+        encoded ^ CONSUMER_SLOT_XOR
+    }
+
+    #[inline(always)]
+    const fn encode_consumer_slot(slot: u32) -> u32 {
+        slot ^ CONSUMER_SLOT_XOR
+    }
+
+    #[inline(always)]
     const fn next_generation(current: u32) -> u32 {
         match current.wrapping_add(1) {
             0 => 1,
@@ -264,7 +295,10 @@ impl<T: Copy> Producer<'_, T> {
             let state = &mut *state;
             let generation = LatestBuf::<T>::next_generation(state.next_generation);
             state.next_generation = generation;
-            (state.back, generation)
+            (
+                LatestBuf::<T>::producer_slot(state.back_encoded),
+                generation,
+            )
         });
 
         // SAFETY: `back` is exclusively producer-owned. The producer does not
@@ -280,9 +314,9 @@ impl<T: Copy> Producer<'_, T> {
 
         // SAFETY: the exchange transferred its previous slot exclusively to
         // the producer. No other producer handle exists.
-        self.buf
-            .producer_state
-            .with_mut(|state| unsafe { (*state).back = previous & SLOT_MASK });
+        self.buf.producer_state.with_mut(|state| unsafe {
+            (*state).back_encoded = LatestBuf::<T>::encode_producer_slot(previous & SLOT_MASK);
+        });
 
         PublishReport {
             generation,
@@ -313,17 +347,26 @@ impl<T: Copy> Consumer<'_, T> {
     /// Claim and copy the latest unread publication.
     ///
     /// Returns `None` when no publication is pending. The operation performs
-    /// one atomic swap unconditionally; this keeps the ownership protocol
-    /// simple while the optional empty-poll load fast path remains under
-    /// evaluation.
+    /// an `Acquire` load first, so an empty poll returns without an atomic
+    /// read-modify-write. A pending publication is still claimed with the
+    /// ownership-transferring `AcqRel` swap.
     #[inline]
     pub fn take_latest(&self) -> Option<LatestItem<T>> {
+        // A false load can linearize before a concurrent publication: the
+        // publication remains pending for the next poll. This path transfers
+        // no slot and therefore must not access or update either owned role.
+        // A true load is only a hint; the AcqRel swap below remains the actual
+        // ownership transfer and may claim a newer replacement publication.
+        if !LatestBuf::<T>::ready(self.buf.exchange.load(Ordering::Acquire)) {
+            return None;
+        }
+
         // SAFETY: consumer_taken grants this handle exclusive role-state
         // access, ordered across reacquisition by Release/AcqRel.
         let front = self
             .buf
             .consumer_state
-            .with(|state| unsafe { (*state).front });
+            .with(|state| unsafe { LatestBuf::<T>::consumer_slot((*state).front_encoded) });
 
         let previous = self
             .buf
@@ -334,9 +377,9 @@ impl<T: Copy> Consumer<'_, T> {
         // SAFETY: the exchange transferred `claimed` exclusively to this
         // consumer; preserving it even on the empty path maintains the three
         // disjoint ownership roles.
-        self.buf
-            .consumer_state
-            .with_mut(|state| unsafe { (*state).front = claimed });
+        self.buf.consumer_state.with_mut(|state| unsafe {
+            (*state).front_encoded = LatestBuf::<T>::encode_consumer_slot(claimed);
+        });
 
         if !LatestBuf::<T>::ready(previous) {
             return None;
