@@ -77,11 +77,14 @@ and all clauses below are stated against the sequence of those instants.
   skipped })`, `pending` becomes `None`, and `last_taken` becomes `g`.
 - **C2.** If `pending = None` at the linearization point, `take_latest`
   returns `None` and changes no observable state.
-- **C3.** `skipped` equals the wrap-aware count (per G3) of generations
-  assigned after `last_taken` and before `g` — that is, publications that
-  were displaced before this consumer observed them. Taking the immediate
+- **C3.** Within one wrap span (the same scope as C5 and O2 — see D1),
+  `skipped` equals the wrap-aware count (per G3) of generations assigned
+  after `last_taken` and before `g` — that is, publications that were
+  displaced before this consumer observed them. Taking the immediate
   successor of `last_taken` yields `skipped = 0`; last-taken 101 and taken
-  104 yields `skipped = 2`.
+  104 yields `skipped = 2`. Beyond one wrap span the exact count is
+  inherently unrecoverable; closing D1 defines what `skipped` reports
+  there.
 - **C4.** Each publication is observed **at most once**. A taken generation
   is never returned again.
 - **C5.** Observed generations are strictly increasing in wrap-aware order
@@ -153,7 +156,8 @@ the measured implementation, per environment.
   dropped and its role reacquired, the channel's observable behaviour is
   indistinguishable from the original handle having continued. The
   generation sequence resumes (G1 holds across the drop), skipped
-  accounting stays exact (C3), and every other clause keeps holding. A
+  accounting continues to satisfy C3 within C3's scope, and every other
+  clause keeps holding. A
   design that cannot honour this must not offer reacquisition for that
   role (narrowing H2 explicitly rather than weakening H4). *(How
   continuation state survives the drop is an implementation concern,
@@ -184,9 +188,10 @@ be closed before implementation (step 2 of the adoption sequence) begins.
   (a) document the maximum reliable gap and leave larger gaps approximate;
   (b) return an explicit "unknown/wrapped" gap state;
   (c) point callers at a wider producer-assigned sequence in the payload.
-  O2 and C5 are scoped "within one wrap span" until this is decided, and
-  closing D1 must define both the gap reporting and the ordering behaviour
-  beyond that span.
+  C3, C5, and O2 are all scoped "within one wrap span" until this is
+  decided; closing D1 must define, for the beyond-span case, the gap
+  reporting (C3), the ordering behaviour (C5), and the accounting (O2) —
+  the whole wrap family closes together.
 - **D2. `Source<T>` policy.** Whether the consumer implements the existing
   `Source<T>` (proposal §13). The contract default is the proposal's option
   1 (no impl; `LatestSource` only) — the safest position given the

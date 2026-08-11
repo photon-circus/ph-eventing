@@ -1120,7 +1120,8 @@ restarts.
 
 **Validation required before adoption:** drop-and-reacquire continuation
 tests — the generation sequence resumes across the drop, skipped accounting
-stays exact, no slot is ever owned by two roles — plus a Loom model (drop in
+keeps satisfying contract C3 within its wrap-span scope, no slot is ever
+owned by two roles — plus a Loom model (drop in
 one context, reacquire in another) and race-detector-on Miri coverage of the
 handoff. Whatever mechanism is chosen, the handoff is cross-context by
 nature: state written at drop must be visible to the reacquiring context,
