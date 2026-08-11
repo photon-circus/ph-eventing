@@ -28,12 +28,18 @@
 //! skipped counts are exact while fewer than `u32::MAX` non-zero
 //! generations separate successful takes, and beyond that full wrap span
 //! the `u32` result is a documented modular approximation —
-//! [`LatestItem::skipped`] carries the full disclosure. The remaining
-//! narrow choices requested by issue #27 are still prototype defaults:
+//! [`LatestItem::skipped`] carries the full disclosure.
 //!
-//! - [`Consumer`] deliberately does not implement [`crate::Source`], because
-//!   doing so would discard replacement evidence; use [`crate::LatestSource`]
-//!   (decision D2, open);
+//! Decision D2 (`Source<T>` policy) is **closed**: [`Consumer`] does not
+//! implement [`crate::Source`], because `try_pop` cannot report the
+//! displacement that is this channel's *designed* overload behaviour —
+//! [`crate::LatestSource`] is the consumer's designed contract surface
+//! (contract §9, non-promise X7), and the absent impl is pinned by a
+//! `compile_fail` doctest on [`Consumer`].
+//!
+//! The remaining narrow choice requested by issue #27 is still a
+//! prototype default:
+//!
 //! - `T` is generic, so it can be one sample or a caller-defined complete
 //!   block without committing the first-deliverable policy (decision D3,
 //!   open).
@@ -355,6 +361,24 @@ impl<T: Copy> core::fmt::Debug for Producer<'_, T> {
 }
 
 /// Unique, stateless read handle for a [`LatestBuf`].
+///
+/// # No `Source<T>` implementation — by decision, not omission
+/// `Source::try_pop` cannot report the displacement that is this channel's
+/// designed overload behaviour, so a generic pipeline would silently
+/// discard loss evidence during *normal* operation (decision D2; contract
+/// non-promise X7). [`crate::LatestSource`] is the consumer's designed
+/// contract surface. A caller whose domain genuinely permits discarding
+/// the skipped count writes its own adapter, so the discard is signed in
+/// application code, never by the transport. This `compile_fail` doctest
+/// pins the absent impl so a convenience `Source` cannot arrive silently,
+/// and pinning the error code keeps it honest:
+///
+/// ```compile_fail,E0277
+/// use ph_eventing::Source;
+/// let channel = ph_eventing::LatestBuf::<u32>::new();
+/// let mut consumer = channel.try_consumer().unwrap();
+/// let _ = Source::try_pop(&mut consumer);
+/// ```
 pub struct Consumer<'a, T: Copy> {
     buf: &'a LatestBuf<T>,
     _not_sync: PhantomData<Cell<()>>,
