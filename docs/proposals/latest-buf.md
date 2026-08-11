@@ -1028,3 +1028,62 @@ with:
 
 That would extend ph-eventing's core purpose without moving the maintenance
 grenade back into either the producer or consumer crate.
+
+---
+
+## Appendix A — Review caveats captured for development (2026-08-11)
+
+Raised in review when the proposal was captured; recorded here **for
+discussion, not as accepted design**. Each is to be validated — proven or
+disproven with the repo's usual evidence — when implementation starts, and
+folded into the body of the proposal or discarded on that evidence.
+
+### A.1 The empty-poll path costs an atomic RMW
+
+As sketched in §8, `take_latest` performs its `swap` unconditionally, so a
+consumer polling an idle channel executes a full atomic read-modify-write on
+every call. On targets without native atomics (Cortex-M0+/M23, ESP32-S2/S3
+under portable-atomic) each such swap is an interrupt-disable critical
+section — a recurring interrupt-latency cost proportional to poll rate, paid
+even when no data ever arrives.
+
+**Candidate refinement:** an `Acquire` load of the ready bit before the swap.
+Not ready → return `None` with no RMW; ready → proceed with the swap exactly
+as sketched. The claim to validate: this is sound because a publication that
+lands between the load and the return is simply observed on the next poll —
+the linearization point moves earlier, nothing is torn, and no ownership is
+transferred on the fast path (the consumer performs no slot access).
+
+**Validation required before adoption:**
+
+- Loom model covering the load/publish interleavings around the fast path;
+- confirmation that the fast path cannot starve or livelock (it performs one
+  load and returns — but the model, not the prose, is the evidence);
+- `cycles.sh` measurement of both variants of the empty poll;
+- codesize on the portable-atomic targets, where the win should be largest.
+
+The unconditional-swap form stays the reference semantics; the fast path is
+an optimisation and must be observationally equivalent.
+
+### A.2 `generation_gap` off-by-one and wrap arithmetic
+
+Two related hazards in the skipped-count arithmetic of §8/§18:
+
+- **Off-by-one:** if the consumer last took generation 101 and now takes
+  104, `skipped` must be **2** (generations 102 and 103), i.e. the distance
+  minus one — not the raw distance. The §4.3 example already implies this;
+  the implementation must pin it with a test before any wrap complexity is
+  added.
+- **Wrap over-counting:** with generation 0 reserved, raw `wrapping_sub`
+  over-counts by one across the wrap because the counter skips 0 — the exact
+  bug `SeqRing` had and fixed via `seq_distance` (see the 0.1.3 changelog
+  and `seq_distance_skips_the_reserved_zero`). `generation_gap` needs the
+  same reserved-zero-aware distance function, and the existing `SeqRing`
+  wrap tests are the template for its test set
+  (`push_wraps_seq_from_zero_to_one`, `lag_across_wrap_counts_drops_exactly`).
+
+**Validation required before adoption:** unit tests at the wrap boundary for
+both the producer's generation succession (`u32::MAX` → 1, never 0) and the
+consumer's gap arithmetic across it, plus the 32-bit Miri pass — the
+`SeqRing` `dropped_accum` overflow was caught by exactly that pass and not by
+the 64-bit host run.
