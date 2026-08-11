@@ -64,6 +64,12 @@ fn latest_buf_returns_only_complete_publications() {
 /// Forces a slot to travel producer -> consumer -> exchange -> producer.
 /// Relaxed phase markers influence scheduling without supplying the
 /// happens-before edges that the exchange itself must provide.
+///
+/// The handshakes spin (with yields) instead of giving up after a bounded
+/// number of polls: every terminating execution therefore completes the
+/// full reuse cycle — publish 1, take 1, publish 2, take 2, publish 3 —
+/// and the final take is asserted after the joins, so the model cannot
+/// pass without exercising the reuse path it exists to check.
 #[test]
 fn latest_buf_reused_slot_keeps_exclusive_ownership() {
     loom::model(|| {
@@ -76,50 +82,58 @@ fn latest_buf_reused_slot_keeps_exclusive_ownership() {
             let producer = producer_channel.try_producer().unwrap();
             let _ = producer.publish([1, 1]);
             producer_phase.store(1, Ordering::Relaxed);
-            for _ in 0..3 {
-                if producer_phase.load(Ordering::Relaxed) >= 2 {
-                    let _ = producer.publish([2, 2]);
-                    producer_phase.store(3, Ordering::Relaxed);
-                    break;
-                }
+            while producer_phase.load(Ordering::Relaxed) < 2 {
                 thread::yield_now();
             }
-            for _ in 0..3 {
-                if producer_phase.load(Ordering::Relaxed) >= 4 {
-                    let _ = producer.publish([3, 3]);
-                    producer_phase.store(5, Ordering::Relaxed);
-                    break;
-                }
+            let _ = producer.publish([2, 2]);
+            producer_phase.store(3, Ordering::Relaxed);
+            while producer_phase.load(Ordering::Relaxed) < 4 {
                 thread::yield_now();
             }
+            let _ = producer.publish([3, 3]);
         });
 
+        let consumer_channel = Arc::clone(&channel);
+        let consumer_phase = Arc::clone(&phase);
         let consumer = thread::spawn(move || {
-            let consumer = channel.try_consumer().unwrap();
-            for _ in 0..3 {
-                if phase.load(Ordering::Relaxed) >= 1 {
-                    if let Some(item) = consumer.take_latest() {
-                        assert_eq!(item.value, [item.generation; 2]);
-                        phase.store(2, Ordering::Relaxed);
-                    }
+            let consumer = consumer_channel.try_consumer().unwrap();
+            // The phase marker orders scheduling only; visibility of the
+            // publication itself must arrive through the exchange, so the
+            // take retries until it does.
+            let mut take_spinning = |expected: u32| loop {
+                if let Some(item) = consumer.take_latest() {
+                    assert_eq!(item.generation, expected);
+                    assert_eq!(item.value, [expected; 2]);
+                    assert_eq!(item.skipped, 0);
                     break;
                 }
                 thread::yield_now();
-            }
-            for _ in 0..3 {
-                if phase.load(Ordering::Relaxed) >= 3 {
-                    if let Some(item) = consumer.take_latest() {
-                        assert_eq!(item.value, [item.generation; 2]);
-                        phase.store(4, Ordering::Relaxed);
-                    }
-                    break;
-                }
+            };
+            while consumer_phase.load(Ordering::Relaxed) < 1 {
                 thread::yield_now();
             }
+            take_spinning(1);
+            consumer_phase.store(2, Ordering::Relaxed);
+            while consumer_phase.load(Ordering::Relaxed) < 3 {
+                thread::yield_now();
+            }
+            take_spinning(2);
+            consumer_phase.store(4, Ordering::Relaxed);
         });
 
         producer.join().unwrap();
         consumer.join().unwrap();
+
+        // Generation 3 was published after the in-thread consumer handle
+        // dropped; a reacquired handle must find it pending with exact
+        // accounting (channel-resident continuation, A.3).
+        let consumer = channel.try_consumer().unwrap();
+        let item = consumer
+            .take_latest()
+            .expect("generation 3 pending after the producer joined");
+        assert_eq!(item.generation, 3);
+        assert_eq!(item.value, [3, 3]);
+        assert_eq!(item.skipped, 0);
     });
 }
 
