@@ -29,6 +29,8 @@ cm0 = ["ph-eventing/portable-atomic-unsafe-assume-single-core"]
 split = []
 # Enable the LatestBuf operation and payload-size matrix.
 latest-matrix = []
+# Enable the cross-lane LatestBuf sample/block composition matrix.
+latest-block-matrix = []
 
 [profile.release]
 # Match what an embedded consumer would realistically ship.

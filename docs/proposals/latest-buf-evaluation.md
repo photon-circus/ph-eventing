@@ -3,9 +3,12 @@
 - **Purpose:** implementation-independent comparison record for issue #27.
 - **Inputs:** [`latest-buf.md`](latest-buf.md),
   [`latest-buf-contract.md`](latest-buf-contract.md), and the BlockBuf candidate.
-- **Status:** live evaluation record. Soundness, target/payload cost, A.1, and
-  channel-state layout evidence now exist; D3 and maintainer closure remain.
-- **Measurements:** [`latest-buf-measurements.md`](latest-buf-measurements.md).
+- **Status:** decision ready. Soundness, target/payload cost, A.1,
+  channel-state layout, and joint D3 composition evidence now exist;
+  maintainer closure remains.
+- **Measurements:** [`latest-buf-measurements.md`](latest-buf-measurements.md)
+  and
+  [`latest-block-composition-measurements.md`](latest-block-composition-measurements.md).
 
 ## 1. Decisions sufficient for an evaluable prototype
 
@@ -24,6 +27,13 @@ The BlockBuf branch also makes `DropBlockBuf` a caller policy over the block
 returned by `EventBuf::push`, not a third synchronization primitive. A named
 type earns its place only through a distinct synchronization or accounting
 contract.
+
+The completed D3 matrix supports that default across 2/8/16-byte samples and
+`N = 8/32/128`: batching crosses from more expensive to cheaper depending on
+shape, but every row is the same generic LatestBuf transport over a different
+payload. No row establishes a separate latest-block contract. Final builder
+completion plus LatestBuf publication costs 171-6,958 reference instructions,
+with combined channel/builder RAM of 136-8,280 bytes.
 
 ## 2. State-persistence comparison
 

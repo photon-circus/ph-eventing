@@ -26,10 +26,19 @@
 use core::hint::black_box;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug;
-#[cfg(feature = "latest-matrix")]
+#[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
 use ph_eventing::LatestBuf;
-#[cfg(not(feature = "latest-matrix"))]
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
 use ph_eventing::{EventBuf, RingBuf, SeqRing};
+
+#[cfg(feature = "latest-block-matrix")]
+#[path = "../../probes/block_shape.rs"]
+mod block_probe;
+#[cfg(feature = "latest-block-matrix")]
+use block_probe::{BlockBuilderShape, BlockShape};
+
+#[cfg(all(feature = "latest-matrix", feature = "latest-block-matrix"))]
+compile_error!("latest-matrix and latest-block-matrix are mutually exclusive probes");
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -43,7 +52,9 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// identical `nop`-only bodies the linker folded all nineteen markers onto a
 /// single address, the runner saw one label, and the output was silently empty.
 /// `r12` is call-clobbered under AAPCS, so writing it in a `-> ()` function is
-/// free and harmless.
+/// free and harmless. The assembly deliberately does not claim `nomem`: each
+/// marker is also a compiler memory barrier, preventing setup for an adjacent
+/// payload from being hoisted into the measured region.
 macro_rules! markers {
     ($($idx:expr => $name:ident),* $(,)?) => {
         $(
@@ -54,7 +65,7 @@ macro_rules! markers {
                     core::arch::asm!(
                         "mov r12, {tag}",
                         tag = const $idx,
-                        options(nomem, nostack, preserves_flags)
+                        options(nostack, preserves_flags)
                     )
                 };
             }
@@ -62,7 +73,7 @@ macro_rules! markers {
     };
 }
 
-#[cfg(not(feature = "latest-matrix"))]
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
 markers! {
     0 => m_end,
     1 => m_overhead,
@@ -89,6 +100,80 @@ markers! {
     19 => m_sr_poll_lagged_far,
 }
 
+#[cfg(feature = "latest-block-matrix")]
+markers! {
+    0 => m_end,
+    1 => m_overhead,
+    // D3 composition rows: sample width in bytes, then complete Block shape.
+    50 => m_lc_sample_w2_publish_first,
+    51 => m_lc_sample_w2_publish_replace,
+    52 => m_lc_sample_w2_take_pending,
+    53 => m_lc_sample_w2_take_empty,
+    54 => m_lc_sample_w8_publish_first,
+    55 => m_lc_sample_w8_publish_replace,
+    56 => m_lc_sample_w8_take_pending,
+    57 => m_lc_sample_w8_take_empty,
+    58 => m_lc_sample_w16_publish_first,
+    59 => m_lc_sample_w16_publish_replace,
+    60 => m_lc_sample_w16_take_pending,
+    61 => m_lc_sample_w16_take_empty,
+    62 => m_lc_block_w2_n8_publish_first,
+    63 => m_lc_block_w2_n8_publish_replace,
+    64 => m_lc_block_w2_n8_take_pending,
+    65 => m_lc_block_w2_n8_take_empty,
+    66 => m_lc_block_w2_n32_publish_first,
+    67 => m_lc_block_w2_n32_publish_replace,
+    68 => m_lc_block_w2_n32_take_pending,
+    69 => m_lc_block_w2_n32_take_empty,
+    70 => m_lc_block_w2_n128_publish_first,
+    71 => m_lc_block_w2_n128_publish_replace,
+    72 => m_lc_block_w2_n128_take_pending,
+    73 => m_lc_block_w2_n128_take_empty,
+    74 => m_lc_block_w8_n8_publish_first,
+    75 => m_lc_block_w8_n8_publish_replace,
+    76 => m_lc_block_w8_n8_take_pending,
+    77 => m_lc_block_w8_n8_take_empty,
+    78 => m_lc_block_w8_n32_publish_first,
+    79 => m_lc_block_w8_n32_publish_replace,
+    80 => m_lc_block_w8_n32_take_pending,
+    81 => m_lc_block_w8_n32_take_empty,
+    82 => m_lc_block_w8_n128_publish_first,
+    83 => m_lc_block_w8_n128_publish_replace,
+    84 => m_lc_block_w8_n128_take_pending,
+    85 => m_lc_block_w8_n128_take_empty,
+    86 => m_lc_block_w16_n8_publish_first,
+    87 => m_lc_block_w16_n8_publish_replace,
+    88 => m_lc_block_w16_n8_take_pending,
+    89 => m_lc_block_w16_n8_take_empty,
+    90 => m_lc_block_w16_n32_publish_first,
+    91 => m_lc_block_w16_n32_publish_replace,
+    92 => m_lc_block_w16_n32_take_pending,
+    93 => m_lc_block_w16_n32_take_empty,
+    94 => m_lc_block_w16_n128_publish_first,
+    95 => m_lc_block_w16_n128_publish_replace,
+    96 => m_lc_block_w16_n128_take_pending,
+    97 => m_lc_block_w16_n128_take_empty,
+    // Final BlockBuilder push + LatestBuf publication, matching #28's boundary.
+    100 => m_lc_complete_w2_n8_publish_first,
+    101 => m_lc_complete_w2_n8_publish_replace,
+    102 => m_lc_complete_w2_n32_publish_first,
+    103 => m_lc_complete_w2_n32_publish_replace,
+    104 => m_lc_complete_w2_n128_publish_first,
+    105 => m_lc_complete_w2_n128_publish_replace,
+    106 => m_lc_complete_w8_n8_publish_first,
+    107 => m_lc_complete_w8_n8_publish_replace,
+    108 => m_lc_complete_w8_n32_publish_first,
+    109 => m_lc_complete_w8_n32_publish_replace,
+    110 => m_lc_complete_w8_n128_publish_first,
+    111 => m_lc_complete_w8_n128_publish_replace,
+    112 => m_lc_complete_w16_n8_publish_first,
+    113 => m_lc_complete_w16_n8_publish_replace,
+    114 => m_lc_complete_w16_n32_publish_first,
+    115 => m_lc_complete_w16_n32_publish_replace,
+    116 => m_lc_complete_w16_n128_publish_first,
+    117 => m_lc_complete_w16_n128_publish_replace,
+}
+
 #[cfg(feature = "latest-matrix")]
 markers! {
     0 => m_end,
@@ -113,7 +198,7 @@ markers! {
     35 => m_lb_consumer_reacquire,
 }
 
-#[cfg(not(feature = "latest-matrix"))]
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
 fn event_buf_costs() {
     let buf = EventBuf::<u32, 8>::new();
     let tx = buf.try_producer().expect("producer");
@@ -154,7 +239,7 @@ fn event_buf_costs() {
     m_end();
 }
 
-#[cfg(not(feature = "latest-matrix"))]
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
 fn seq_ring_costs() {
     let ring = SeqRing::<u32, 8>::new();
     let tx = ring.try_producer().expect("producer");
@@ -203,7 +288,7 @@ fn seq_ring_costs() {
     m_end();
 }
 
-#[cfg(not(feature = "latest-matrix"))]
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
 fn ring_buf_costs() {
     let mut ring = RingBuf::<u32, 8>::new();
 
@@ -228,7 +313,7 @@ fn ring_buf_costs() {
     m_end();
 }
 
-#[cfg(feature = "latest-matrix")]
+#[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
 macro_rules! measure_latest_payload {
     (
         $payload:ty,
@@ -259,6 +344,220 @@ macro_rules! measure_latest_payload {
         let _ = black_box(consumer.take_latest());
         m_end();
     }};
+}
+
+#[cfg(feature = "latest-block-matrix")]
+macro_rules! measure_complete_publication {
+    (
+        $sample:ty,
+        $n:literal,
+        $value:expr,
+        $publish_first:ident,
+        $publish_replace:ident
+    ) => {{
+        let channel = LatestBuf::<BlockShape<$sample, $n>>::new();
+        let producer = channel.try_producer().expect("producer");
+
+        let mut first_fill = BlockBuilderShape::<$sample, $n>::new();
+        for sequence in 1..$n {
+            let _ = first_fill.push(sequence as u32, black_box($value));
+        }
+        $publish_first();
+        let block = first_fill
+            .push($n as u32, black_box($value))
+            .expect("contiguous")
+            .expect("complete");
+        let _ = black_box(producer.publish(block));
+        m_end();
+
+        let mut replacement_fill = BlockBuilderShape::<$sample, $n>::new();
+        for sequence in 1..$n {
+            let _ = replacement_fill.push(sequence as u32, black_box($value));
+        }
+        $publish_replace();
+        let block = replacement_fill
+            .push($n as u32, black_box($value))
+            .expect("contiguous")
+            .expect("complete");
+        let _ = black_box(producer.publish(block));
+        m_end();
+    }};
+}
+
+#[cfg(feature = "latest-block-matrix")]
+fn latest_block_composition_costs() {
+    measure_latest_payload!(
+        u16,
+        1_u16,
+        2_u16,
+        m_lc_sample_w2_publish_first,
+        m_lc_sample_w2_publish_replace,
+        m_lc_sample_w2_take_pending,
+        m_lc_sample_w2_take_empty
+    );
+    measure_latest_payload!(
+        u64,
+        1_u64,
+        2_u64,
+        m_lc_sample_w8_publish_first,
+        m_lc_sample_w8_publish_replace,
+        m_lc_sample_w8_take_pending,
+        m_lc_sample_w8_take_empty
+    );
+    measure_latest_payload!(
+        [u64; 2],
+        [1_u64; 2],
+        [2_u64; 2],
+        m_lc_sample_w16_publish_first,
+        m_lc_sample_w16_publish_replace,
+        m_lc_sample_w16_take_pending,
+        m_lc_sample_w16_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u16, 8>,
+        BlockShape::filled(1_u16),
+        BlockShape::filled(2_u16),
+        m_lc_block_w2_n8_publish_first,
+        m_lc_block_w2_n8_publish_replace,
+        m_lc_block_w2_n8_take_pending,
+        m_lc_block_w2_n8_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u16, 32>,
+        BlockShape::filled(1_u16),
+        BlockShape::filled(2_u16),
+        m_lc_block_w2_n32_publish_first,
+        m_lc_block_w2_n32_publish_replace,
+        m_lc_block_w2_n32_take_pending,
+        m_lc_block_w2_n32_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u16, 128>,
+        BlockShape::filled(1_u16),
+        BlockShape::filled(2_u16),
+        m_lc_block_w2_n128_publish_first,
+        m_lc_block_w2_n128_publish_replace,
+        m_lc_block_w2_n128_take_pending,
+        m_lc_block_w2_n128_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u64, 8>,
+        BlockShape::filled(1_u64),
+        BlockShape::filled(2_u64),
+        m_lc_block_w8_n8_publish_first,
+        m_lc_block_w8_n8_publish_replace,
+        m_lc_block_w8_n8_take_pending,
+        m_lc_block_w8_n8_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u64, 32>,
+        BlockShape::filled(1_u64),
+        BlockShape::filled(2_u64),
+        m_lc_block_w8_n32_publish_first,
+        m_lc_block_w8_n32_publish_replace,
+        m_lc_block_w8_n32_take_pending,
+        m_lc_block_w8_n32_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<u64, 128>,
+        BlockShape::filled(1_u64),
+        BlockShape::filled(2_u64),
+        m_lc_block_w8_n128_publish_first,
+        m_lc_block_w8_n128_publish_replace,
+        m_lc_block_w8_n128_take_pending,
+        m_lc_block_w8_n128_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<[u64; 2], 8>,
+        BlockShape::filled([1_u64; 2]),
+        BlockShape::filled([2_u64; 2]),
+        m_lc_block_w16_n8_publish_first,
+        m_lc_block_w16_n8_publish_replace,
+        m_lc_block_w16_n8_take_pending,
+        m_lc_block_w16_n8_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<[u64; 2], 32>,
+        BlockShape::filled([1_u64; 2]),
+        BlockShape::filled([2_u64; 2]),
+        m_lc_block_w16_n32_publish_first,
+        m_lc_block_w16_n32_publish_replace,
+        m_lc_block_w16_n32_take_pending,
+        m_lc_block_w16_n32_take_empty
+    );
+    measure_latest_payload!(
+        BlockShape<[u64; 2], 128>,
+        BlockShape::filled([1_u64; 2]),
+        BlockShape::filled([2_u64; 2]),
+        m_lc_block_w16_n128_publish_first,
+        m_lc_block_w16_n128_publish_replace,
+        m_lc_block_w16_n128_take_pending,
+        m_lc_block_w16_n128_take_empty
+    );
+
+    measure_complete_publication!(
+        u16,
+        8,
+        1_u16,
+        m_lc_complete_w2_n8_publish_first,
+        m_lc_complete_w2_n8_publish_replace
+    );
+    measure_complete_publication!(
+        u16,
+        32,
+        1_u16,
+        m_lc_complete_w2_n32_publish_first,
+        m_lc_complete_w2_n32_publish_replace
+    );
+    measure_complete_publication!(
+        u16,
+        128,
+        1_u16,
+        m_lc_complete_w2_n128_publish_first,
+        m_lc_complete_w2_n128_publish_replace
+    );
+    measure_complete_publication!(
+        u64,
+        8,
+        1_u64,
+        m_lc_complete_w8_n8_publish_first,
+        m_lc_complete_w8_n8_publish_replace
+    );
+    measure_complete_publication!(
+        u64,
+        32,
+        1_u64,
+        m_lc_complete_w8_n32_publish_first,
+        m_lc_complete_w8_n32_publish_replace
+    );
+    measure_complete_publication!(
+        u64,
+        128,
+        1_u64,
+        m_lc_complete_w8_n128_publish_first,
+        m_lc_complete_w8_n128_publish_replace
+    );
+    measure_complete_publication!(
+        [u64; 2],
+        8,
+        [1_u64; 2],
+        m_lc_complete_w16_n8_publish_first,
+        m_lc_complete_w16_n8_publish_replace
+    );
+    measure_complete_publication!(
+        [u64; 2],
+        32,
+        [1_u64; 2],
+        m_lc_complete_w16_n32_publish_first,
+        m_lc_complete_w16_n32_publish_replace
+    );
+    measure_complete_publication!(
+        [u64; 2],
+        128,
+        [1_u64; 2],
+        m_lc_complete_w16_n128_publish_first,
+        m_lc_complete_w16_n128_publish_replace
+    );
 }
 
 #[cfg(feature = "latest-matrix")]
@@ -321,7 +620,7 @@ fn main() -> ! {
     m_overhead();
     m_end();
 
-    #[cfg(not(feature = "latest-matrix"))]
+    #[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
     {
         event_buf_costs();
         seq_ring_costs();
@@ -329,6 +628,8 @@ fn main() -> ! {
     }
     #[cfg(feature = "latest-matrix")]
     latest_buf_costs();
+    #[cfg(feature = "latest-block-matrix")]
+    latest_block_composition_costs();
 
     debug::exit(debug::EXIT_SUCCESS);
     loop {}

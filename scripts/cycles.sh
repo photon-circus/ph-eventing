@@ -39,6 +39,7 @@
 # Usage:
 #   ./scripts/cycles.sh            # local qemu-system-arm
 #   ./scripts/cycles.sh latest-matrix
+#   ./scripts/cycles.sh latest-block-matrix
 #   ./scripts/verify.sh cycles     # same, inside the reference image
 
 set -u
@@ -52,6 +53,7 @@ PROBE_FEATURES=""
 for arg in "$@"; do
     case "$arg" in
         latest-matrix) PROBE_FEATURES="latest-matrix" ;;
+        latest-block-matrix) PROBE_FEATURES="latest-block-matrix" ;;
         *) printf 'unknown argument: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -211,6 +213,7 @@ report="$(awk '
                     else if (group == "sr") printf "\nSeqRing   (overwrite SPSC)\n"
                     else if (group == "rb") printf "\nRingBuf   (single owner)\n"
                     else if (group == "lb") printf "\nLatestBuf (freshness-first SPSC)\n"
+                    else if (group == "lc") printf "\nLatestBuf sample/block composition\n"
                 }
             }
             next

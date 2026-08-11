@@ -19,6 +19,7 @@
 #   ./scripts/verify.sh loom
 #   ./scripts/verify.sh cycles
 #   ./scripts/verify.sh cycles latest-matrix
+#   ./scripts/verify.sh cycles latest-block-matrix
 #   ./scripts/verify.sh shell      # interactive shell in the image
 #
 # Requires Docker. Everything else is inside the image.

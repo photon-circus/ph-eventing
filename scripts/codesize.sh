@@ -29,6 +29,7 @@
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
 #   ./scripts/codesize.sh latest-matrix    # LatestBuf target/payload matrix
+#   ./scripts/codesize.sh latest-block-matrix # LatestBuf sample/block D3 matrix
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
@@ -48,12 +49,17 @@ export CARGO_INCREMENTAL
 PROBE_FEATURES=""
 BLESS=0
 LATEST_MATRIX=0
+LATEST_BLOCK_MATRIX=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
         latest-matrix)
             PROBE_FEATURES="latest-matrix"
             LATEST_MATRIX=1
+            ;;
+        latest-block-matrix)
+            PROBE_FEATURES="latest-block-matrix"
+            LATEST_BLOCK_MATRIX=1
             ;;
         --bless) BLESS=1 ;;
         # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
@@ -126,11 +132,17 @@ section_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-if [ "$LATEST_MATRIX" = "1" ]; then
-    printf '%-30s %-10s %10s %10s %10s %6s\n' \
+if [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+    printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+        TARGET PAYLOAD publish_B take_B complete_B channel_B builder_B init
+    printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+        '------------------------------' '----------------' '---------' '------' \
+        '----------' '---------' '---------' '----'
+elif [ "$LATEST_MATRIX" = "1" ]; then
+    printf '%-30s %-16s %10s %10s %10s %6s\n' \
         TARGET PAYLOAD publish_B take_B channel_B init
-    printf '%-30s %-10s %10s %10s %10s %6s\n' \
-        '------------------------------' '----------' '---------' '------' '---------' '----'
+    printf '%-30s %-16s %10s %10s %10s %6s\n' \
+        '------------------------------' '----------------' '---------' '------' '---------' '----'
 else
     printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
     printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
@@ -228,6 +240,46 @@ for entry in $TARGETS; do
         continue
     fi
 
+    if [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+        for shape in sample_w2 sample_w8 sample_w16 block_w2_n8 block_w2_n32 block_w2_n128 block_w8_n8 block_w8_n32 block_w8_n128 block_w16_n8 block_w16_n32 block_w16_n128; do
+            publish_fn="latest_${shape}_publish"
+            take_fn="latest_${shape}_take"
+            static_name="$(printf 'LATEST_%s_BUF' "$shape" | tr '[:lower:]' '[:upper:]')"
+            publish="$(fn_size "$ar" "$publish_fn")"
+            take="$(fn_size "$ar" "$take_fn")"
+            complete='-'
+            builder='-'
+            case "$shape" in
+                block_*)
+                    block_shape="${shape#block_}"
+                    publish='-'
+                    complete="$(fn_size "$ar" "latest_complete_${block_shape}_publish")"
+                    builder_name="$(printf 'LATEST_BUILDER_%s' "$block_shape" | tr '[:lower:]' '[:upper:]')"
+                    builder="$(section_size "$ar" ".bss.$builder_name")"
+                    [ -z "$builder" ] && builder="$(section_size "$ar" ".rodata.$builder_name")"
+                    [ -z "$complete" ] && matrix_missing=$((matrix_missing + 1))
+                    [ -z "$builder" ] && matrix_missing=$((matrix_missing + 1))
+                    ;;
+            esac
+            channel_data="$(section_size "$ar" ".data.$static_name")"
+            channel_bss="$(section_size "$ar" ".bss.$static_name")"
+            if [ -n "$channel_data" ]; then
+                channel="$channel_data"
+                init=data
+            else
+                channel="$channel_bss"
+                init=bss
+            fi
+            [ -z "$publish" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$take" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$channel" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+                "$target" "$shape" "${publish:--}" "${take:--}" \
+                "${complete:--}" "${channel:--}" "${builder:--}" "${init:--}"
+        done
+        continue
+    fi
+
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
@@ -251,20 +303,29 @@ if [ "$skipped" -gt 0 ]; then
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
 
-if [ "$LATEST_MATRIX" = "1" ]; then
+if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
     if [ "$matrix_missing" -gt 0 ]; then
-        printf '%s latest-matrix section(s) had no code-size measurement.\n' \
+        printf '%s LatestBuf matrix section(s) had no code-size measurement.\n' \
             "$matrix_missing" >&2
         exit 1
     fi
     [ "$failed" -gt 0 ] && exit 1
     [ "$skipped" -gt 0 ] && exit 2
     printf 'publish_B and take_B are emitted flash for one operation monomorph.\n'
-    printf 'The roles row reports producer and consumer claim+release code size.\n'
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        printf 'The roles row reports producer and consumer claim+release code size.\n'
+    else
+        printf 'complete_B adds the final BlockBuilder push to block publication.\n'
+        printf 'Block and builder rows use the exact shapes from #28 at bc54a9a.\n'
+    fi
     printf 'channel_B is target-object RAM for three slots plus channel state.\n'
     printf 'init reports whether that const-initialized image is .data or .bss;\n'
     printf '.data also occupies flash and is copied during startup.\n'
-    printf 'Run scripts/cycles.sh latest-matrix for state-dependent paths.\n'
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        printf 'Run scripts/cycles.sh latest-matrix for state-dependent paths.\n'
+    else
+        printf 'Run scripts/cycles.sh latest-block-matrix for state-dependent paths.\n'
+    fi
     exit 0
 fi
 # ---------------------------------------------------------------------------

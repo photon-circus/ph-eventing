@@ -12,8 +12,8 @@
 This is the cost evidence requested by issue #27 and
 [latest-buf-evaluation.md](latest-buf-evaluation.md) section 6. The 128-byte
 array measures the transport's complete-payload scaling without importing the
-BlockBuf candidate. It is not the joint `Block<T, N>` composition campaign,
-which remains separately coupled to issue #28.
+BlockBuf candidate. The subsequent joint `Block<T, N>` campaign is recorded in
+[`latest-block-composition-measurements.md`](latest-block-composition-measurements.md).
 
 Reproduce the final implementation with:
 
@@ -121,13 +121,13 @@ pending take, and zero to an empty take. That bounded hot-path cost removes a
 payload-proportional flash and startup-copy cost, so the encoded `.bss` layout
 is retained.
 
-## Result and remaining gate
+## Result and follow-on
 
 The soundness-stage implementation now has the requested target/payload code
 size, pinned instruction regions, A.1 comparison, and explicit handle/channel
 RAM record. Neither constrained kill row shows a code-size outlier, and idle
 polling no longer enters a portable-atomic critical section.
 
-This does not close D3. Joint sample-versus-`Block<T, N>` composition numbers
-against the BlockBuf lane remain the next development item, followed by
-maintainer closure of D1-D3 and A.3.
+The joint sample-versus-`Block<T, N>` composition follow-on is now complete in
+the linked record. Development gates 1-3 are therefore complete; maintainer
+closure of D1-D3 and A.3 remains.

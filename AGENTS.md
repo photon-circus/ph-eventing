@@ -653,6 +653,7 @@ Re-bless deliberately, never reflexively — the diff is the review:
 ./scripts/codesize.sh              # baseline, 8 upstream targets
 ./scripts/codesize.sh split        # include try_split, on branches that have it
 ./scripts/codesize.sh latest-matrix # LatestBuf operations and payload layouts
+./scripts/codesize.sh latest-block-matrix # LatestBuf/BlockBuf D3 composition
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
 ```
 
@@ -711,6 +712,13 @@ latest-matrix`) so the larger stack shapes do not disturb the standing probe:
 Role drop/reacquisition costs 5/15 instructions for the producer and 5/14 for
 the consumer. The target/code-size/RAM and A.1 comparison record is
 `docs/proposals/latest-buf-measurements.md`.
+
+The joint D3 composition probe uses a separate `latest-block-matrix` feature
+and a structural twin of `Block<T, N>` / `BlockBuilder<T, N>` pinned to the
+BlockBuf candidate revision, rather than stacking candidate branches. Run it
+with `./scripts/verify.sh cycles latest-block-matrix`; its 2/8/16-byte by
+8/32/128 cycle, code-size, and RAM record is
+`docs/proposals/latest-block-composition-measurements.md`.
 
 Two results carry the argument:
 

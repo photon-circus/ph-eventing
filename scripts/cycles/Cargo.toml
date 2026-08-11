@@ -19,6 +19,8 @@ cortex-m-semihosting = "0.5"
 # Keep the larger LatestBuf payload matrix out of the standing probe so its
 # stack use and marker set remain independent.
 latest-matrix = []
+# Keep the larger cross-lane sample/block matrix isolated as well.
+latest-block-matrix = []
 
 [profile.release]
 opt-level = "z"

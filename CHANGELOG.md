@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
   flash, including +8 bytes on ESP32-S2. Private role indices now have an
   all-zero encoding, moving const-initialized channels from `.data` to `.bss`
   and removing 48-420 bytes of flash/startup copy in the measured payloads.
+- Joint LatestBuf/BlockBuf D3 measurement mode over 2/8/16-byte samples and
+  `N = 8/32/128`, covering all 11 targets plus pinned QEMU regions. It records
+  sample scheduling, final block completion/publication, consumer cost, and
+  136-8,280 bytes of combined channel/builder RAM without stacking candidate
+  branches.
 
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
