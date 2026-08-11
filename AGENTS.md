@@ -719,10 +719,13 @@ oversight:
   would report `SKIP` for nearly everyone, and this repo's own rule is that a
   `SKIP` is not a pass. Fifteen checks that everybody runs is worth more than
   sixteen where one is usually skipped.
-- **The numbers are not yet stable enough to gate.** Unlike code size — pinned
-  by `rust-toolchain.toml` and verified host-independent — these counts move
-  with the `cortex-m-rt` version, which is a floating dependency of the probe.
-  Gating would need a baseline plus a pinned probe lockfile first.
+- **There is no blessed baseline to gate against.** The counts themselves are
+  now stable per environment — the probe lockfile is committed and the
+  reference image pins QEMU — so the old blocker (a floating `cortex-m-rt`)
+  is gone. What gating would still need is a committed baseline file with a
+  bless flow like `codesize.sh`'s, and it would inherit the QEMU-availability
+  problem above: the gate could only run inside the reference image, making
+  Docker a prerequisite for a green `ci.sh`.
 
 Run it by hand when changing a hot path, and paste the numbers into the PR the
 way `codesize.sh` output is pasted.
