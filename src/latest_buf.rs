@@ -27,7 +27,7 @@
 //! approximation plus payload escape hatch (contract §9, non-promise X6):
 //! skipped counts are exact while fewer than `u32::MAX` non-zero
 //! generations separate successful takes, and beyond that full wrap span
-//! the `u32` result is a documented modular approximation —
+//! the `u32` result is a documented under-count —
 //! [`LatestItem::skipped`] carries the full disclosure.
 //!
 //! Decision D2 (`Source<T>` policy) is **closed**: [`Consumer`] does not
@@ -130,22 +130,29 @@ pub struct LatestItem<T> {
     pub generation: u32,
     /// Publications assigned after the prior take and before this one.
     ///
-    /// Exact while fewer than `u32::MAX` non-zero generations — one full
-    /// wrap span — separate two successful takes. Beyond that span the
-    /// count is modular arithmetic's approximation, and a gap of exactly
-    /// one full cycle reports zero: a silent under-count, accepted and
+    /// One formula in every case (contract C3): the wrap-aware generation
+    /// distance from the previously taken value to this one, minus one,
+    /// saturated at zero. Exact while fewer than `u32::MAX` non-zero
+    /// generations — one full wrap span — separate two successful takes.
+    /// Beyond that span the same formula under-counts: by whole spans
+    /// while the endpoints differ, and a gap of exactly one or more full
+    /// cycles reports zero — a silent under-count, accepted and
     /// documented by decision D1 (contract non-promise X6).
     ///
-    /// That boundary is reachable only through consumer stall, never
-    /// producer burst: crossing it means the consumer did not take while
-    /// `u32::MAX` publications occurred — roughly 49.7 days of continuous
-    /// 1 kHz publishing, or 72 minutes at 1 MHz. The channel deliberately
-    /// does not detect the crossing; detection would price wider hot-path
-    /// state into every operation and still could not recover the lost
-    /// count. If the count itself is the requirement (audit, metering,
-    /// loss accounting), carry a wider producer-assigned sequence inside
-    /// `T`; if consumer liveness is, use a watchdog — each catches its
-    /// condition sooner and correctly.
+    /// The boundary is a rate × take-interval property: it is crossed
+    /// exactly when a full span of publications occurs between two
+    /// successful takes — whether because the consumer stopped (fault)
+    /// or because the deployment deliberately takes rarely against a
+    /// fast producer (design). At representative rates that is roughly
+    /// 49.7 days between takes at continuous 1 kHz publishing, or
+    /// 72 minutes at 1 MHz; the crate bounds neither rate nor cadence,
+    /// so this arithmetic is the caller's to run. The channel
+    /// deliberately does not detect the crossing; detection would price
+    /// wider hot-path state into every operation and still could not
+    /// recover the lost count. If the count itself is the requirement
+    /// (audit, metering, loss accounting), carry a wider
+    /// producer-assigned sequence inside `T`; if consumer liveness is,
+    /// use a watchdog — each catches its condition sooner and correctly.
     pub skipped: u32,
 }
 
