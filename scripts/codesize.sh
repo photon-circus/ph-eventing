@@ -13,8 +13,9 @@
 #     from ARM, where both are ldrex/strex.
 #   - Xtensa splits code between `.text.<fn>` and `.literal.<fn>`. Counting only
 #     `.text` undercounts it (212 vs 220 bytes for the same function on esp32).
-#   - ESP32-S2/S3 are single-core Xtensa without the S32C1I compare-and-swap
-#     instruction, so they need portable-atomic exactly like Cortex-M0+.
+#   - ESP32-S2 lacks native 32-bit RMWs and uses portable-atomic's masked path.
+#     The measured esp-rs ESP32-S3 target advertises 32-bit atomics and emits
+#     native S32C1I. Keep the two rows separate and verify their disassembly.
 #
 # Tooling is whatever rust-toolchain.toml pins. `llvm-size` ships with the
 # `llvm-tools` component, which that file already declares, so there is nothing
@@ -114,8 +115,10 @@ fn_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %6s\n' TARGET two_calls split bss data
-printf '%-30s %10s %8s %8s %6s\n' '------------------------------' '---------' '-----' '---' '----'
+printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
+    TARGET two_calls split flags_acq flags_raise flags_take bss data
+printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
+    '------------------------------' '---------' '-----' '---------' '-----------' '----------' '---' '----'
 
 skipped=0
 failed=0
@@ -162,16 +165,23 @@ for entry in $TARGETS; do
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
+    flags_acq="$(fn_size "$ar" event_flags_acquire_roles)"
+    flags_raise="$(fn_size "$ar" event_flags_raise)"
+    flags_take="$(fn_size "$ar" event_flags_take)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
     dat="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.data\./ { s += $2 } END { print s + 0 }')"
 
-    printf '%-30s %10s %8s %8s %6s\n' \
-        "$target" "${two:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
+    printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
+        "$target" "${two:--}" "${spl:--}" "${flags_acq:--}" \
+        "${flags_raise:--}" "${flags_take:--}" "${bss:--}" "${dat:-0}"
 
     # Xtensa is never gated: it needs a toolchain fork, so making it a hard gate
     # would make that fork mandatory for every contributor.
     case "$target" in xtensa-*) continue ;; esac
     [ -n "$two" ] && printf '%s\ttwo_calls\t%s\n' "$target" "$two" >> "$RESULTS"
+    [ -n "$flags_acq" ] && printf '%s\tevent_flags_acquire\t%s\n' "$target" "$flags_acq" >> "$RESULTS"
+    [ -n "$flags_raise" ] && printf '%s\tevent_flags_raise\t%s\n' "$target" "$flags_raise" >> "$RESULTS"
+    [ -n "$flags_take" ] && printf '%s\tevent_flags_take\t%s\n' "$target" "$flags_take" >> "$RESULTS"
     [ -n "$bss" ] && printf '%s\tbss\t%s\n' "$target" "$bss" >> "$RESULTS"
     printf '%s\tdata\t%s\n' "$target" "${dat:-0}" >> "$RESULTS"
 done

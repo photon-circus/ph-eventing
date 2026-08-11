@@ -26,7 +26,7 @@
 use core::hint::black_box;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug;
-use ph_eventing::{EventBuf, RingBuf, SeqRing};
+use ph_eventing::{EventBuf, EventFlags, EventMask, RingBuf, SeqRing};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -83,6 +83,11 @@ markers! {
     17 => m_rb_get,
     18 => m_rb_latest,
     19 => m_sr_poll_lagged_far,
+    // EventFlags -- coalesced SPSC conditions
+    20 => m_ef_raise_clear,
+    21 => m_ef_raise_already_set,
+    22 => m_ef_take_nonempty,
+    23 => m_ef_take_empty,
 }
 
 fn event_buf_costs() {
@@ -197,6 +202,29 @@ fn ring_buf_costs() {
     m_end();
 }
 
+fn event_flags_costs() {
+    let flags = EventFlags::new();
+    let tx = flags.try_producer().expect("producer");
+    let rx = flags.try_consumer().expect("consumer");
+    let condition = EventMask::from_bits(1 << 7);
+
+    m_ef_raise_clear();
+    tx.raise(black_box(condition));
+    m_end();
+
+    m_ef_raise_already_set();
+    tx.raise(black_box(condition));
+    m_end();
+
+    m_ef_take_nonempty();
+    black_box(rx.take_all());
+    m_end();
+
+    m_ef_take_empty();
+    black_box(rx.take_all());
+    m_end();
+}
+
 #[entry]
 fn main() -> ! {
     // Two adjacent markers: the cost of the markers themselves, subtracted
@@ -207,6 +235,7 @@ fn main() -> ! {
     event_buf_costs();
     seq_ring_costs();
     ring_buf_costs();
+    event_flags_costs();
 
     debug::exit(debug::EXIT_SUCCESS);
     loop {}

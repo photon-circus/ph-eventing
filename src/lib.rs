@@ -1,4 +1,4 @@
-//! Stack-allocated ring buffers for no-std embedded targets.
+//! Deterministic handoff primitives for no-std embedded targets.
 //!
 //! # Primitives
 //!
@@ -7,8 +7,10 @@
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+//! | [`EventFlags`] | Coalesced SPSC condition set — one bit per condition, one atomic operation per hot path. |
 //!
-//! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
+//! All four are fixed-size and zero-allocation. The three buffers are generic
+//! over `T: Copy`; `EventFlags` provides exactly 32 payload-free conditions.
 //!
 //! # Common traits
 //!
@@ -101,7 +103,7 @@
 //! The crate is `#![no_std]` by default. Tests require `std`.
 //!
 //! # Targets without atomics
-//! `SeqRing` and `EventBuf` require 32-bit atomics. For targets that lack them
+//! `SeqRing`, `EventBuf`, and `EventFlags` require 32-bit atomics. For targets that lack them
 //! (for example `thumbv6m-none-eabi`), enable
 //! `portable-atomic-unsafe-assume-single-core` or `portable-atomic-critical-section`.
 //! The crate always compiles those modules, so no-atomic targets need one of
@@ -112,7 +114,7 @@
 //! - `RingBuf` has no atomics and no interior mutability — standard Rust borrow
 //!   rules apply. It stores slots as `MaybeUninit<T>` and reads only live
 //!   entries, so it does contain `unsafe`.
-//! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
+//! - `SeqRing`, `EventBuf`, and `EventFlags` are SPSC by design: exactly one producer and one
 //!   consumer must be active. Use `try_producer()` / `try_consumer()`, which
 //!   return `None` rather than panicking — on a microcontroller a panic is a
 //!   reset. The panicking `producer()` / `consumer()` are deprecated since
@@ -146,8 +148,9 @@
 //! The typical embedded shape is a producer in an interrupt handler and a
 //! consumer in a task loop.
 //!
-//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, so `&buf` can be
-//!   handed to both contexts. The `Producer` and `Consumer` handles are
+//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, and [`EventFlags`]
+//!   is `Sync`, so a shared reference can be handed to both contexts. The
+//!   `Producer` and `Consumer` handles are
 //!   `Send + !Sync`: move each into the context that owns it, never share one.
 //! - The handles borrow the buffer, so the buffer must outlive them.
 //! - **`new()` is a `const fn`** on the normal build, so
@@ -181,6 +184,12 @@
 //! - `pop` returns the oldest item, or `None` when empty.
 //! - `peek` copies the oldest item without advancing the consumer cursor.
 //! - `drain(max, hook)` consumes up to `max` items through a callback.
+//!
+//! # EventFlags semantics
+//! - [`event_flags::Producer::raise`] unions a mask into the pending set.
+//! - [`event_flags::Consumer::take_all`] atomically returns and clears that set.
+//! - Duplicate raises may coalesce; ordering and multiplicity are not retained.
+//! - A take that observes a raise also observes memory actions sequenced before it.
 #![no_std]
 
 #[cfg(all(not(target_has_atomic = "32"), not(feature = "portable-atomic")))]
@@ -201,12 +210,14 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 mod macros;
 
 pub mod event_buf;
+pub mod event_flags;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
 pub use event_buf::EventBuf;
+pub use event_flags::{EventFlags, EventMask};
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
 pub use traits::{Link, Sink, Source};

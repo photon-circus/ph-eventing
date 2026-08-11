@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `EventFlags` — a coalescing SPSC condition set for ISR-to-task notification. Exactly 32
+  payload-free conditions are represented by a transparent `EventMask(u32)`; the producer raises
+  with one Release `fetch_or`, and the consumer atomically returns and clears the set with one
+  Acquire `swap(0)`. Duplicate raises may coalesce, but a raise racing a take is never lost between
+  windows. Handles follow the accepted signal-lane doctrine: sole-role `Send + !Sync` values with
+  `&self` hot-path operations and fallible, non-panicking acquisition.
+- EventFlags admission evidence: three Loom models (including a publication litmus whose Release
+  and Acquire mutation checks both fail as intended), detector-on Miri coverage, eight gated and
+  three opt-in Xtensa code-size rows, four Cortex-M3 instruction regions, and a reproducible
+  portable-atomic disassembly check. The masked window is 4 instructions on thumbv6m and 5 on
+  ESP32-S2; ESP32-S3 uses native `s32c1i` and masks interrupts for 0 instructions under the
+  measured esp-rs toolchain.
+
+### Fixed
+- `scripts/loom.sh <filter>` now scopes the filter to `loom_tests::<filter>` instead of passing a
+  second positional test filter to Cargo. The documented `./scripts/loom.sh event_buf` form was
+  rejected by Cargo before any model ran.
+
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked

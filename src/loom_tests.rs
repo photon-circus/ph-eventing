@@ -19,8 +19,9 @@
 // they remain public API until 0.3.0, so their orderings still need proving.
 #![allow(deprecated)]
 
-use crate::{EventBuf, SeqRing};
+use crate::{EventBuf, EventFlags, EventMask, SeqRing};
 use loom::sync::Arc;
+use loom::sync::atomic::{AtomicU32, Ordering};
 use loom::thread;
 
 /// Every item the producer pushes is popped exactly once, in order, with no
@@ -208,6 +209,125 @@ fn seq_ring_latest_is_never_ahead_of_published() {
                 let expected = if seq == 1 { 10 } else { 20 };
                 assert_eq!(val, expected, "latest returned a stale payload");
             }
+        });
+
+        producer.join().unwrap();
+        consumer.join().unwrap();
+    });
+}
+
+/// One raise racing one take is returned in exactly one take window: never
+/// lost, duplicated, or fabricated (EventFlags contract C1-C3).
+#[test]
+fn event_flags_raise_racing_take_is_partitioned_exactly() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let condition = EventMask::from_bits(1 << 3);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer = thread::spawn(move || {
+            producer_flags
+                .try_producer()
+                .expect("sole producer")
+                .raise(condition);
+        });
+
+        let consumer_flags = Arc::clone(&flags);
+        let first_take = thread::spawn(move || {
+            consumer_flags
+                .try_consumer()
+                .expect("sole consumer")
+                .take_all()
+        });
+
+        producer.join().unwrap();
+        let first = first_take.join().unwrap();
+        let second = flags
+            .try_consumer()
+            .expect("consumer role released")
+            .take_all();
+
+        assert_eq!(
+            first | second,
+            condition,
+            "the raise was lost or fabricated"
+        );
+        assert!(
+            (first & second).is_empty(),
+            "one raise appeared in two take windows"
+        );
+    });
+}
+
+/// Distinct raises are distributed exactly across a racing take and the final
+/// pending set (EventFlags contract R1, T1, and C1-C3).
+#[test]
+fn event_flags_distinct_raises_partition_across_takes() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let first_condition = EventMask::from_bits(1 << 0);
+        let second_condition = EventMask::from_bits(1 << 31);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer = thread::spawn(move || {
+            let producer = producer_flags.try_producer().expect("sole producer");
+            producer.raise(first_condition);
+            producer.raise(second_condition);
+        });
+
+        let consumer_flags = Arc::clone(&flags);
+        let first_take = thread::spawn(move || {
+            consumer_flags
+                .try_consumer()
+                .expect("sole consumer")
+                .take_all()
+        });
+
+        producer.join().unwrap();
+        let first = first_take.join().unwrap();
+        let second = flags
+            .try_consumer()
+            .expect("consumer role released")
+            .take_all();
+        let expected = first_condition | second_condition;
+
+        assert_eq!(first | second, expected, "a distinct raise was lost");
+        assert!(
+            (first & second).is_empty(),
+            "a condition was returned twice without being re-raised"
+        );
+        assert_eq!((first | second).bits() & !expected.bits(), 0);
+    });
+}
+
+/// Observing a condition also observes memory written before its raise
+/// (EventFlags contract S1). Changing either the Release `fetch_or` or Acquire
+/// `swap` to Relaxed makes Loom find the stale-payload execution.
+#[test]
+fn event_flags_observed_raise_publishes_payload() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let payload = Arc::new(AtomicU32::new(0));
+        let ready = EventMask::from_bits(1);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer_payload = Arc::clone(&payload);
+        let producer = thread::spawn(move || {
+            let producer = producer_flags.try_producer().expect("sole producer");
+            producer_payload.store(0xA5A5_5A5A, Ordering::Relaxed);
+            producer.raise(ready);
+        });
+
+        let consumer = thread::spawn(move || {
+            let consumer = flags.try_consumer().expect("sole consumer");
+            while !consumer.take_all().contains(ready) {
+                thread::yield_now();
+            }
+            assert_eq!(
+                payload.load(Ordering::Relaxed),
+                0xA5A5_5A5A,
+                "the observed raise did not publish its payload"
+            );
         });
 
         producer.join().unwrap();

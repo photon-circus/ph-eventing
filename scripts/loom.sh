@@ -35,7 +35,14 @@ export LOOM_MAX_PREEMPTIONS
 
 printf '==> loom (max_preemptions=%s)\n' "$LOOM_MAX_PREEMPTIONS"
 
-if RUSTFLAGS='--cfg loom' cargo test --lib loom_tests "$@"; then
+if [ "$#" -gt 0 ]; then
+    filter="loom_tests::$1"
+    shift
+else
+    filter="loom_tests"
+fi
+
+if RUSTFLAGS='--cfg loom' cargo test --lib "$filter" "$@"; then
     printf '\nAll Loom models verified.\n'
 else
     printf '\nLoom found a failing execution. The output above replays the\n'
