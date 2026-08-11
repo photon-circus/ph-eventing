@@ -93,6 +93,63 @@ fn latest_buf_producer_reacquisition_continues_across_threads() {
     });
 }
 
+/// Consumer continuation state crosses the taken flag's Release/Acquire
+/// handoff. The relaxed `first_took` signal controls the model without adding
+/// an independent happens-before edge for `last_generation`.
+#[test]
+fn latest_buf_consumer_reacquisition_continues_across_threads() {
+    loom::model(|| {
+        let channel = Arc::new(LatestBuf::<u32>::new());
+        {
+            let producer = channel.try_producer().unwrap();
+            assert_eq!(producer.publish(1).generation, 1);
+        }
+
+        let first_took = Arc::new(AtomicBool::new(false));
+        let later_published = Arc::new(AtomicBool::new(false));
+
+        let first_channel = Arc::clone(&channel);
+        let first_signal = Arc::clone(&first_took);
+        let first = thread::spawn(move || {
+            let consumer = first_channel.try_consumer().unwrap();
+            assert_eq!(consumer.take_latest().unwrap().generation, 1);
+            // Relaxed deliberately: successful reacquisition, not this test
+            // signal, must publish the role-owned continuation state.
+            first_signal.store(true, Ordering::Relaxed);
+        });
+
+        let publisher_channel = Arc::clone(&channel);
+        let publisher_start = Arc::clone(&first_took);
+        let publisher_done = Arc::clone(&later_published);
+        let publisher = thread::spawn(move || {
+            if publisher_start.load(Ordering::Relaxed) {
+                let producer = publisher_channel.try_producer().unwrap();
+                let _ = producer.publish(2);
+                let _ = producer.publish(3);
+                publisher_done.store(true, Ordering::Release);
+            }
+        });
+
+        let second = thread::spawn(move || {
+            if later_published.load(Ordering::Acquire) {
+                channel
+                    .try_consumer()
+                    .and_then(|consumer| consumer.take_latest())
+            } else {
+                None
+            }
+        });
+
+        first.join().unwrap();
+        publisher.join().unwrap();
+        if let Some(item) = second.join().unwrap() {
+            assert_eq!(item.generation, 3);
+            assert_eq!(item.value, 3);
+            assert_eq!(item.skipped, 1);
+        }
+    });
+}
+
 /// Every item the producer pushes is popped exactly once, in order, with no
 /// duplicates and no losses — under every interleaving.
 ///

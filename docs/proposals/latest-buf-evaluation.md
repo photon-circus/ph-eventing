@@ -175,14 +175,21 @@ An implementation is ready to compare only when its PR can fill every cell:
 
 | Evidence | Channel state | Persist on drop |
 |---|---|---|
-| Unit semantics and wrap seam | pending | pending |
-| L1-L4 Loom models | pending | pending |
-| All applicable ordering mutations fail | pending | pending |
-| Miri race detector on | pending | pending |
-| Native patterned-payload stress | pending | pending |
+| Unit semantics and wrap seam | pass: 9 focused tests | pass: 8 focused tests on comparison branch |
+| L1-L4 Loom models | partial: payload ownership plus producer and consumer L3 pass; L2 and optional L4 remain | partial: six models pass, but its joined L3 does not isolate the taken-flag handoff |
+| All applicable ordering mutations fail | pending | partial: Drop `Release -> Relaxed` and claim `AcqRel -> Release` fail Loom; exchange matrix remains |
+| Miri race detector on | pass: 9 focused tests, including threaded patterned payload | pass: 8 focused tests on comparison branch |
+| Native patterned-payload stress | pass | not implemented |
+| Embedded compile matrix | pass: thumbv6m portable-atomic, thumbv7em, riscv32imac | pass: same library paths, candidate-specific rerun pending |
 | Full code-size matrix | pending | pending |
 | Cycle regions above | pending | pending |
 | Handle/channel/RAM sizes | pending | pending |
 
 Correctness removes a candidate; measurements select between candidates that
 remain. Ergonomics is evaluated only after those results.
+
+The channel-state prototype is the integration default because it follows the
+crate's stateless-handle precedent and has no Drop-time state-copying path.
+The persist-on-drop prototype remains on its independent comparison branch;
+it is not rejected, but its possible register-residency advantage must be
+measured and its L3 model repaired before it can displace the default.

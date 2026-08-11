@@ -67,8 +67,9 @@ and all clauses below are stated against the sequence of those instants.
 - **P6.** `publish` publishes the complete value or, if the operation never
   linearizes (e.g. the producer is torn down mid-call by the environment),
   nothing. No partial publication is ever observable. ("Complete" means:
-  the value later observed under `g` is bit-for-bit the `v` passed to this
-  call.)
+  the value later observed under `g` comes from that one `v` under Rust value
+  semantics; it is never torn or mixed with another publication. This does
+  not promise preservation or observability of padding bytes.)
 
 ## 4. Consumer clauses (C)
 
@@ -99,9 +100,9 @@ and all clauses below are stated against the sequence of those instants.
   previously seen generation value, so the comparison is inherently
   ambiguous there — closing D1 must define the ordering behaviour for that
   case along with the gap reporting.
-- **C6.** The value returned under generation `g` is exactly and completely
-  the value published under `g` (with P6: no torn, mixed, or partially
-  initialized value is ever returned).
+- **C6.** The value returned under generation `g` is the complete Rust value
+  published under `g` (with P6: no torn, mixed, or partially initialized value
+  is ever returned).
 - **C7.** `take_latest` never waits for the producer, never invokes it,
   and never delays it: its cost bound (B2) is independent of producer
   activity, and the consumer may hold a returned value indefinitely
