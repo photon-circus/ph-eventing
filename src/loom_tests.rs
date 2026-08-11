@@ -38,10 +38,19 @@ fn latest_buf_returns_only_complete_publications() {
 
         let consumer = thread::spawn(move || {
             let consumer = channel.try_consumer().unwrap();
+            // Conservation across the run, not just per-item sanity: each
+            // observed generation must be strictly newer than the last
+            // (at-most-once, C-family), and `skipped` must equal exactly the
+            // generations passed over since the previous take (C3/O2; no wrap
+            // at these magnitudes, so the formula reduces to the difference).
+            let mut last_generation = 0u32;
             for _ in 0..3 {
                 if let Some(item) = consumer.take_latest() {
                     assert!((1..=3).contains(&item.generation));
                     assert_eq!(item.value, [item.generation; 2]);
+                    assert!(item.generation > last_generation);
+                    assert_eq!(item.skipped, item.generation - last_generation - 1);
+                    last_generation = item.generation;
                 }
                 thread::yield_now();
             }
