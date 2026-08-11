@@ -73,12 +73,13 @@ Complete-window handoff for producers that naturally operate in blocks —
 IMU FIFO bursts, ADC DMA half/full buffers, audio frames, analysis windows.
 A producer fills a privately owned block; once complete, ownership is
 published atomically, so the consumer can never see a partially filled
-block. Overload policies (`Latest` / `Queued` / `Drop`) are separate
-compile-time types. Each delivered block is internally contiguous even when
+block. Overload policy is carried by the composition, not by new types
+(D3, closed 2026-08-11 — contract §9): `LatestBuf<Block<T, N>>` for
+latest, `EventBuf<Block<T, N>, Q>` for queued, and drop-new as caller
+policy on the complete block `EventBuf::push` returns — no separate
+`DropBlockBuf`. Each delivered block is internally contiguous even when
 whole blocks are skipped, so a DSP knows exactly where a discontinuity
-occurred. Likely one of the strongest additions for embedded DSP; coupled
-to the LatestBuf contract's decision point D3 (closed 2026-08-11 as
-composition over payload-agnostic `LatestBuf<T>` — contract §9).
+occurred. Likely one of the strongest additions for embedded DSP.
 
 ## 3. SlotPool: bounded zero-copy ownership transfer
 

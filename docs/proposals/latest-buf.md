@@ -294,6 +294,12 @@ A third slot provides that writable space without waiting.
 pub struct LatestBuf<T: Copy> {
     state: AtomicU32,
     slots: [UnsafeCell<MaybeUninit<Entry<T>>>; 3],
+    // Role-owned continuation state (A.3, closed 2026-08-11): these
+    // cells live in the channel so a drop-and-reacquire continues
+    // rather than restarts (contract H4). Each cell is accessed only
+    // by its sole role handle, never shared.
+    producer_state: UnsafeCell<ProducerState>, // { back, next_generation }
+    consumer_state: UnsafeCell<ConsumerState>, // { front, last_generation }
     producer_taken: AtomicBool,
     consumer_taken: AtomicBool,
 }
@@ -312,33 +318,40 @@ The shared atomic state identifies:
 The generation can live inside the slot because it is written and read under
 the same exclusive-ownership protocol as the payload.
 
+*(An earlier revision of this sketch carried the role fields in the
+handles. That is exactly the design Appendix A.3 rejects — a dropped
+handle takes the slot cursor and generation sequence with it, breaking
+H4 — and the sketch here reflects the closed decision instead:
+channel-resident role state, stateless handles.)*
+
 ### 6.3 Producer state
 
-The producer handle owns:
+The producer handle is stateless — a reference plus the `!Sync` marker:
 
 ```rust
 pub struct Producer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
-    back: SlotIndex,
-    next_generation: u32,
 }
 ```
 
-`back` names the slot that only this producer may access.
+Its working state lives in the channel's role-owned `producer_state`
+cell: `back` names the slot that only this producer may access, and
+`next_generation` is the sequence cursor. Sole-role acquisition (H1)
+is what makes that cell exclusively the producer's.
 
 ### 6.4 Consumer state
 
-The consumer handle owns:
+The consumer handle is likewise stateless:
 
 ```rust
 pub struct Consumer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
-    front: SlotIndex,
-    last_generation: u32,
 }
 ```
 
-`front` names the slot that only this consumer may access.
+Its working state lives in the channel's role-owned `consumer_state`
+cell: `front` names the slot that only this consumer may access, and
+`last_generation` feeds the C3 skipped accounting.
 
 ## 7. Publication Algorithm
 
@@ -355,11 +368,15 @@ Pseudocode:
 
 ```rust
 fn publish(&mut self, value: T) -> PublishReport {
-    let generation = next_nonzero(self.next_generation);
-    self.next_generation = generation;
+    // Exclusive by H1: this is the sole producer handle, so the
+    // channel's producer_state cell is exclusively ours (A.3, closed).
+    let st = self.buffer.producer_state_mut();
+
+    let generation = next_nonzero(st.next_generation);
+    st.next_generation = generation;
 
     write_owned_slot(
-        self.back,
+        st.back,
         Entry {
             generation,
             value,
@@ -369,9 +386,9 @@ fn publish(&mut self, value: T) -> PublishReport {
     let previous = self
         .buffer
         .state
-        .swap(encode(self.back, Ready::Yes), Ordering::AcqRel);
+        .swap(encode(st.back, Ready::Yes), Ordering::AcqRel);
 
-    self.back = previous.slot();
+    st.back = previous.slot();
 
     PublishReport {
         generation,
@@ -399,20 +416,24 @@ Pseudocode:
 
 ```rust
 fn take_latest(&mut self) -> Option<LatestItem<T>> {
+    // Exclusive by H1: sole consumer handle, so the channel's
+    // consumer_state cell is exclusively ours (A.3, closed).
+    let st = self.buffer.consumer_state_mut();
+
     let previous = self
         .buffer
         .state
-        .swap(encode(self.front, Ready::No), Ordering::AcqRel);
+        .swap(encode(st.front, Ready::No), Ordering::AcqRel);
 
-    self.front = previous.slot();
+    st.front = previous.slot();
 
     if !previous.ready() {
         return None;
     }
 
-    let entry = read_owned_slot(self.front);
-    let skipped = generation_gap(self.last_generation, entry.generation);
-    self.last_generation = entry.generation;
+    let entry = read_owned_slot(st.front);
+    let skipped = generation_gap(st.last_generation, entry.generation);
+    st.last_generation = entry.generation;
 
     Some(LatestItem {
         value: entry.value,
@@ -1113,9 +1134,12 @@ the 64-bit host run.
 
 ### A.3 Handle-carried producer state does not survive reacquisition
 
-Found by Codex review on the capture PR (#24). The sketched `Producer`
-(§6.3) carries `back` and `next_generation` in the handle, while the
-sketched buffer (§6.2) stores only the exchange state and the taken flags.
+Found by Codex review on the capture PR (#24). As originally sketched,
+`Producer` (§6.3) carried `back` and `next_generation` in the handle,
+while the sketched buffer (§6.2) stored only the exchange state and the
+taken flags. *(§§6.2–6.4 and the §7/§8 pseudocode have since been
+updated to the closed channel-resident design; the description below
+records the sketch as the review found it.)*
 The contract makes roles re-acquirable after a handle drop (H2) — but with
 the sketch as written, a dropped producer takes its private slot index and
 the generation cursor with it. A fresh handle cannot compute which slot is

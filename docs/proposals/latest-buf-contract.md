@@ -302,7 +302,10 @@ All three decision points are **closed** (2026-08-11, below).
   to design; the coupled BlockBuf candidate's composition
   (`LatestBuf<Block<T, N>>` for latest, `EventBuf<Block<T, N>, Q>` for
   queued, caller policy on the returned block for drop-new) is the
-  confirmed type identity. Both lanes reached this independently, and the
+  confirmed type identity. `Block<T, N>` names the developed candidate's
+  accepted definition — payload type and sample count only; any per-sample
+  stamp travels inside `T`, per X3. The seed sketch's
+  `Block<T, Stamp, N>` parameterisation is superseded by it. Both lanes reached this independently, and the
   joint composition matrix (`8593b4a`; 66 pinned regions over 2/8/16-byte
   samples × `N = 8/32/128`) measured it: no row establishes a separate
   latest-block contract, and the probe-payload concern above is satisfied

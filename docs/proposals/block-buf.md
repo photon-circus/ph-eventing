@@ -31,6 +31,15 @@ Many producers naturally operate in blocks:
 
 Conceptually:
 
+> **Superseded (2026-08-11):** the sketch below, including its
+> `Block<T, Stamp, N>` parameterisation and the three named types that
+> follow, is the historical seed. D3's closure accepted the developed
+> candidate's `Block<T, N>` (payload and count only; stamps travel inside
+> `T`) with composition as the type identity — `LatestBuf<Block<T, N>>`
+> latest, `EventBuf<Block<T, N>, Q>` queued, caller policy for drop-new.
+> See §5.1 of the developed document on `candidate/block-buf` and the
+> contract §9.
+
 ```rust
 pub struct Block<T, Stamp, const N: usize> {
     pub first_sequence: u32,
@@ -84,6 +93,14 @@ obvious.
   ownership transfer rather than copying.
 
 ## 3. Open questions
+
+> **Superseded (2026-08-11):** the type-identity questions below are
+> answered by D3's closure — composition over payload-agnostic
+> primitives, no new named types (contract §9). The fill-side,
+> `Copy`-vs-`SlotPool`, and stamp questions are answered in the developed
+> document on `candidate/block-buf` (`BlockBuilder`, the deferred **P**
+> decision, and stamps-inside-`T` respectively). Retained unedited as the
+> seed record.
 
 - Is `LatestBlockBuf` a new type or `LatestBuf<Block<T, Stamp, N>>` plus a
   fill-side helper? What, concretely, does a separate type buy?
