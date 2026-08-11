@@ -862,10 +862,18 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
+**`slot_pool::tests` (experimental candidate):**
+- `committed_slots_are_claimed_fifo` — zero-copy FIFO handoff
+- `dropped_grant_is_not_published_and_slot_is_reused` — bounded cancellation and residue semantics
+- `held_claim_applies_backpressure_until_drop` — claim ownership prevents reuse
+- `non_copy_slots_drop_once_with_the_pool` — reusable non-`Copy` values keep one drop obligation
+- `endpoint_handles_are_unique_and_reacquirable` — SPSC handle enforcement
+- `concurrent_transfer_preserves_fifo_and_exclusivity` — threaded handoff stress
+
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail`
+and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 3 `compile_fail`
 doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions

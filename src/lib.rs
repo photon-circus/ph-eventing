@@ -10,6 +10,11 @@
 //!
 //! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
 //!
+//! An evaluation-only `slot_pool` module is also compiled for this crate's
+//! tests and can be enabled downstream with `experimental-slot-pool`. Its API
+//! and guarantees are exploratory and are not part of the three published
+//! primitive contracts above.
+//!
 //! # Common traits
 //!
 //! | Trait | Role | Implementors |
@@ -203,12 +208,16 @@ mod macros;
 pub mod event_buf;
 pub mod ring;
 pub mod seq_ring;
+#[cfg(any(test, feature = "experimental-slot-pool"))]
+pub mod slot_pool;
 pub(crate) mod sync;
 pub mod traits;
 
 pub use event_buf::EventBuf;
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
+#[cfg(feature = "experimental-slot-pool")]
+pub use slot_pool::SlotPool;
 pub use traits::{Link, Sink, Source};
 
 #[cfg(all(loom, test))]

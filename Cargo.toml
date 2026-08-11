@@ -54,6 +54,7 @@ portable-atomic = { version = "1.13", optional = true, default-features = false,
 # crate. Test combinations individually — `scripts/ci.sh` does.
 [features]
 default = []
+experimental-slot-pool = []
 portable-atomic = ["dep:portable-atomic"]
 portable-atomic-unsafe-assume-single-core = [
     "portable-atomic",

@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- An `experimental-slot-pool` feature exposing an evaluation-only SPSC
+  `SlotPool<T, N>`. The probe transfers pre-initialized, reusable non-`Copy`
+  slots through RAII grants and claims with FIFO backpressure and O(1) cursor
+  operations. It is deliberately not promoted: generic uninitialized fill,
+  SlotPool-specific Loom modeling, target measurements, and trait stabilization
+  remain open.
+
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked

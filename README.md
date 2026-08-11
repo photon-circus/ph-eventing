@@ -19,6 +19,15 @@ Stack-allocated ring buffers for no-std embedded targets.
 
 All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
+### Experimental SlotPool
+
+The `experimental-slot-pool` feature exposes an evaluation-only `SlotPool<T, N>`.
+It transfers FIFO ownership of pre-initialized reusable slots through RAII
+producer grants and consumer claims, including non-`Copy` payloads. This is a
+candidate probe, not a published primitive contract: the API may change or be
+removed, and the promotion evidence described in
+[`docs/proposals/slot-pool.md`](docs/proposals/slot-pool.md) is not complete.
+
 ## What this optimises for
 
 `no_std` and no-alloc are the entry fee. What this crate offers past that is
@@ -293,7 +302,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 69 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
+| 75 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for the SPSC types and the experimental SlotPool; `N == 0` rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |
