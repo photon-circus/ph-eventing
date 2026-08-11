@@ -690,8 +690,9 @@ Cross-environment diffs of ±1 are noise; compare inside the image.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
+| `CountedSignal::increment` / `take_count` | 8 / 7 | | |
 
-Two results carry the argument:
+Three results carry the argument:
 
 1. **Every `push` is constant.** Empty vs loaded differs by at most one
    instruction on all three types. Cost does not scale with occupancy or `N`.
@@ -699,6 +700,10 @@ Two results carry the argument:
    ~2000 behind both cost **115 instructions**. If recovery walked the backlog
    the second would be two orders of magnitude larger. It is a jump, and now
    that is measured rather than asserted.
+3. **CountedSignal's SPSC hot paths are small and bounded.** `increment`
+   retires 8 instructions and `take_count` retires 7 in the reference
+   Cortex-M3 environment. The producer region contains no CAS retry loop; its
+   fixed count is the measured counterpart to the sole-producer no-wrap proof.
 
 The rejected push is *cheaper* than an accepted one — backpressure is an early
 return, not extra work.
@@ -882,8 +887,9 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 3 `compile_fail`
-doctests pinning the `N == 0` rejection (`E0080`) on all three types.
+and `src/traits.rs`. Total: 75 unit tests + 11 doctests, plus 5 `compile_fail`
+doctests: three pin the `N == 0` rejection (`E0080`) on the buffer types, and
+two pin the CountedSignal handles' `!Sync` contract.
 
 ## Code Conventions
 

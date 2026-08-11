@@ -6,6 +6,8 @@
   2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
 - **Taxonomy row:** retention *count per condition* · overload *counter
   saturates* · representative use *pulse/event accumulation*.
+- **Contract:** [`counted-signal-contract.md`](counted-signal-contract.md) —
+  short abstract contract with stable clause IDs and an evidence map.
 - **Related:** [`event-flags.md`](event-flags.md) — same niche (bounded ISR
   notification), different contract (multiplicity matters here); the
   `SignalSink`/`SignalSource` trait vocabulary lives in that document and
@@ -140,9 +142,22 @@ are small and, importantly, expose the architecture split for review:
 | RV32IMAC | 18 B | 8 B |
 
 The M0/M23 rows use the existing portable-atomic single-core probe backend.
-Instruction counts still require the pinned QEMU reference environment; the
-probe regions are committed, but no cycle number is claimed from a machine
-without QEMU.
+
+The cycle probe has also been run in the pinned reference environment via
+`./scripts/verify.sh cycles`:
+
+| Cortex-M3 hot path | Retired guest instructions |
+|---|---:|
+| `increment` | 8 |
+| `take_count` | 7 |
+
+Environment stamp: rustc 1.92.0 (`ded5c06cf`), LLVM 21.1.3, QEMU 10.0.11
+(Debian trixie), release `opt-level = "z"` with LTO. The runner subtracts its
+marker overhead and uses one guest instruction per translation block with
+`-icount shift=0`; these are deterministic instruction/tick counts for that
+environment, not a universal microarchitectural cycle claim. Together with
+the eight-target code-size rows, this closes the lane's missing pinned-cost
+evidence.
 
 This result refines rather than silently closes the handle decision: choose
 SPSC handles and the central bounded-saturation problem has a small exact
@@ -150,12 +165,18 @@ solution; choose multiple raisers and this implementation must be rejected.
 
 ## 4. Promotion bar to PROPOSED
 
-1. Solve the bounded-saturating-increment question — it decides whether the
-   primitive can honour the crate's boundedness rules at all.
-2. Settle the shared handle-model question with
-   [`event-flags.md`](event-flags.md) (one answer for both).
-3. Write the short contract with citable clause IDs.
-4. Standard evidence bar, same emphasis as EventFlags: codesize/cycles on
-   the ISR-side `increment` carry the admission case; Loom/Miri close the
-   atomic-take and no-lost-increment clauses; the saturation test mirrors
-   `dropped_accum_saturates_instead_of_overflowing`.
+1. **Complete for the SPSC candidate:** the bounded-saturating-increment
+   question has the load-plus-conditional-RMW answer proved in §3.1.
+2. **Open maintainer decision:** settle the shared handle model with
+   [`event-flags.md`](event-flags.md) (one answer for both). The proof
+   dependency is recorded in the contract's H-decision section; choosing
+   multiple raisers rejects the current algorithm and its B1 evidence.
+3. **Complete:** the short
+   [`counted-signal-contract.md`](counted-signal-contract.md) gives stable
+   I/T/A/B/H/X clause IDs and maps each guarantee to evidence.
+4. **Complete for the SPSC candidate:** eight-target code-size rows and pinned
+   Cortex-M3 instruction counts carry the cost case; the unit boundary test,
+   threaded stress, Miri, and two Loom models cover atomic take,
+   no-lost-increment accounting, and saturation without wrapping.
+
+The shared handle decision is therefore the only remaining promotion gate.

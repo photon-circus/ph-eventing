@@ -113,6 +113,15 @@ impl core::fmt::Debug for CountedSignal {
 ///
 /// This handle is `Send + !Sync`. Its exclusivity is what makes exact,
 /// bounded saturation possible without a compare-exchange loop.
+///
+/// The load-bearing `!Sync` property is pinned at compile time:
+///
+/// ```compile_fail
+/// use ph_eventing::counted_signal::Producer;
+///
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<Producer<'static>>();
+/// ```
 pub struct Producer<'a> {
     signal: &'a CountedSignal,
     _not_sync: PhantomData<Cell<()>>,
@@ -152,6 +161,13 @@ impl core::fmt::Debug for Producer<'_> {
 ///
 /// This handle is `Send + !Sync` and may atomically take counts while its
 /// paired producer increments from another context.
+///
+/// ```compile_fail
+/// use ph_eventing::counted_signal::Consumer;
+///
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<Consumer<'static>>();
+/// ```
 pub struct Consumer<'a> {
     signal: &'a CountedSignal,
     _not_sync: PhantomData<Cell<()>>,
@@ -215,6 +231,7 @@ mod tests {
 
     #[test]
     fn increments_accumulate_and_take_clears() {
+        // Contract I1, T1, T4, and A1.
         let signal = CountedSignal::new();
         let producer = signal.try_producer().unwrap();
         let consumer = signal.try_consumer().unwrap();
@@ -228,6 +245,7 @@ mod tests {
 
     #[test]
     fn saturates_instead_of_wrapping() {
+        // Contract I2-I3, T2, and A2-A3.
         let signal = CountedSignal::new();
         signal.count.store(u32::MAX - 1, Ordering::Relaxed);
         let producer = signal.try_producer().unwrap();
@@ -244,20 +262,27 @@ mod tests {
 
     #[test]
     fn handles_are_exclusive_and_reusable_after_drop() {
+        // Contract H1 and H3: reacquisition continues existing state.
         let signal = CountedSignal::new();
         let producer = signal.try_producer().unwrap();
         let consumer = signal.try_consumer().unwrap();
         assert!(signal.try_producer().is_none());
         assert!(signal.try_consumer().is_none());
 
+        producer.increment();
+
         drop(producer);
         drop(consumer);
-        assert!(signal.try_producer().is_some());
-        assert!(signal.try_consumer().is_some());
+        let producer = signal.try_producer().expect("producer role released");
+        let consumer = signal.try_consumer().expect("consumer role released");
+        assert_eq!(consumer.take_count().count(), 1);
+        producer.increment();
+        assert_eq!(consumer.take_count().count(), 1);
     }
 
     #[test]
     fn handles_are_send() {
+        // Contract H2. The compile-fail examples above pin `!Sync`.
         fn assert_send<T: Send>() {}
         assert_send::<Producer<'static>>();
         assert_send::<Consumer<'static>>();
@@ -266,6 +291,7 @@ mod tests {
     #[cfg(not(loom))]
     #[test]
     fn const_new_works_in_static_context() {
+        // Contract H4.
         static SIGNAL: CountedSignal = CountedSignal::new();
         let producer = SIGNAL.try_producer().unwrap();
         let consumer = SIGNAL.try_consumer().unwrap();
@@ -276,6 +302,7 @@ mod tests {
     #[cfg(not(loom))]
     #[test]
     fn concurrent_takes_do_not_lose_increments() {
+        // Contract T3 and A1 at stress-test scale.
         use core::sync::atomic::{AtomicBool, Ordering as CoreOrdering};
 
         let signal = CountedSignal::new();

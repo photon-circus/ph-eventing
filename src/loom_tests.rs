@@ -24,7 +24,7 @@ use loom::sync::Arc;
 use loom::thread;
 
 /// Concurrent takes partition increments between snapshots without losing or
-/// duplicating them.
+/// duplicating them (CountedSignal contract T1-T3 and A1).
 #[test]
 fn counted_signal_take_partitions_increments() {
     loom::model(|| {
@@ -52,7 +52,7 @@ fn counted_signal_take_partitions_increments() {
 
 /// At the saturation boundary, a take between the producer's load and
 /// `fetch_add` moves the increment into the new epoch; it cannot make the RMW
-/// wrap or lose the increment.
+/// wrap or lose the increment (contract I2-I3, T2-T3, and A2-A3).
 #[test]
 fn counted_signal_saturation_boundary_is_linearizable() {
     loom::model(|| {

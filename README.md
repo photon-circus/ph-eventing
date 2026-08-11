@@ -321,7 +321,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 75 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for all concurrent types; `N == 0` rejected at compile time |
+| 75 unit + 11 doctests + 5 compile-fail | Behaviour, including threaded stress tests for all concurrent types; `N == 0` and the CountedSignal handles' `!Sync` contract rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |
