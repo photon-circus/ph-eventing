@@ -1,5 +1,9 @@
 # Build output
 /target
+# The measurement probes under scripts/ are their own cargo workspaces, so they
+# build into their own target dirs that the root-anchored rule above misses.
+# Committed here on the release branch rather than on one feature branch: three
+# separate commits swept ~500 build artifacts each before this existed.
 # The code-size probe is its own workspace (see scripts/codesize/Cargo.toml),
 # so it builds into its own target dir that the root-anchored rule above misses.
 /scripts/codesize/target
