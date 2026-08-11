@@ -31,19 +31,28 @@ fn latest_buf_returns_only_complete_publications() {
         let producer_channel = Arc::clone(&channel);
         let producer = thread::spawn(move || {
             let producer = producer_channel.try_producer().unwrap();
-            let _ = producer.publish([1, 1]);
-            let _ = producer.publish([2, 2]);
-            let _ = producer.publish([3, 3]);
+            // Each publication's report is preserved: `replaced_unread` is
+            // the producer-side half of the loss ledger, and the conservation
+            // assert after the joins checks it against the consumer's takes.
+            let mut replaced = 0u32;
+            for value in 1..=3u32 {
+                if producer.publish([value, value]).replaced_unread {
+                    replaced += 1;
+                }
+            }
+            replaced
         });
 
+        let consumer_channel = Arc::clone(&channel);
         let consumer = thread::spawn(move || {
-            let consumer = channel.try_consumer().unwrap();
+            let consumer = consumer_channel.try_consumer().unwrap();
             // Conservation across the run, not just per-item sanity: each
             // observed generation must be strictly newer than the last
             // (at-most-once, C-family), and `skipped` must equal exactly the
             // generations passed over since the previous take (C3/O2; no wrap
             // at these magnitudes, so the formula reduces to the difference).
             let mut last_generation = 0u32;
+            let mut taken = 0u32;
             for _ in 0..3 {
                 if let Some(item) = consumer.take_latest() {
                     assert!((1..=3).contains(&item.generation));
@@ -51,13 +60,22 @@ fn latest_buf_returns_only_complete_publications() {
                     assert!(item.generation > last_generation);
                     assert_eq!(item.skipped, item.generation - last_generation - 1);
                     last_generation = item.generation;
+                    taken += 1;
                 }
                 thread::yield_now();
             }
+            taken
         });
 
-        producer.join().unwrap();
-        consumer.join().unwrap();
+        let replaced = producer.join().unwrap();
+        let taken = consumer.join().unwrap();
+
+        // Every publication ends in exactly one bucket — taken by the
+        // consumer, displaced while unread (the producer's report), or still
+        // pending at the end. The exchange's linearization makes this hold in
+        // every interleaving; a report derived from stale state breaks it.
+        let pending = u32::from(channel.try_consumer().unwrap().take_latest().is_some());
+        assert_eq!(replaced + taken + pending, 3);
     });
 }
 
@@ -80,17 +98,20 @@ fn latest_buf_reused_slot_keeps_exclusive_ownership() {
         let producer_phase = Arc::clone(&phase);
         let producer = thread::spawn(move || {
             let producer = producer_channel.try_producer().unwrap();
-            let _ = producer.publish([1, 1]);
+            // Each handshake guarantees the prior publication was taken
+            // before the next publish, so no publish here may ever report a
+            // displaced-unread predecessor.
+            assert!(!producer.publish([1, 1]).replaced_unread);
             producer_phase.store(1, Ordering::Relaxed);
             while producer_phase.load(Ordering::Relaxed) < 2 {
                 thread::yield_now();
             }
-            let _ = producer.publish([2, 2]);
+            assert!(!producer.publish([2, 2]).replaced_unread);
             producer_phase.store(3, Ordering::Relaxed);
             while producer_phase.load(Ordering::Relaxed) < 4 {
                 thread::yield_now();
             }
-            let _ = producer.publish([3, 3]);
+            assert!(!producer.publish([3, 3]).replaced_unread);
         });
 
         let consumer_channel = Arc::clone(&channel);
