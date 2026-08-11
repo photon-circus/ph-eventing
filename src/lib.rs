@@ -109,7 +109,9 @@
 //! atomics.
 //!
 //! # Safety and concurrency
-//! - `RingBuf` is a plain struct — standard Rust borrow rules apply.
+//! - `RingBuf` has no atomics and no interior mutability — standard Rust borrow
+//!   rules apply. It stores slots as `MaybeUninit<T>` and reads only live
+//!   entries, so it does contain `unsafe`.
 //! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
 //!   consumer must be active. Use `try_producer()` / `try_consumer()`, which
 //!   return `None` rather than panicking — on a microcontroller a panic is a

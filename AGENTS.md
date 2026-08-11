@@ -260,10 +260,8 @@ one invariant now carries every read: **the `len` slots ending at `head` have
 all been written by `push`**. Every read goes through the private `index`,
 which addresses only that range, and every public accessor checks `len` first.
 A change that lets `len` outrun the number of writes is UB, not a logic bug.
-`RingBuf` requires `T: Default` while the other two do not: it initialises a
-real `[T; N]` array, whereas they use `MaybeUninit` and never need a value up
-front. On the non-Loom path `SeqRing::new` / `EventBuf::new` are `const fn` so
-the buffers can live in a `static`.
+On the non-Loom path `SeqRing::new` / `EventBuf::new` are `const fn` so the
+buffers can live in a `static`.
 
 ### Conditional compilation map
 
@@ -856,14 +854,11 @@ cargo test
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
-- No panics in hot paths. `RingBuf::new` rejects `N == 0` with a **const**
-  assertion, so a zero-capacity ring fails the build rather than panicking —
+- No panics in hot paths. All three `new()` reject `N == 0` with a **const**
+  assertion, so a zero-capacity buffer fails the build rather than panicking —
   which also means no test can cover the rejection, and the const assertion is
-  the only thing enforcing it
-- No panics in hot paths; only assertions are in `::new()` for `N > 0`
-- Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
-- No panics in hot paths; `N > 0` is a const assertion on the host `SeqRing` /
-  `EventBuf` `new()` path (runtime assert under Loom); `RingBuf` still asserts at runtime
+  the only thing enforcing it. Under `--cfg loom` the `SeqRing` / `EventBuf`
+  constructors are not `const`, so there the assertion is a runtime one
 
 ### Documentation Style
 

@@ -314,9 +314,6 @@ if [ "${regressions:-0}" -gt 0 ]; then
 '
     exit 1
 fi
-printf '  ok -- no row grew by more than %s bytes
-' "$TOLERANCE"
-
 printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"
 
 printf 'split column is "-" unless run as: ./scripts/codesize.sh split\n'
