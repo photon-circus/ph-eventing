@@ -294,6 +294,12 @@ A third slot provides that writable space without waiting.
 pub struct LatestBuf<T: Copy> {
     state: AtomicU32,
     slots: [UnsafeCell<MaybeUninit<Entry<T>>>; 3],
+    // Role-owned continuation state (A.3, closed 2026-08-11): these
+    // cells live in the channel so a drop-and-reacquire continues
+    // rather than restarts (contract H4). Each cell is accessed only
+    // by its sole role handle, never shared.
+    producer_state: UnsafeCell<ProducerState>, // { back, next_generation }
+    consumer_state: UnsafeCell<ConsumerState>, // { front, last_generation }
     producer_taken: AtomicBool,
     consumer_taken: AtomicBool,
 }
@@ -312,33 +318,45 @@ The shared atomic state identifies:
 The generation can live inside the slot because it is written and read under
 the same exclusive-ownership protocol as the payload.
 
+*(An earlier revision of this sketch carried the role fields in the
+handles. That is exactly the design Appendix A.3 rejects — a dropped
+handle takes the slot cursor and generation sequence with it, breaking
+H4 — and the sketch here reflects the closed decision instead:
+channel-resident role state, stateless handles.)*
+
 ### 6.3 Producer state
 
-The producer handle owns:
+The producer handle is stateless — a reference plus the `!Sync` marker:
 
 ```rust
 pub struct Producer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
-    back: SlotIndex,
-    next_generation: u32,
+    // The channel is Sync (shared statics), so a marker-free handle
+    // would be auto-Sync. Cell<()> is Send + !Sync: it keeps the handle
+    // movable into an ISR while denying shared references (H2).
+    _not_sync: PhantomData<Cell<()>>,
 }
 ```
 
-`back` names the slot that only this producer may access.
+Its working state lives in the channel's role-owned `producer_state`
+cell: `back` names the slot that only this producer may access, and
+`next_generation` is the sequence cursor. Sole-role acquisition (H1)
+is what makes that cell exclusively the producer's.
 
 ### 6.4 Consumer state
 
-The consumer handle owns:
+The consumer handle is likewise stateless:
 
 ```rust
 pub struct Consumer<'a, T: Copy> {
     buffer: &'a LatestBuf<T>,
-    front: SlotIndex,
-    last_generation: u32,
+    _not_sync: PhantomData<Cell<()>>, // same H2 marker as the producer
 }
 ```
 
-`front` names the slot that only this consumer may access.
+Its working state lives in the channel's role-owned `consumer_state`
+cell: `front` names the slot that only this consumer may access, and
+`last_generation` feeds the C3 skipped accounting.
 
 ## 7. Publication Algorithm
 
@@ -355,11 +373,15 @@ Pseudocode:
 
 ```rust
 fn publish(&mut self, value: T) -> PublishReport {
-    let generation = next_nonzero(self.next_generation);
-    self.next_generation = generation;
+    // Exclusive by H1: this is the sole producer handle, so the
+    // channel's producer_state cell is exclusively ours (A.3, closed).
+    let st = self.buffer.producer_state_mut();
+
+    let generation = next_nonzero(st.next_generation);
+    st.next_generation = generation;
 
     write_owned_slot(
-        self.back,
+        st.back,
         Entry {
             generation,
             value,
@@ -369,9 +391,9 @@ fn publish(&mut self, value: T) -> PublishReport {
     let previous = self
         .buffer
         .state
-        .swap(encode(self.back, Ready::Yes), Ordering::AcqRel);
+        .swap(encode(st.back, Ready::Yes), Ordering::AcqRel);
 
-    self.back = previous.slot();
+    st.back = previous.slot();
 
     PublishReport {
         generation,
@@ -399,20 +421,33 @@ Pseudocode:
 
 ```rust
 fn take_latest(&mut self) -> Option<LatestItem<T>> {
+    // Exclusive by H1: sole consumer handle, so the channel's
+    // consumer_state cell is exclusively ours (A.3, closed).
+    let st = self.buffer.consumer_state_mut();
+
+    // A.1 (measured, selected): an Acquire load answers the empty poll
+    // with no RMW — on portable-atomic targets the idle path never
+    // enters the critical section. Ready is cleared only by this sole
+    // consumer, so a publication observed ready stays ready until the
+    // exchange below claims it.
+    if !self.buffer.state.load(Ordering::Acquire).ready() {
+        return None;
+    }
+
     let previous = self
         .buffer
         .state
-        .swap(encode(self.front, Ready::No), Ordering::AcqRel);
+        .swap(encode(st.front, Ready::No), Ordering::AcqRel);
 
-    self.front = previous.slot();
+    st.front = previous.slot();
 
     if !previous.ready() {
         return None;
     }
 
-    let entry = read_owned_slot(self.front);
-    let skipped = generation_gap(self.last_generation, entry.generation);
-    self.last_generation = entry.generation;
+    let entry = read_owned_slot(st.front);
+    let skipped = generation_gap(st.last_generation, entry.generation);
+    st.last_generation = entry.generation;
 
     Some(LatestItem {
         value: entry.value,
@@ -422,17 +457,20 @@ fn take_latest(&mut self) -> Option<LatestItem<T>> {
 }
 ```
 
-This exchange is unconditional.
-
-If no publication is ready, the consumer simply trades one privately owned
-spare slot for another and returns `None`. This remains safe because it does
-not read the unready slot.
+If no publication is ready, the `Acquire` load answers the poll with no
+exchange and no slot movement — the A.1 measurement selected this fast
+path (it removes the RMW from every idle poll; on thumbv6m and ESP32-S2
+that is the portable-atomic critical section the idle path no longer
+enters).
 
 If a publication is ready, the exchange gives the consumer exclusive
-ownership before it reads the payload.
+ownership before it reads the payload. The defensive `ready` re-check
+after the swap costs nothing: only this sole consumer clears the ready
+bit, so a publication observed ready cannot vanish before the exchange.
 
 There is no compare-and-exchange retry loop. Both producer and consumer
-perform one atomic exchange per operation.
+perform at most one atomic exchange per operation, and the consumer's
+empty poll performs none.
 
 ## 9. Proposed API
 
@@ -653,8 +691,8 @@ Contract:
 - may skip intermediate publications;
 - reports the transport generation and skipped count;
 - never returns an older generation after a newer one within one wrap span
-  (the scope of contract clause C5; behaviour beyond a full generation
-  cycle is decided with contract decision point D1).
+  (the scope of contract clause C5; per D1's closure, no ordering claim is
+  made beyond a full generation cycle — contract C5/X6).
 
 This is intentionally different from a FIFO `Source`.
 
@@ -750,6 +788,14 @@ consistently present.
 
 No implementation should silently imply FIFO semantics where the primitive
 intentionally returns only the newest value.
+
+**Decision (D2, closed 2026-08-11): the first option.** The maintainer's
+articulation, on the record: `LatestSink`/`LatestSource` were designed to
+solve the problem the existing traits could not — they *are* the contract
+surface for the type. The second option remains the pre-registered additive
+upgrade path under exactly the adopter-evidence condition stated above; the
+third stays gated behind the second-implementation rule for payload-metadata
+vocabulary. See the contract §9 and non-promise X7.
 
 ## 14. Safety Argument
 
@@ -912,6 +958,12 @@ inherently ambiguous. The API should either:
 - return an "unknown or wrapped" gap state; or
 - rely on a wider producer-assigned acquisition sequence in the payload.
 
+**Decision (D1, closed 2026-08-11):** the first and third together. The
+contract's C3/C5/O2 carry the beyond-span text and non-promise X6 states
+the limitation for adopters — including why the second option was rejected
+(hot-path cost, and "unknown" cannot recover the lost count). See the
+contract §9.
+
 Transport generation should not be mistaken for permanent global identity.
 
 ## 19. Non-Goals
@@ -981,6 +1033,13 @@ for implementation and never a substitute for the memory-model proof.
     as an implementation prerequisite.
 
 ## 22. Open Questions
+
+**Update (2026-08-11):** several of these questions have since received
+decisions on the record — the wrap question is answered by D1's closure
+(contract §9, C3/X6), the `Source<T>` question by D2 (contract §9, X7),
+the sample-versus-block questions by D3 (payload-agnostic `LatestBuf<T>`;
+blocks are payloads), and the critical-section-versus-exchange question by
+the A.1 measurement. The remaining questions stay open as written.
 
 - Is retaining only the latest individual sample sufficient for realistic
   DSP consumers?
@@ -1067,6 +1126,17 @@ transferred on the fast path (the consumer performs no slot access).
 The unconditional-swap form stays the reference semantics; the fast path is
 an optimisation and must be observationally equivalent.
 
+**Decision (A.1, measured and selected 2026-08-11):** the `Acquire`-load
+fast path is the accepted algorithm, and §8 now sketches it. The
+validation above exists: the Loom equivalence model passes, the ordering
+mutation run covers it, and the pinned measurements show the fast path
+removes 7–8 instructions from every empty poll at a cost of 5–6 on
+pending Cortex-M3 paths, with thumbv6m/ESP32-S2 avoiding the idle
+portable-atomic critical section entirely. Reverting to the unconditional
+swap is warranted only if a target regresses beyond the code-size
+tolerance or the equivalence model fails — neither occurred in the
+recorded matrix.
+
 ### A.2 `generation_gap` off-by-one and wrap arithmetic
 
 Two related hazards in the skipped-count arithmetic of §8/§18:
@@ -1092,9 +1162,12 @@ the 64-bit host run.
 
 ### A.3 Handle-carried producer state does not survive reacquisition
 
-Found by Codex review on the capture PR (#24). The sketched `Producer`
-(§6.3) carries `back` and `next_generation` in the handle, while the
-sketched buffer (§6.2) stores only the exchange state and the taken flags.
+Found by Codex review on the capture PR (#24). As originally sketched,
+`Producer` (§6.3) carried `back` and `next_generation` in the handle,
+while the sketched buffer (§6.2) stored only the exchange state and the
+taken flags. *(§§6.2–6.4 and the §7/§8 pseudocode have since been
+updated to the closed channel-resident design; the description below
+records the sketch as the review found it.)*
 The contract makes roles re-acquirable after a handle drop (H2) — but with
 the sketch as written, a dropped producer takes its private slot index and
 the generation cursor with it. A fresh handle cannot compute which slot is
@@ -1115,6 +1188,31 @@ is its cost.
   storage, matching the crate's stateless-handle precedent; or
 - persist them into the channel in the handle's `Drop`; or
 - withdraw reacquisition for stateful roles (narrow H2 explicitly).
+
+**Decision (A.3, closed 2026-08-11): the first refinement.** Role state is
+channel-resident in role-owned storage; handles are stateless — matching
+the `SeqRing`/`EventBuf` precedent and the sole-role handle doctrine
+accepted for the signal primitives (cycle decision H). Continuation holds
+by construction: state never leaves the channel, so a drop-and-reacquire
+has nothing to lose. The validation this appendix required exists in
+full: drop-and-reacquire continuation tests, Loom models of both
+cross-context role handoffs, race-detector-on Miri coverage, and
+ordering-mutation runs detecting all four weakened role-handoff orderings.
+
+The persist-on-drop alternative is **considered and not selected**, with
+its partial evidence preserved in the evaluation record (§7): its
+Drop-time state copy is a permanent failure surface — a missing or
+reordered write-back silently restarts accounting, the exact H4 violation
+this appendix exists to prevent — its L3 model does not isolate the
+taken-flag handoff, and its register-residency claim is unmeasured.
+Narrowing H2 was the registered fallback if both candidates failed the
+evidence bar; the condition was not met.
+
+Contract non-promise **X8** states the boundary implications for
+integrators — reacquisition requires the previous handle's drop; handle
+lifetime is an application property; there is deliberately no out-of-band
+role reset — informing downstream design without prescribing or solving
+it.
 
 Contract clause **H4** (added on the same review round) pins the
 requirement whichever way the design goes: reacquisition continues, never

@@ -28,6 +28,15 @@ Many producers naturally operate in blocks:
 
 Conceptually:
 
+> **Superseded (2026-08-11):** the sketch below, including its
+> `Block<T, Stamp, N>` parameterisation and the three named types that
+> follow, is the historical seed. D3's closure accepted the developed
+> candidate's `Block<T, N>` (payload and count only; stamps travel inside
+> `T`) with composition as the type identity — `LatestBuf<Block<T, N>>`
+> latest, `EventBuf<Block<T, N>, Q>` queued, caller policy for drop-new.
+> See §5.1 of the developed document on `candidate/block-buf` and the
+> contract §9.
+
 ```rust
 pub struct Block<T, Stamp, const N: usize> {
     pub first_sequence: u32,
@@ -82,6 +91,11 @@ obvious.
 
 ## 3. Initial open questions (evaluated in section 5)
 
+> **Superseded (2026-08-11):** the type-identity questions below are
+> answered by §5 and by D3's closure (contract §9): composition, no new
+> named types; the stamp question resolves as stamps-inside-`T`, and
+> `Copy`-vs-`SlotPool` is the deferred **P** decision.
+
 - Is `LatestBlockBuf` a new type or `LatestBuf<Block<T, Stamp, N>>` plus a
   fill-side helper? What, concretely, does a separate type buy?
 - Is `QueuedBlockBuf` a new type or `EventBuf<Block<…>>`? If the answer is
@@ -100,7 +114,8 @@ obvious.
 
 ## 4. Initial promotion bar to PROPOSED
 
-1. Resolve D3 jointly with this document (maintainer decision).
+1. Resolve D3 jointly with this document (maintainer decision). **Done
+   2026-08-11** — closed as composition; see the contract §9.
 2. Answer the type-identity questions above — in particular whether each
    variant is a new primitive or a composition over existing/planned ones.
 3. Develop to the detail level of [`latest-buf.md`](latest-buf.md); derive
