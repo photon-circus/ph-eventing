@@ -77,19 +77,34 @@ if ! ( cd "$PROBE_DIR" && cargo build --release >/dev/null 2>&1 ); then
     exit 1
 fi
 
-# Thumb symbol addresses have bit 0 set to mark Thumb state; the PC in the
-# trace does not. Clear it before comparing.
-MARK_ADDR="$("$NM" "$ELF" 2>/dev/null | awk '$3 == "mark" { print $1; exit }')"
-if [ -z "$MARK_ADDR" ]; then
-    printf 'error: could not find the `mark` symbol in %s\n' "$ELF" >&2
+# Regions are labelled by symbol name, not by position, so adding a measurement
+# to the probe needs no change here. Build addr -> label from the symbol table.
+# Thumb function addresses have bit 0 set to mark Thumb state; the PC in the
+# trace does not, so clear it before comparing.
+SYMS="$PROBE_DIR/target/markers.txt"
+"$NM" "$ELF" 2>/dev/null | awk '$3 ~ /^m_/ { print $1, $3 }' > "$SYMS"
+if [ ! -s "$SYMS" ]; then
+    printf 'error: no `m_*` markers found in %s\n' "$ELF" >&2
+    exit 1
+fi
+
+# Guard against identical code folding. Markers with identical bodies get merged
+# by the linker onto one address; the runner then sees a single label and prints
+# nothing, which reads as "the probe measured nothing" rather than as a bug.
+# Each marker embeds a unique immediate to prevent it -- this checks that it
+# actually worked.
+total_marks="$(wc -l < "$SYMS")"
+uniq_marks="$(awk '{ print $1 }' "$SYMS" | sort -u | wc -l)"
+if [ "$total_marks" -ne "$uniq_marks" ]; then
+    printf 'error: %s markers share only %s distinct addresses.\n' \
+        "$total_marks" "$uniq_marks" >&2
+    printf 'The linker folded identical marker bodies. Each marker in\n' >&2
+    printf 'scripts/cycles/src/main.rs must embed a unique immediate.\n' >&2
     exit 1
 fi
 
 printf '==> tracing under qemu\n'
 mkdir -p "$(dirname "$LOG")"
-# Remove any stale log first: a leftover trace from an earlier run would make
-# a failed QEMU invocation look like a successful one to the emptiness check.
-rm -f "$LOG"
 timeout 300 qemu-system-arm \
     -cpu cortex-m3 -machine lm3s6965evb -nographic \
     -semihosting-config enable=on,target=native \
@@ -98,7 +113,7 @@ timeout 300 qemu-system-arm \
 qemu_status=$?
 
 # A crash or timeout after some trace was already written leaves a non-empty
-# log, so the emptiness check alone would let a partial measurement through.
+# log, so the emptiness check alone would let a partial run through.
 if [ "$qemu_status" -ne 0 ]; then
     printf 'error: qemu exited %s (124 = timeout)
 ' "$qemu_status" >&2
@@ -111,10 +126,10 @@ if [ ! -s "$LOG" ]; then
 fi
 
 printf '\n'
-awk -v mark_hex="$MARK_ADDR" '
-    # `strtonum` is a GNU extension; on a stock Debian/Ubuntu `awk` is mawk,
-    # where it is undefined -- verified. The parse then aborts and, without a
-    # status check, the script prints its footer and exits 0 having measured
+awk '
+    # GNU awk has a strtonum builtin; mawk, the default awk on a stock
+    # Debian/Ubuntu, does not -- verified. The parse then aborts and, with no
+    # status check, the script printed its footer and exited 0 having measured
     # nothing. This is POSIX awk.
     function hex2dec(h,   i, c, d, v) {
         h = tolower(h); v = 0
@@ -126,37 +141,48 @@ awk -v mark_hex="$MARK_ADDR" '
         }
         return v
     }
-    BEGIN {
-        # Strip the Thumb bit and normalise to a decimal address.
-        mark = hex2dec(mark_hex)
-        mark = mark - (mark % 2)
-        seg = -1; count = 0; overhead = 0
-        split("marker-overhead push-into-empty (setup) push-into-nearly-full " \
-              "push-into-full-rejected pop-from-full (drain) pop-from-empty len", \
-              name, " ")
+    NR == FNR {
+        addr = hex2dec($1)
+        addr = addr - (addr % 2)      # clear the Thumb bit
+        label[addr] = $2
+        next
     }
-    # Trace lines look like:  Trace 0: 0x... [flags/PC/...]
     /^Trace/ {
-        if (match($0, /\/[0-9a-f]{16}\//)) {
-            pc = hex2dec(substr($0, RSTART + 1, 16))
-            if (pc == mark) {
-                if (seg >= 0) {
-                    n = count
-                    if (seg == 0) { overhead = n }
-                    else { n = n - overhead; if (n < 0) n = 0 }
-                    label = (seg + 1 <= 9) ? name[seg + 1] : "seg" seg
-                    if (label !~ /^\(/) printf "  %-28s %6d\n", label, n
+        if (!match($0, /\/[0-9a-f]{16}\//)) next
+        pc = hex2dec(substr($0, RSTART + 1, 16))
+        if (pc in label) {
+            name = label[pc]
+            if (name == "m_end") {
+                if (open != "") {
+                    n = count - overhead
+                    if (open == "m_overhead") { overhead = count; n = count }
+                    if (n < 0) n = 0
+                    if (open != "m_overhead") {
+                        pretty = substr(open, 3)
+                        gsub(/_/, " ", pretty)
+                        printf "  %-26s %5d\n", pretty, n
+                    }
                 }
-                seg++; count = 0; next
+                open = ""
+            } else {
+                open = name; count = 0
+                if (name != "m_overhead" && group != substr(name, 3, 2)) {
+                    group = substr(name, 3, 2)
+                    if (group == "eb") printf "\nEventBuf  (backpressure SPSC)\n"
+                    else if (group == "sr") printf "\nSeqRing   (overwrite SPSC)\n"
+                    else if (group == "rb") printf "\nRingBuf   (single owner)\n"
+                }
             }
-            count++
+            next
         }
+        if (open != "") count++
     }
-' "$LOG"
+' "$SYMS" "$LOG"
 
 printf '\n'
 printf 'Instructions retired on the guest, marker overhead subtracted.\n'
 printf 'Deterministic: -icount shift=0 pins one instruction to one tick, so the\n'
 printf 'same ELF yields the same counts on any host.\n'
 
+rm -f "$SYMS"
 rm -f "$LOG"

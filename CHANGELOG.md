@@ -17,6 +17,13 @@ All notable changes to this project will be documented in this file.
   written as a `#[test]` — this restores the coverage that `zero_capacity_panics` used to provide.
   The expected error code is pinned (`compile_fail,E0080`) so the test cannot pass for the wrong
   reason. No dev-dependency was added; rustdoc does this natively.
+- `scripts/cycles.sh` now covers all three types, and measures the claim rather than restating it.
+  Every `push` is constant with respect to occupancy — `EventBuf` 25/25, `SeqRing` 34/33,
+  `RingBuf` 19/20 for empty vs loaded. `SeqRing` lag recovery is **O(1) in the lag**: a consumer
+  2×N behind costs 115 instructions, one ~2000 behind costs 114. Deliberately not wired into
+  `ci.sh` — it needs a system package (`qemu-system-arm`) that the pinned toolchain does not
+  supply, and a check most contributors cannot run would make a green `ci.sh` mean less.
+### Added
 - `scripts/cycles.sh` — instruction-cost measurement under QEMU, covering the half of the
   determinism claim that code size cannot reach. `push` costs **25 instructions into an empty
   buffer and 25 into a nearly-full one**; the rejected push is 19, `pop` 20 and 14, `len()` 14.

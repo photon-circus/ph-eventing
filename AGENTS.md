@@ -557,46 +557,73 @@ this package and the root stops reporting zero dependencies. It is not in the
 
 Code size is a proxy; it says nothing about *time*. `./scripts/cycles.sh`
 measures the other half of the determinism claim — that the hot paths cost a
-**bounded, knowable number of instructions regardless of buffer state**:
+**bounded, knowable number of instructions regardless of buffer state**.
 
-| Operation | Instructions |
-|---|---|
-| `push` into empty | 25 |
-| `push` into 7-of-8 full | 25 |
-| `push` into full (rejected) | 19 |
-| `pop` from full | 20 |
-| `pop` from empty | 14 |
-| `len()` | 14 |
+| | empty | loaded | rejected/empty |
+|---|---:|---:|---:|
+| `EventBuf::push` | 25 | **25** (7 of 8) | 19 (full, rejected) |
+| `EventBuf::pop` | — | 20 (full) | 13 (empty) |
+| `EventBuf::peek` / `len` | 13 / 14 | | |
+| `SeqRing::push` | 34 | **33** (overwriting) | |
+| `SeqRing::poll_one_value` | — | 92 | 24 (empty) |
+| `SeqRing` poll, lagged 2×N | | **115** | |
+| `SeqRing` poll, lagged ~2000 | | **114** | |
+| `SeqRing::latest_value` | — | 30 | |
+| `RingBuf::push` | 19 | **20** (overwriting) | |
+| `RingBuf::get` / `latest` | 22 / 16 | | |
 
-**The first two rows are the result.** `push` costs the same whether the buffer
-is empty or nearly full — the cost does not scale with `N` or with occupancy.
-The rejected push is *cheaper*, not more expensive, because backpressure is an
-early return. Nothing here is a loop over data.
+Two results carry the argument:
 
-**How it measures, and why not a cycle counter.** QEMU models neither
-`DWT_CYCCNT` nor SysTick on `lm3s6965evb` or `mps2-an385` — both read zero,
-verified on QEMU 10.2 — and Ubuntu's `qemu-system-arm` ships no TCG plugins.
-What works without either is QEMU's own execution trace:
-`-accel tcg,one-insn-per-tb=on -d exec` emits one line per retired instruction.
-The probe calls a never-inlined `mark()` between operations; the script finds
-its address with `llvm-nm` and counts instructions between hits, subtracting the
-marker cost measured from two adjacent marks.
+1. **Every `push` is constant.** Empty vs loaded differs by at most one
+   instruction on all three types. Cost does not scale with occupancy or `N`.
+2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind costs
+   115 instructions; one ~2000 behind costs **114**. If recovery walked the
+   backlog this would grow by two orders of magnitude. It is a jump, and now
+   that is measured rather than asserted.
 
-`-icount shift=0` pins one instruction to one clock tick, so results do not
-depend on host speed. **Verified deterministic**: two consecutive runs are
-byte-identical.
+The rejected push is *cheaper* than an accepted one — backpressure is an early
+return, not extra work.
 
-**This one needs a system package.** Unlike the rest of the tooling,
-`rust-toolchain.toml` does not supply QEMU — `sudo apt-get install
-qemu-system-arm`. The script `SKIP`s cleanly without it, and a SKIP is not a
-pass.
+**How it measures.** QEMU models neither `DWT_CYCCNT` nor SysTick on
+`lm3s6965evb` or `mps2-an385` (both read zero, verified on QEMU 10.2), and
+Ubuntu's `qemu-system-arm` ships no TCG plugins. What works without either is
+QEMU's execution trace: `-accel tcg,one-insn-per-tb=on -d exec` emits one line
+per retired instruction. Regions are bracketed by never-inlined markers whose
+**symbol names carry the labels**, so adding a measurement to the probe needs no
+change to the runner. `-icount shift=0` pins one instruction to one tick;
+verified deterministic by diffing two runs.
 
-Two traps if you edit the probe:
-- Build it **from inside `scripts/cycles/`**. Cargo resolves `.cargo/config.toml`
+**Two traps, both hit during development:**
+
+- **Markers must embed a unique immediate.** With identical `nop`-only bodies
+  the linker folded all nineteen onto one address, the runner saw a single
+  label, and the output was silently empty — it looked like the probe measured
+  nothing rather than like a bug. `cycles.sh` now fails loudly if the count of
+  distinct marker addresses does not match the count of markers.
+- **Build from inside `scripts/cycles/`.** Cargo resolves `.cargo/config.toml`
   from the working directory, not from `--manifest-path`; building from the repo
   root silently targets the host and fails to link against libc.
-- `mark()` must stay `#[inline(never)]` with a `nop` body, or it is folded away
-  and the segmentation collapses.
+
+#### Why this is not in `ci.sh`
+
+Deliberate, and the reasoning should survive anyone who thinks it is an
+oversight:
+
+- **It needs a system package.** Every other check is satisfied by
+  `rust-toolchain.toml` alone — `llvm-tools` supplies `llvm-size`/`llvm-nm`,
+  `loom` is a cfg-gated dev-dependency. QEMU is `apt-get install
+  qemu-system-arm`, with no equivalent on a stock Windows or macOS box.
+- **A check most contributors cannot run makes a green `ci.sh` mean less.** It
+  would report `SKIP` for nearly everyone, and this repo's own rule is that a
+  `SKIP` is not a pass. Fifteen checks that everybody runs is worth more than
+  sixteen where one is usually skipped.
+- **The numbers are not yet stable enough to gate.** Unlike code size — pinned
+  by `rust-toolchain.toml` and verified host-independent — these counts move
+  with the `cortex-m-rt` version, which is a floating dependency of the probe.
+  Gating would need a baseline plus a pinned probe lockfile first.
+
+Run it by hand when changing a hot path, and paste the numbers into the PR the
+way `codesize.sh` output is pasted.
 
 ### Model checking (Loom)
 
