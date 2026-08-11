@@ -35,11 +35,18 @@ export LOOM_MAX_PREEMPTIONS
 
 printf '==> loom (max_preemptions=%s)\n' "$LOOM_MAX_PREEMPTIONS"
 
+# A bare name becomes loom_tests::<name>. Leading Cargo/test flags (anything
+# starting with '-') must pass through unchanged — rewriting them produced
+# filters like loom_tests::--quiet that match nothing and look like a pass.
+filter="loom_tests"
 if [ "$#" -gt 0 ]; then
-    filter="loom_tests::$1"
-    shift
-else
-    filter="loom_tests"
+    case "$1" in
+        -*) ;;
+        *)
+            filter="loom_tests::$1"
+            shift
+            ;;
+    esac
 fi
 
 if RUSTFLAGS='--cfg loom' cargo test --lib "$filter" "$@"; then

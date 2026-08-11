@@ -121,7 +121,7 @@ tied to a compiler and architecture.
 | M1, R1-R2, T1-T2, C1, C3, W1-W2 | `event_mask_is_an_explicit_panic_free_32_bit_set`, `duplicate_raises_coalesce_and_take_clears`, `multi_bit_and_all_bit_masks_round_trip`, and `empty_raise_and_empty_take_are_no_ops` |
 | C1-C3 | Loom's `event_flags_raise_racing_take_is_partitioned_exactly` and `event_flags_distinct_raises_partition_across_takes`; native/Miri threaded stress |
 | S1 | Loom's `event_flags_observed_raise_publishes_payload`; the model fails with either Release or Acquire independently weakened to Relaxed |
-| B1-B3 | Source review; eight-target gated code-size rows; Cortex-M3 QEMU rows; `event-flags-atomic-window.sh` disassembly checks for thumbv6m and ESP32-S2/S3 |
+| B1-B3 | Source review; eight-target gated code-size rows; Cortex-M3 QEMU rows; `event-flags-atomic-window.sh` thumbv6m gate in `verify.sh`, ESP32-S2/S3 via `ESP=1` |
 | H1, H3 | `handles_are_exclusive_and_reusable_after_drop`, including pending-state continuation |
 | H2 | `handles_are_send_and_container_is_sync`; producer and consumer compile-fail doctests pin `!Sync` |
 | H4 | `const_new_works_in_static_context` |

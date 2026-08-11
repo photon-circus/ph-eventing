@@ -287,6 +287,14 @@ mod tests {
     const OVERFLOW: EventMask = EventMask::from_bits(1 << 1);
 
     #[test]
+    fn event_flags_object_is_eight_bytes() {
+        // Pending AtomicU32 + two packed AtomicBool role claims. Docs and the
+        // admission record cite this figure; keep it from drifting silently.
+        assert_eq!(core::mem::size_of::<EventFlags>(), 8);
+        assert_eq!(core::mem::align_of::<EventFlags>(), 4);
+    }
+
+    #[test]
     fn event_mask_is_an_explicit_panic_free_32_bit_set() {
         // Contract M1, R1, and W1-W2.
         assert_eq!(core::mem::size_of::<EventMask>(), 4);

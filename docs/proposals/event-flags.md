@@ -132,9 +132,12 @@ and non-empty code size.
 | ESP32-S2 (opt-in) | 68 | 23 | 22 |
 | ESP32-S3 (opt-in) | 145 | 37 | 36 |
 
-`EventFlags` itself is 12 bytes: pending plus two role-claim atomic words. The
-existing static buffer remains in `.bss`, and the candidate adds no `.data`,
-runtime dependency, allocation, or panic string to either hot path.
+`EventFlags` itself is 8 bytes on the host and gated targets: one `AtomicU32`
+pending word plus two packed `AtomicBool` role claims (`size_of` is pinned by
+unit test). The codesize probe's `bss` row still measures only the existing
+`EventBuf` static (`.bss.*BUF`); it does not report the EventFlags object size.
+The candidate adds no `.data`, runtime dependency, allocation, or panic string
+to either hot path.
 
 ### 4.3 Cortex-M3 instruction counts
 
@@ -157,16 +160,20 @@ nor number of set bits changes the executed work.
 probe. Counts are instructions after the architectural disable instruction
 through restore/synchronization.
 
-| Target | raise | take | Generated path |
-|---|---:|---:|---|
-| thumbv6m | 4 | 4 | PRIMASK: load, update/store, restore; straight-line |
-| ESP32-S2 | 5 | 5 | PS.INTLEVEL=15: load, update/store, `wsr.ps`, `rsync`; straight-line |
-| ESP32-S3 | 0 | 0 | Native `s32c1i`; the esp-rs target advertises 32-bit atomics and does not mask interrupts |
+| Target | raise | take | Gating | Generated path |
+|---|---:|---:|---|---|
+| thumbv6m | 4 | 4 | Always (`./scripts/verify.sh atomic-window`) | PRIMASK: load, update/store, restore; straight-line |
+| ESP32-S2 | 5 | 5 | Opt-in (`ESP=1`, needs esp-rs) | PS.INTLEVEL=15: load, update/store, `wsr.ps`, `rsync`; straight-line |
+| ESP32-S3 | 0 | 0 | Opt-in (`ESP=1`, needs esp-rs) | Native `s32c1i`; the esp-rs target advertises 32-bit atomics and does not mask interrupts |
 
-The thumbv6m and S2 paths each contain exactly one interrupt-masked RMW and no
-branch or hidden compare-exchange loop. The S3 result corrects the exploratory
-assumption that S2 and S3 share a fallback: under esp-rs 1.95.0-nightly, S3 is
-a native-atomic target, so its maximum interrupt-disabled window is zero.
+The Docker verify matrix gates thumbv6m only — the reference image does not
+ship esp-rs, and a SKIP is not a pass. ESP rows are measured on hosts with the
+fork installed (`ESP=1`), the same present-tooling pattern as `XTENSA=1`
+codesize. The thumbv6m and S2 paths each contain exactly one interrupt-masked
+RMW and no branch or hidden compare-exchange loop. The S3 result corrects the
+exploratory assumption that S2 and S3 share a fallback: under esp-rs
+1.95.0-nightly, S3 is a native-atomic target, so its maximum interrupt-disabled
+window is zero.
 
 ## 5. Promotion result
 

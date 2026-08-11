@@ -88,16 +88,18 @@ IDs in parentheses; the clauses are the normative statements.
 | Racing raise partitions across take windows; never erased (C1–C3) | Loom `event_flags_raise_racing_take_is_partitioned_exactly` and `event_flags_distinct_raises_partition_across_takes`; native/Miri threaded stress | Proven |
 | Observed raise publishes prior application memory (S1) | Loom `event_flags_observed_raise_publishes_payload`; fails when either Release or Acquire is independently weakened to Relaxed | Proven |
 | One `fetch_or` / one `swap(0)`; no CAS loop, no history-proportional work (B1–B3) | Source review; Cortex-M3 QEMU: raise **12** / take **8** instructions whether empty or set (constant w.r.t. occupancy and set-bit count) | Measured |
-| Portable-atomic ISR windows stay small on constrained targets | `event-flags-atomic-window.sh`: thumbv6m **4**, ESP32-S2 **5**, ESP32-S3 **0** (native `s32c1i`); one masked RMW, no branch/CAS loop | Measured |
+| Portable-atomic ISR windows stay small on constrained targets | `event-flags-atomic-window.sh`: thumbv6m **4** always gated in `verify.sh`; ESP32-S2 **5** / ESP32-S3 **0** (native `s32c1i`) opt-in via `ESP=1`; one masked RMW, no branch/CAS loop | Measured |
 | Sole-role `Send + !Sync` handles; reacquisition continues pending state (H1–H4) | Exclusivity/reuse unit test; `Send` + container-`Sync` type tests; producer/consumer `compile_fail` doctests pin `!Sync`; `const_new_works_in_static_context` | Proven |
 | Transparent panic-free 32-bit mask (W1–W2) | `EventMask` four-byte transparent layout; `from_index` returns `None` outside `0..32` (no shift panic) | Pinned |
 | No silent `Source`/`Sink` or peek surface (D4, D5, X5) | Absent from the public API; contract non-promises X5; stream/signal traits deferred on the record | Pinned |
-| Cost claims per target | Eight gated code-size rows + three opt-in Xtensa (raise/take 24/24 B thumbv6m, 23/22 B ESP32-S2, 37/36 B ESP32-S3); object is 12 B; static in `.bss` | Measured |
+| Cost claims per target | Eight gated code-size rows + three opt-in Xtensa (raise/take 24/24 B thumbv6m, 23/22 B ESP32-S2, 37/36 B ESP32-S3); object is 8 B (`size_of` unit assert); `EventBuf` static remains in `.bss` (codesize `bss` row) | Measured |
 
-Full CI for the lane (`./scripts/verify.sh`, zero skips): 78 unit tests,
+Full CI for the lane (`./scripts/verify.sh`, zero skips): 77 unit tests,
 11 doctests, 5 compile-fail contracts, 93.60% line coverage, all 8 Loom
 models plus ordering-mutation checks, detector-on Miri host and
-i686/armv7/s390x proxies, feature/embedded builds, supply-chain checks.
+i686/armv7/s390x proxies, feature/embedded builds, supply-chain checks,
+thumbv6m EventFlags interrupt-window gate. ESP32-S2/S3 window rows remain
+opt-in (`ESP=1`) and are outside the Docker zero-SKIP matrix.
 
 ## 4. The record
 

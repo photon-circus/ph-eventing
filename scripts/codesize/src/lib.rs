@@ -18,7 +18,7 @@ fn panic(_: &PanicInfo) -> ! {
 /// no flash and no startup code. Measured as `.bss.*BUF`.
 static BUF: EventBuf<u32, 64> = EventBuf::new();
 
-/// EventFlags is three atomic words: pending plus the two role claims.
+/// EventFlags is one AtomicU32 plus two packed AtomicBool role claims (8 B).
 static FLAGS: EventFlags = EventFlags::new();
 
 #[cfg(feature = "split")]

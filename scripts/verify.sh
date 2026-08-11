@@ -5,19 +5,20 @@
 # builds run without network, but the cargo-deny advisory refresh is
 # time-varying by design and still wants one.
 #
-# Local runs of ci.sh / miri.sh / loom.sh / cycles.sh are only as reproducible
-# as the machine they run on: QEMU builds differ, `+nightly` drifts daily, and
-# the optional gates skip when their tools are absent. This wraps the same
-# scripts in the image scripts/verify/Dockerfile pins, which is the
-# environment the documented numbers come from. See that file for exactly
-# what is pinned and why.
+# Local runs of ci.sh / miri.sh / loom.sh / cycles.sh / the EventFlags
+# atomic-window gate are only as reproducible as the machine they run on:
+# QEMU builds differ, `+nightly` drifts daily, and the optional gates skip when
+# their tools are absent. This wraps the same scripts in the image
+# scripts/verify/Dockerfile pins, which is the environment the documented
+# numbers come from. See that file for exactly what is pinned and why.
 #
 # Usage:
-#   ./scripts/verify.sh            # ci + miri + loom + cycles, in order
+#   ./scripts/verify.sh            # full matrix, in order
 #   ./scripts/verify.sh ci         # one script
 #   ./scripts/verify.sh miri
 #   ./scripts/verify.sh loom
 #   ./scripts/verify.sh cycles
+#   ./scripts/verify.sh atomic-window
 #   ./scripts/verify.sh shell      # interactive shell in the image
 #
 # Requires Docker. Everything else is inside the image.
@@ -66,30 +67,44 @@ run() {
         -v "$(pwd):/work" -w /work "$IMAGE" "$@"
 }
 
+run_script() {
+    case "$1" in
+        ci) run sh scripts/ci.sh ;;
+        miri) run sh scripts/miri.sh ;;
+        loom) run sh scripts/loom.sh ;;
+        cycles) run sh scripts/cycles.sh ;;
+        # thumbv6m only inside the image; ESP rows need esp-rs and stay opt-in
+        # (ESP=1) outside Docker — see event-flags-atomic-window.sh.
+        atomic-window) run sh scripts/event-flags-atomic-window.sh ;;
+        *)
+            printf 'unknown argument: %s (ci|miri|loom|cycles|atomic-window|shell)\n' "$1" >&2
+            return 1
+            ;;
+    esac
+}
+
 case "${1:-all}" in
     shell)
         DOCKER_TTY=1 run bash
         ;;
-    ci)     run sh scripts/ci.sh ;;
-    miri)   run sh scripts/miri.sh ;;
-    loom)   run sh scripts/loom.sh ;;
-    cycles) run sh scripts/cycles.sh ;;
     all)
         # Version stamp first, so any pasted output carries its environment.
         run sh -c 'rustc --version; rustc "+$MIRI_TOOLCHAIN" --version; qemu-system-arm --version | head -1'
         failed=0
-        for s in ci miri loom cycles; do
+        for s in ci miri loom cycles atomic-window; do
             printf '\n########## %s ##########\n' "$s"
-            run sh "scripts/$s.sh" || failed=$((failed + 1))
+            run_script "$s" || failed=$((failed + 1))
         done
         if [ "$failed" -gt 0 ]; then
             printf '\n%s script(s) failed.\n' "$failed"
             exit 1
         fi
         printf '\nFull matrix passed in the reference environment.\n'
+        printf 'Note: EventFlags ESP32-S2/S3 interrupt windows are opt-in\n'
+        printf '(ESP=1 ./scripts/event-flags-atomic-window.sh); they are not\n'
+        printf 'part of this Docker matrix (no esp-rs in the image).\n'
         ;;
     *)
-        printf 'unknown argument: %s (ci|miri|loom|cycles|shell)\n' "$1" >&2
-        exit 1
+        run_script "$1" || exit 1
         ;;
 esac

@@ -231,8 +231,8 @@ memory-ordering proof.
 - Release/Acquire is load-bearing publication. If a take observes a bit, it also
   observes application-owned state sequenced before that raise. The Loom
   publication litmus fails when either side is weakened to Relaxed.
-- Producer and consumer role claims use AcqRel compare-exchange and Release on
-  handle drop. Handles are `Send + !Sync`; their `&self` operations do not grant
+- Producer and consumer role claims use AcqRel `swap` and Release on handle
+  drop. Handles are `Send + !Sync`; their `&self` operations do not grant
   multiple logical producers or consumers.
 
 ### Internal model (SeqRing)
@@ -382,9 +382,16 @@ across builds), the Miri nightly (`+nightly` drifts daily), and the optional
 pins all three, and
 
 ```bash
-./scripts/verify.sh            # ci + miri + loom + cycles, zero SKIPs
+./scripts/verify.sh            # ci + miri + loom + cycles + atomic-window, zero SKIPs
 ./scripts/verify.sh cycles     # one script inside the image
+./scripts/verify.sh atomic-window  # EventFlags thumbv6m interrupt-mask gate
 ```
+
+`atomic-window` gates the thumbv6m PRIMASK window only. ESP32-S2/S3 rows stay
+opt-in (`ESP=1 ./scripts/event-flags-atomic-window.sh`, like `XTENSA=1` for
+codesize) because the reference Docker image deliberately does not ship
+esp-rs; treating a missing fork as a green verify would break the zero-SKIP
+rule.
 
 runs the matrix inside it. The documented instruction counts are measured
 there; cite results together with the versions each run prints. The script
@@ -710,10 +717,11 @@ Three results carry the argument:
    that is measured rather than asserted.
 3. **EventFlags is constant across condition state.** Raise is 12 instructions
    whether the bit is clear or already set; take is 8 whether non-empty or
-   empty. On the portable paths, `event-flags-atomic-window.sh` additionally
-   pins straight-line masked windows of 4 instructions on thumbv6m and 5 on
-   ESP32-S2; ESP32-S3 masks interrupts for zero instructions under its native
-   `S32C1I` path.
+   empty. `./scripts/verify.sh atomic-window` (and the default verify matrix)
+   additionally pins the thumbv6m straight-line masked window at 4
+   instructions. ESP32-S2 (5) and ESP32-S3 (0 under native `S32C1I`) remain
+   opt-in via `ESP=1 ./scripts/event-flags-atomic-window.sh` — measured on
+   hosts with esp-rs, not claimed by the Docker zero-SKIP matrix.
 
 The rejected push is *cheaper* than an accepted one — backpressure is an early
 return, not extra work.
@@ -857,6 +865,7 @@ cargo test
 - `static_buf_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` buffer
 
 **`event_flags::tests`:**
+- `event_flags_object_is_eight_bytes` — `size_of::<EventFlags>() == 8` layout pin
 - `event_mask_is_an_explicit_panic_free_32_bit_set` — exact-width mask and checked bit construction
 - `duplicate_raises_coalesce_and_take_clears` — duplicate coalescing and destructive take
 - `multi_bit_and_all_bit_masks_round_trip` — multi-condition and all-condition masks
@@ -908,7 +917,7 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 76 unit tests + 11 doctests, plus 5
+and `src/traits.rs`. Total: 77 unit tests + 11 doctests, plus 5
 `compile_fail` doctests: three pin the `N == 0` rejection (`E0080`) on the
 buffer types and two pin the EventFlags handle `!Sync` contract.
 

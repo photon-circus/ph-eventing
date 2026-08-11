@@ -27,14 +27,17 @@ All notable changes to this project will be documented in this file.
 - EventFlags admission evidence: three Loom models (including a publication litmus whose Release
   and Acquire mutation checks both fail as intended), detector-on Miri coverage, eight gated and
   three opt-in Xtensa code-size rows, four Cortex-M3 instruction regions, and a reproducible
-  portable-atomic disassembly check. The masked window is 4 instructions on thumbv6m and 5 on
-  ESP32-S2; ESP32-S3 uses native `s32c1i` and masks interrupts for 0 instructions under the
-  measured esp-rs toolchain.
+  portable-atomic disassembly check. The thumbv6m masked window (4 instructions) is gated by
+  `./scripts/verify.sh atomic-window`; ESP32-S2 (5) and ESP32-S3 (0 under native `s32c1i`) stay
+  opt-in via `ESP=1` because the reference Docker image does not ship esp-rs.
 
 ### Fixed
-- `scripts/loom.sh <filter>` now scopes the filter to `loom_tests::<filter>` instead of passing a
-  second positional test filter to Cargo. The documented `./scripts/loom.sh event_buf` form was
-  rejected by Cargo before any model ran.
+- `scripts/loom.sh <filter>` now scopes a bare name filter to `loom_tests::<filter>` instead of
+  passing a second positional test filter to Cargo. Leading Cargo/test flags (arguments that
+  start with `-`) pass through unchanged, so forms like `./scripts/loom.sh -- --nocapture` are
+  not rewritten into a no-op `loom_tests::--` filter.
+- `EventFlags` object-size claim corrected from 12 B to the measured 8 B (`size_of` unit assert);
+  AGENTS.md role-claim wording aligned with the AcqRel `swap` implementation.
 
 ### Documentation
 - `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
