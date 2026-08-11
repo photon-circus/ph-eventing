@@ -702,6 +702,7 @@ cargo test
 - `iter_exact_size` — ExactSizeIterator
 - `default_is_new` — Default impl
 - `works_without_default_bound` — `T: Copy` only, no `Default`
+- `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
 - `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
 - `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
@@ -765,7 +766,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 2 `compile_fail` doctests pinning the `N == 0` rejection (`E0080`).
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 69 unit tests + 11 doctests, plus 3 `compile_fail` doctests pinning the `N == 0` rejection (`E0080`) on all three types.
 
 ## Code Conventions
 
@@ -782,6 +783,10 @@ cargo test
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- No panics in hot paths. `RingBuf::new` rejects `N == 0` with a **const**
+  assertion, so a zero-capacity ring fails the build rather than panicking —
+  which also means no test can cover the rejection, and the const assertion is
+  the only thing enforcing it
 - No panics in hot paths; only assertions are in `::new()` for `N > 0`
 - Unsafe code is confined to `SeqRing`'s and `EventBuf`'s `UnsafeCell` / `MaybeUninit` operations; `RingBuf` uses no unsafe
 - No panics in hot paths; `N > 0` is a const assertion on the host `SeqRing` /

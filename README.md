@@ -162,6 +162,7 @@ them is a runtime step and always will be.
 - `get(i)` returns the `i`-th element where `0` is the oldest.
 - `latest()` returns the most recently pushed element.
 - `iter()` yields elements oldest → newest.
+- `new()` is a `const fn`; `N == 0` fails at compile time.
 
 ### SeqRing
 - Sequence numbers are monotonically increasing `u32` values; `0` is reserved for "empty".

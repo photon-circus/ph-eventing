@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `RingBuf::new()` is a `const fn`, so a ring can be const-initialised inside an interior-mutability
+  wrapper — `static LOG: Mutex<RefCell<RingBuf<u32, 64>>> = Mutex::new(RefCell::new(RingBuf::new()));`
+  — which previously needed a `StaticCell` and a runtime init step. A bare `static RingBuf` is of
+  little use on its own, since every mutator takes `&mut self`.
+
+### Added
+- `compile_fail` doctest covering `RingBuf`'s `N == 0` rejection, restoring the coverage that
+  `zero_capacity_panics` provided before the check moved to compile time. The expected error code
+  is pinned (`compile_fail,E0080`) so it cannot pass for the wrong reason.
 ### Fixed
 - `RingBuf` accessors no longer overflow at very large `N`. The slot index formed an intermediate
   up to `3N`; a zero-sized `T` makes `RingBuf<(), { usize::MAX }>` constructible, so `get`/`latest`
@@ -13,6 +23,9 @@ All notable changes to this project will be documented in this file.
   so a future change to the cursor representation could fix `get` and silently invalidate `latest`.
 
 ### Changed
+- **Breaking:** `RingBuf::new()` rejects `N == 0` with a const assertion instead of a runtime
+  `assert!`. `RingBuf::<u32, 0>::new()` no longer compiles where it previously panicked, and the
+  `zero_capacity_panics` test is gone because the case can no longer be written.
 - **Breaking:** `RingBuf` no longer requires `T: Default`. Slots are stored as `MaybeUninit<T>`
   and only live entries are read. Relaxing a bound is compatible for callers, but `RingBuf` is no
   longer free of `unsafe`, which was a documented property of the type — so it is recorded as

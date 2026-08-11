@@ -48,10 +48,41 @@ pub struct RingBuf<T: Copy, const N: usize> {
 impl<T: Copy, const N: usize> RingBuf<T, N> {
     /// Create a new, empty ring buffer.
     ///
+    /// This is a `const fn`, so the buffer can be built in a `const` or
+    /// `static` initialiser. Note that `push`, `pop`, and `clear` take
+    /// `&mut self`, so a bare `static RingBuf` is read-only and of little use,
+    /// and `static mut` is a hard error to reference under edition 2024. The
+    /// pattern this actually enables is const-initialising the buffer *inside*
+    /// an interior-mutability wrapper, which is how a single-owner buffer is
+    /// reached from an interrupt context:
+    ///
+    /// ```text
+    /// // with critical-section, cortex-m, or similar:
+    /// static LOG: Mutex<RefCell<RingBuf<u32, 64>>> =
+    ///     Mutex::new(RefCell::new(RingBuf::new()));
+    /// ```
+    ///
+    /// Without a const `new` that initialiser is impossible and you need a
+    /// `StaticCell` or a `OnceCell` and a runtime init step.
+    ///
+    /// # Capacity `0` is a build failure
+    /// The `N > 0` check is a *const* assertion, so a zero-capacity ring cannot
+    /// be constructed at all -- there is no runtime panic left to catch, and
+    /// therefore no way to write the negative case as a `#[test]`
+    /// (`zero_capacity_panics` was deleted for exactly this reason). This
+    /// `compile_fail` doctest is that coverage, and pinning the error code
+    /// keeps it honest: a bare `compile_fail` would also pass on a typo.
+    ///
+    /// ```compile_fail,E0080
+    /// let _ = ph_eventing::RingBuf::<u32, 0>::new();
+    /// ```
+    ///
     /// # Panics
-    /// Panics if `N == 0`.
-    pub fn new() -> Self {
-        assert!(N > 0, "RingBuf capacity N must be > 0");
+    /// Does not panic.
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "RingBuf capacity N must be > 0");
+        }
         Self {
             buf: [const { MaybeUninit::uninit() }; N],
             head: 0,
@@ -309,10 +340,31 @@ mod tests {
         assert!(r.is_empty());
     }
 
+    // `zero_capacity_panics` used to live here and could not survive the const
+    // assertion: `RingBuf::<u32, 0>::new()` no longer builds, so there is no
+    // runtime panic left to catch and no way to write the negative case as a
+    // `#[test]`. The rejection is now enforced by the compiler instead, which
+    // is stronger -- but it means nothing in this suite covers it, so the
+    // const assertion itself is the only thing keeping N > 0 true.
+
     #[test]
-    #[should_panic(expected = "RingBuf capacity N must be > 0")]
-    fn zero_capacity_panics() {
-        let _ = RingBuf::<u32, 0>::new();
+    fn const_new_works_in_const_context() {
+        // The const initialiser is the feature. A `static RingBuf` is itself
+        // near-useless because every mutator needs `&mut self` -- the real
+        // shape is this one nested inside an interior-mutability wrapper, and
+        // that is exactly what a non-const `new` makes impossible.
+        const EMPTY: RingBuf<u32, 4> = RingBuf::new();
+        static LOG: RingBuf<u32, 8> = RingBuf::new();
+
+        assert!(EMPTY.is_empty());
+        assert_eq!(EMPTY.capacity(), 4);
+        assert!(LOG.is_empty());
+        assert_eq!(LOG.capacity(), 8);
+
+        // Const-constructed and runtime-constructed rings behave identically.
+        let mut r = EMPTY;
+        r.push(1);
+        assert_eq!(r.get(0), Some(1));
     }
 
     /// A zero-sized `T` makes an enormous `N` genuinely constructible, since
