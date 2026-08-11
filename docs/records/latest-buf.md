@@ -5,17 +5,19 @@
   (D1–D3, A.1–A.3); awaiting acceptance review and release assembly.
 - **Normative sources:** [contract](../proposals/latest-buf-contract.md)
   (clause IDs cited below) · [proposal](../proposals/latest-buf.md) ·
-  [evaluation record](../proposals/latest-buf-evaluation.md) (lane) ·
-  measurement records (lane): `latest-buf-measurements.md`,
-  `latest-block-composition-measurements.md`.
+  lane-resident until #35 merges (paths become repo-relative then):
+  [evaluation record](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-evaluation.md) ·
+  [measurements](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md) ·
+  [joint composition matrix](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md).
 
 ## 1. Value statement
 
 `LatestBuf<T>` is a three-slot SPSC channel for the freshness-first niche:
 the producer never waits, never fails, and never touches bytes the
 consumer is reading; the consumer always receives the newest complete
-publication, with every displaced publication *counted* rather than
-hidden. Its soundness argument is ownership transfer **before** access —
+publication, with displaced publications *counted* rather than hidden —
+exactly within one wrap span, under-counted beyond it, a boundary X6
+states rather than buries (§2). Its soundness argument is ownership transfer **before** access —
 provable by Miri with the race detector on — instead of a seqlock's
 post-hoc validation, which is the headline property: a lock-free
 latest-value channel whose absence of data races is machine-checked, not
@@ -135,7 +137,8 @@ C3 formula misstatement, an unsatisfiable O2 congruence claim, and an
 overclaimed stall-only trigger — every finding confirmed, none
 disputed). The corrected text is *stricter* than the drafts it replaced.
 
-**Where the numbers live:** `latest-buf-measurements.md` (11-target code
-size, pinned cycles, A.1 comparison, RAM); 
-`latest-block-composition-measurements.md` (the joint D3 matrix);
-tracking: issues #26/#27, PRs #35/#37.
+**Where the numbers live** (lane-resident until #35 merges):
+[`latest-buf-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md)
+(11-target code size, pinned cycles, A.1 comparison, RAM);
+[`latest-block-composition-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md)
+(the joint D3 matrix); tracking: issues #26/#27, PRs #35/#37.
