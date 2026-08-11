@@ -652,7 +652,9 @@ Contract:
 - consumes that publication;
 - may skip intermediate publications;
 - reports the transport generation and skipped count;
-- never returns an older generation after a newer one.
+- never returns an older generation after a newer one within one wrap span
+  (the scope of contract clause C5; behaviour beyond a full generation
+  cycle is decided with contract decision point D1).
 
 This is intentionally different from a FIFO `Source`.
 

@@ -215,7 +215,7 @@ without a row here is a clause nobody is keeping true.
 | O1–O3 | Property assertions inside the Loom models and the stress test (conservation counting on both sides) |
 | B1–B3 | Code review of the final algorithm (no loops) + `cycles.sh` regions showing cost constant w.r.t. lag/occupancy |
 | B4 | `codesize.sh` panic-string probe (the 0.2.0 technique) |
-| H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation tests: the generation sequence resumes across the drop and no storage is ever owned by two roles. The drop→reacquire handoff is a cross-context handoff, so it additionally gets a Loom model (drop in one thread, reacquire in another) and race-detector-on Miri coverage — sequential tests cannot see a missing publication ordering on the continuation state |
+| H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation checks stated observably: after a drop in one context and reacquisition in another, the generation sequence resumes (G1) and skipped accounting still satisfies C3 — exercised under Loom and race-detector-on Miri, because a sequential test cannot exercise a cross-context handoff. How continuation state survives the drop is the implementation's concern, and validating that mechanism belongs to the proposal's evidence (Appendix A.3), not this map |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
 
 ## 11. Relationship to the design sketch
