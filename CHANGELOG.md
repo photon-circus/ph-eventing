@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Documentation
+- `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
+  (a) + (c) — `skipped` is exact within one wrap span, a documented modular approximation
+  beyond it, and callers whose requirement is the count itself are pointed at a wider
+  producer-assigned payload sequence or a saturating counter. The wrap family (C3, C5, O2)
+  now carries its beyond-span text, and a new non-promise **X6** states the limitation for
+  adopters: the boundary is reachable only through consumer stall, the channel deliberately
+  does not detect the crossing, and a full-cycle gap reports zero. Option (b) — an explicit
+  "wrapped/unknown" state — is rejected on the record: it prices wrap detection into every
+  hot-path operation and still cannot recover the lost count.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so

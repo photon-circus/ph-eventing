@@ -653,8 +653,8 @@ Contract:
 - may skip intermediate publications;
 - reports the transport generation and skipped count;
 - never returns an older generation after a newer one within one wrap span
-  (the scope of contract clause C5; behaviour beyond a full generation
-  cycle is decided with contract decision point D1).
+  (the scope of contract clause C5; per D1's closure, no ordering claim is
+  made beyond a full generation cycle — contract C5/X6).
 
 This is intentionally different from a FIFO `Source`.
 
@@ -911,6 +911,12 @@ inherently ambiguous. The API should either:
 - document the maximum observable gap;
 - return an "unknown or wrapped" gap state; or
 - rely on a wider producer-assigned acquisition sequence in the payload.
+
+**Decision (D1, closed 2026-08-11):** the first and third together. The
+contract's C3/C5/O2 carry the beyond-span text and non-promise X6 states
+the limitation for adopters — including why the second option was rejected
+(hot-path cost, and "unknown" cannot recover the lost count). See the
+contract §9.
 
 Transport generation should not be mistaken for permanent global identity.
 

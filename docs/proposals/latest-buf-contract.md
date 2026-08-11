@@ -83,22 +83,27 @@ and all clauses below are stated against the sequence of those instants.
   displaced before this consumer observed them. Taking the immediate
   successor of `last_taken` yields `skipped = 0`; last-taken 101 and taken
   104 yields `skipped = 2`. Beyond one wrap span the exact count is
-  inherently unrecoverable; closing D1 defines what `skipped` reports
-  there.
+  inherently unrecoverable; per D1's closure, `skipped` reports the
+  wrap-aware modular approximation (the G3 distance between the two
+  endpoint generations). In particular, a gap of exactly one full
+  generation cycle reports `skipped = 0` — a documented silent under-count
+  in that case (X6).
 - **C4.** Each publication is observed **at most once** — the same
   publication *instance* is never returned twice, unconditionally. Stated
   per generation **value**, the claim carries C5's one-wrap-span scope: a
   taken generation value does not reappear unless a full generation cycle
   has passed and a genuinely newer publication reuses it, which is the
-  beyond-span case decided with D1.
+  beyond-span case D1's closure documents (§9, X6).
 - **C5.** Observed generations are strictly increasing in wrap-aware order
   **within one wrap span** (the same scope as O2): while fewer than a full
   generation cycle of publications separates two takes, `take_latest`
   never returns a generation older than or equal to a previously returned
   one. Beyond that span a genuinely newer publication can carry a
   previously seen generation value, so the comparison is inherently
-  ambiguous there — closing D1 must define the ordering behaviour for that
-  case along with the gap reporting.
+  ambiguous there. Per D1's closure, **no ordering claim is made beyond one
+  wrap span**: an observed generation may repeat or appear to regress
+  relative to one taken a full cycle earlier, and consumers must not treat
+  generation comparison as a total order across such a gap (X6).
 - **C6.** The value returned under generation `g` is exactly and completely
   the value published under `g` (with P6: no torn, mixed, or partially
   initialized value is ever returned).
@@ -123,7 +128,10 @@ and all clauses below are stated against the sequence of those instants.
   it lands in the `skipped` of the next successful take. No generation is
   double-counted and none disappears; immediately after a successful take
   the awaiting-report set is empty, so at those observation points the
-  first three states account for everything.
+  first three states account for everything. Beyond one wrap span, per
+  D1's closure, conservation holds modulo the number of assignable
+  generations in one span: the four-state accounting stays internally
+  consistent, but `skipped` totals lose whole cycles (C3, X6).
 - **O3.** *(No fabrication)* Every generation returned or counted was
   assigned by a real `publish` call. `skipped` never includes generations
   that were never assigned (in particular, never the reserved `0` — G3).
@@ -184,22 +192,55 @@ the measured implementation, per environment.
 - **X5.** Real-time guarantees. B-clauses are algorithmic bounds; wall-clock
   and instruction costs are measured claims, stated per target and
   toolchain.
+- **X6.** Exact loss accounting beyond one wrap span. `skipped` is exact
+  while fewer than a full generation cycle of publications separates two
+  consecutive takes; beyond that it is a modular approximation, and a gap
+  of exactly one full cycle reports zero (C3) — a silent under-count in
+  that case. Three facts frame this honestly for adopters:
+  - The boundary is reachable **only through consumer stall, never
+    producer burst**: publishing a full cycle between two takes at any
+    realistic take cadence requires a physically impossible publication
+    rate, so crossing it means the consumer did not run while a full
+    cycle of publications occurred (for a 32-bit generation: ~49.7 days
+    of continuous 1 kHz publishing, ~72 minutes at 1 MHz).
+  - The channel deliberately does **not detect** the crossing. Detection
+    would require widening hot-path state (a wider generation or a wrap
+    epoch), and even a detected "unknown" cannot recover the lost count —
+    it converts a silent under-count into a named one at a per-operation
+    cost on exactly the constrained targets this primitive exists for.
+  - Callers whose **requirement is the count itself** — audit, metering,
+    regulatory loss accounting — must carry a wider producer-assigned
+    sequence inside `T` (time and identity belong to the payload, X3) or
+    use a saturating-counter primitive; a stalled-consumer *liveness*
+    requirement belongs to the supervision layer (watchdog/heartbeat),
+    which detects a dead consumer orders of magnitude sooner than any
+    generation wrap.
 
-## 9. Decision points (D) — deferred by maintainer decision (2026-08-11)
+## 9. Decision points (D)
 
-All three remain open deliberately; none blocks contract review. They must
-be closed before implementation (step 2 of the adoption sequence) begins.
+D1 is **closed** (2026-08-11, below). D2 and D3 remain open deliberately;
+neither blocks contract review, and both must be closed before the
+implementation is accepted.
 
-- **D1. Wrap-ambiguity policy.** If more than a full generation cycle of
-  publications occurs between two takes, `skipped` is inherently ambiguous
-  (proposal §18). The contract must pick one before implementation:
-  (a) document the maximum reliable gap and leave larger gaps approximate;
-  (b) return an explicit "unknown/wrapped" gap state;
-  (c) point callers at a wider producer-assigned sequence in the payload.
-  C3, C5, and O2 are all scoped "within one wrap span" until this is
-  decided; closing D1 must define, for the beyond-span case, the gap
-  reporting (C3), the ordering behaviour (C5), and the accounting (O2) —
-  the whole wrap family closes together.
+- **D1. Wrap-ambiguity policy — CLOSED (maintainer, 2026-08-11): options
+  (a) + (c) together.** `skipped` is exact within one wrap span and reports
+  the documented modular approximation beyond it (a); callers whose
+  requirement is the count itself are pointed at a wider producer-assigned
+  sequence carried in the payload or a saturating-counter primitive (c).
+  The whole wrap family closes with it: C3 (beyond-span gap reporting), C5
+  (no beyond-span ordering claim), O2 (modular conservation), and the new
+  X6 (the non-promise, stated so a downstream user can decide against the
+  type with full information). Option (b) — an explicit "unknown/wrapped"
+  state — was rejected on two independent grounds recorded in X6: it
+  prices wrap detection into every hot-path operation on the targets the
+  primitive exists for, and it still cannot serve the accounting mission,
+  because "unknown" does not recover a count that exceeded the counter.
+  **Documentation obligation, binding on the implementation:** the concrete
+  type's public documentation must carry the X6 disclosure prominently —
+  the exactness span, the silent-zero full-cycle case, the stall-only
+  reachability arithmetic at representative rates, and the (c) escape
+  hatch. "Unreachable in practice" is a measured claim to be shown, never
+  a reason for silence.
 - **D2. `Source<T>` policy.** Whether the consumer implements the existing
   `Source<T>` (proposal §13). The contract default is the proposal's option
   1 (no impl; `LatestSource` only) — the safest position given the
@@ -225,6 +266,7 @@ without a row here is a clause nobody is keeping true.
 | B4 | `codesize.sh` panic-string probe (the 0.2.0 technique) |
 | H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation checks stated observably: after a drop in one context and reacquisition in another, the generation sequence resumes (G1) and skipped accounting still satisfies C3 — exercised under Loom and race-detector-on Miri, because a sequential test cannot exercise a cross-context handoff. How continuation state survives the drop is the implementation's concern, and validating that mechanism belongs to the proposal's evidence (Appendix A.3), not this map |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
+| C3/C5/O2 beyond-span, X6 (D1 closure) | Unit test pinning the full-cycle modular result (equal endpoints report zero — the prototype's `full_generation_cycle_uses_documented_approximation` is the template), alongside the G1–G3 wrap-boundary tests; a documentation check that the concrete type's public docs carry the X6 disclosure (span, silent-zero case, reachability arithmetic, escape hatch) |
 
 ## 11. Relationship to the design sketch
 
