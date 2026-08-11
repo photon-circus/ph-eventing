@@ -287,9 +287,9 @@ in a task loop. That works, with three things to know:
   shared reference can be handed to both
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
-  There is no way to get a second `Producer` while one is live: `producer()`
-  panics rather than handing out a duplicate; `try_producer` /
-  `try_consumer` return `None` instead.
+  There is no way to get a second `Producer` while one is live:
+  `try_producer` / `try_consumer` return `None` rather than handing out a
+  duplicate.
 - **The buffer must outlive both handles.** The handles borrow it, so the usual
   answer is to own the buffer where it lives longest.
 - **`new()` is a `const fn`** on the normal build, so
@@ -334,7 +334,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 78 unit + 11 doctests + 5 compile-fail | Behaviour, including threaded stress for all concurrent types; `N == 0` and EventFlags handle `!Sync` contracts rejected at compile time |
+| 76 unit + 11 doctests + 5 compile-fail | Behaviour, including threaded stress for all concurrent types; `N == 0` and EventFlags handle `!Sync` contracts rejected at compile time |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

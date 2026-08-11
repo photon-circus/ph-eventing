@@ -845,8 +845,6 @@ cargo test
 - `drain_returns_count` — Drain with callback
 - `drain_on_empty_returns_zero` — Empty drain
 - `producer_consumer_can_be_recreated` — Handle drop/recreate
-- `double_producer_panics` — SPSC enforcement
-- `double_consumer_panics` — SPSC enforcement
 - `wraps_around_correctly` — Multi-round wrap exercise
 - `default_is_new` — Default impl
 - `len_and_full_track_state` — len/is_empty/is_full tracking
@@ -910,7 +908,7 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-and `src/traits.rs`. Total: 78 unit tests + 11 doctests, plus 5
+and `src/traits.rs`. Total: 76 unit tests + 11 doctests, plus 5
 `compile_fail` doctests: three pin the `N == 0` rejection (`E0080`) on the
 buffer types and two pin the EventFlags handle `!Sync` contract.
 
