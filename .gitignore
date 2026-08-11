@@ -4,6 +4,10 @@
 # so it builds into its own target dir that the root-anchored rule above misses.
 /scripts/codesize/target
 /scripts/cycles/target
+# The cycle probe is a binary, so cargo writes a lockfile. It is deliberately
+# not committed: pinning cortex-m-rt would contradict the stated reason for not
+# gating cycle counts. If they are ever gated, commit it then, with a baseline.
+/scripts/cycles/Cargo.lock
 **/*.rs.bk
 *.profraw
 
