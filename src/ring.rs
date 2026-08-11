@@ -137,9 +137,21 @@ impl<T: Copy, const N: usize> RingBuf<T, N> {
     ///
     /// Callers must ensure `i < self.len`; the result is only a valid slot
     /// under that precondition.
+    ///
+    /// Steps back from `head` rather than computing `(head + N - len + i) % N`.
+    /// That form is easier to read but forms an intermediate up to `3N`, which
+    /// overflows for a large `N` -- and a large `N` is reachable, because a
+    /// zero-sized `T` makes `RingBuf<(), { usize::MAX }>` constructible. An
+    /// accessor that panics in an overflow-checking build would break the
+    /// no-panic guarantee. Here nothing exceeds `N`.
     #[inline(always)]
     const fn index(&self, i: usize) -> usize {
-        (self.head + N - self.len + i) % N
+        let back = self.len - i; // 1..=len, so no underflow given i < len
+        if self.head >= back {
+            self.head - back
+        } else {
+            N - (back - self.head)
+        }
     }
 
     /// Read the `i`-th element (0 = oldest).
@@ -158,8 +170,14 @@ impl<T: Copy, const N: usize> RingBuf<T, N> {
         if self.len == 0 {
             return None;
         }
-        let idx = if self.head == 0 { N - 1 } else { self.head - 1 };
-        // SAFETY: `len > 0`, so the slot behind `head` was written by `push`.
+        // Routed through `index` like every other read. The open-coded
+        // `head - 1` it replaces was correct, but it was a second, independent
+        // slot calculation -- so a future change to the cursor representation
+        // could fix `get` and silently invalidate this one. One indexing path
+        // means one unsafe proof.
+        let idx = self.index(self.len - 1);
+        // SAFETY: `len > 0`, so `index(len - 1)` is the newest live slot,
+        // written by `push`.
         Some(unsafe { self.buf[idx].assume_init() })
     }
 
@@ -347,6 +365,23 @@ mod tests {
         let mut r = EMPTY;
         r.push(1);
         assert_eq!(r.get(0), Some(1));
+    }
+
+    /// A zero-sized `T` makes an enormous `N` genuinely constructible, since
+    /// the backing array is zero-sized too. The earlier `(head + N - len + i)`
+    /// index formed an intermediate up to `3N` and panicked here in an
+    /// overflow-checking build -- which unit tests are. Accessors must stay
+    /// panic-free.
+    #[test]
+    fn huge_capacity_does_not_overflow_the_index() {
+        let mut r = RingBuf::<(), { usize::MAX }>::new();
+        r.push(());
+        assert_eq!(r.len(), 1);
+        assert_eq!(r.get(0), Some(()));
+        assert_eq!(r.latest(), Some(()));
+        r.push(());
+        assert_eq!(r.get(1), Some(()));
+        assert_eq!(r.latest(), Some(()));
     }
 
     #[test]

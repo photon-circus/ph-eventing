@@ -462,6 +462,8 @@ cargo test
 - `default_is_new` — Default impl
 - `works_without_default_bound` — `T: Copy` only, no `Default`
 - `const_new_works_in_const_context` — const / `static` initialiser; `N == 0` is now a build failure, not a runtime panic
+- `huge_capacity_does_not_overflow_the_index` — accessors stay panic-free at `N = usize::MAX`
+- `zero_capacity_panics` — N=0 assertion
 - `capacity_returns_n` — capacity() API
 - `into_iter_for_ref` — IntoIterator for &RingBuf
 
@@ -519,7 +521,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 59 unit tests + 7 doctests, plus 1 `compile_fail` doctest pinning the `N == 0` rejection (`E0080`) that `zero_capacity_panics` used to cover.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 60 unit tests + 7 doctests, plus 1 `compile_fail` doctest pinning the `N == 0` rejection (`E0080`) that `zero_capacity_panics` used to cover.
 
 ## Code Conventions
 

@@ -13,6 +13,14 @@ All notable changes to this project will be documented in this file.
 - `compile_fail` doctest covering `RingBuf`'s `N == 0` rejection, restoring the coverage that
   `zero_capacity_panics` provided before the check moved to compile time. The expected error code
   is pinned (`compile_fail,E0080`) so it cannot pass for the wrong reason.
+### Fixed
+- `RingBuf` accessors no longer overflow at very large `N`. The slot index formed an intermediate
+  up to `3N`; a zero-sized `T` makes `RingBuf<(), { usize::MAX }>` constructible, so `get`/`latest`
+  panicked there in an overflow-checking build, breaking the no-panic guarantee. The index now
+  steps back from `head` and nothing exceeds `N`. Found by automated review on the PR.
+- `RingBuf::latest` now routes through the same private `index` helper as every other read. The
+  open-coded calculation it replaced was correct, but it was a second independent slot computation,
+  so a future change to the cursor representation could fix `get` and silently invalidate `latest`.
 
 ### Changed
 - **Breaking:** `RingBuf::new()` rejects `N == 0` with a const assertion instead of a runtime
