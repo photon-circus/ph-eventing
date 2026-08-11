@@ -305,4 +305,6 @@ no block-specific evidence; Loom remains required for the selected transport.
    obligation rides to promotion with them: the **double-copy hazard**
    guidance for DMA integrations — make the builder the DMA target, or
    publish from task context — stated in the block-payload docs, not left
-   for integrators to discover.
+   for integrators to discover. **Landed:** the `src/block.rs` module
+   docs now carry all four bound disclosures (per-shape RAM, small-`N`
+   inversion, rejection cost, double-copy DMA guidance).

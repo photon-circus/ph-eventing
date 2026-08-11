@@ -80,8 +80,9 @@ section and contract IDs in parentheses; those texts are normative.
 - **The double-copy hazard is real for DMA integrations (P
   obligation).** DMA already wrote the bytes once; builder-then-publish
   crosses them twice unless the builder is the DMA target or publication
-  moves to task context. The block-payload docs owe this guidance at
-  promotion — integrators must not discover the second copy.
+  moves to task context. Landed: the `src/block.rs` module docs carry
+  this guidance (with the RAM, inversion, and rejection-cost
+  disclosures), so integrators choose rather than discover.
 - **Drop-new is an action, not a type (§5.1).** There is no
   `DropBlockBuf`; discarding a newly completed block is what the caller
   does with `Err(block)`. Loss after completion is reported by the

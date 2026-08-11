@@ -15,6 +15,42 @@
 //! Timestamps are payload policy: use a timestamped sample type for `T` when
 //! each sample needs a stamp. The transport does not impose one.
 //!
+//! # Costs and integration (measured; bound by decisions D3 and P)
+//!
+//! **RAM is multiple complete blocks, always.** The latest composition
+//! (`LatestBuf<Block<T, N>>`) holds three block slots plus this private
+//! builder — 136–8,280 bytes of combined channel + builder RAM across the
+//! measured 2/8/16-byte × `N = 8/32/128` grid. The queued composition
+//! stores `Q` blocks plus the builder. The cost is fixed and in `.bss`,
+//! but it is not small: state the number for your shape.
+//!
+//! **Small windows can invert the economics.** Continuous block release
+//! beats `N` individual sample publications for every measured 2-byte row
+//! and for 8/16-byte samples at `N >= 32`, but costs 54% / 31% *more* at
+//! the 8/16-byte `N = 8` corners. For tiny windows, per-sample
+//! publication through a plain channel may be the cheaper shape.
+//!
+//! **Publication cost scales with block bytes** — 159–8,658 reference
+//! instructions across the measured grid — and rejection is within 5–31
+//! instructions of acceptance, because the complete rejected block is
+//! preserved and returned rather than reduced to a scalar error. Budget
+//! rejection like acceptance, not like error plumbing.
+//!
+//! **DMA integrations: mind the double copy.** A DMA engine has already
+//! written the samples once; filling this builder from the DMA buffer and
+//! then publishing crosses the payload a second time. Either make the
+//! builder's storage the DMA target, or publish from task context where
+//! the copy is off the interrupt path. (DMA cache maintenance remains
+//! outside this crate, per the taxonomy's out-of-scope list.)
+//!
+//! **No partial block is ever visible** — sample-level freshness inside a
+//! filling window is unobtainable by design, stated here so it is chosen,
+//! not discovered.
+//!
+//! The measured rows behind these numbers live in
+//! `docs/proposals/block-buf-measurements.md` and the joint composition
+//! matrix; the decision record is `docs/records/block-buf.md`.
+//!
 //! # Example
 //! ```
 //! use ph_eventing::{BlockBuilder, EventBuf};
