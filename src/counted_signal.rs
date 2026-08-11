@@ -12,8 +12,11 @@
 //! RMW (`fetch_or(0)`), which — unlike a load — observes the latest value in
 //! modification order: `MAX` confirms true saturation (skip), anything else
 //! means a completed take reset the counter and the producer `fetch_add`s into
-//! the new epoch. Every path is a fixed instruction sequence on every gated
-//! ISA — no compare-exchange, so no LR/SC retry loop on RISC-V. Multiple
+//! the new epoch. Every path is a fixed sequence of at most three source-level
+//! atomic operations — no compare-exchange and no algorithmic retry. On
+//! exclusive-monitor Arm each single RMW is realised as an LDREX/STREX pair
+//! that repeats only when an intervening event claims the word; contract B1
+//! carries the full per-ISA disclosure. Multiple
 //! producers would invalidate the proof.
 //!
 //! The counter carries no payload-publication semantics. These Relaxed
@@ -129,19 +132,22 @@ impl Default for CountedSignal {
     }
 }
 
+// Deliberately opaque: printing `count` would be a non-clearing peek —
+// the advisory observation the API deliberately lacks (destructive
+// `take_count` is the only read) — without the take's snapshot semantics.
+// Debug is required by convention; it reports the type, not the state.
+// Same rationale as EventFlags' opaque Debug.
 impl core::fmt::Debug for CountedSignal {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("CountedSignal")
-            .field("count", &self.count.load(Ordering::Relaxed))
-            .finish_non_exhaustive()
+        f.debug_struct("CountedSignal").finish_non_exhaustive()
     }
 }
 
 /// The sole incrementing handle for a [`CountedSignal`].
 ///
 /// This handle is `Send + !Sync`. Its exclusivity is what keeps exact
-/// saturation wrap-free with a fixed instruction sequence on every path —
-/// the sentinel re-read is a no-op RMW, never a retry loop.
+/// saturation wrap-free with a fixed source-level sequence on every path —
+/// the sentinel re-read is a no-op RMW, never an algorithmic retry loop.
 ///
 /// The load-bearing `!Sync` property is pinned at compile time:
 ///
@@ -164,8 +170,12 @@ impl Producer<'_> {
     /// `MAX` confirms saturation (skip), anything else is a post-take epoch
     /// and one `fetch_add` records the occurrence. Under sole-producer
     /// ownership the consumer's `swap(0)` is the only competing write, so
-    /// every path is a fixed instruction sequence — no retry loop on any
-    /// gated ISA — and the counter never wraps.
+    /// every path is a fixed sequence of source-level atomics with no
+    /// algorithmic retry, and the counter never wraps. On exclusive-monitor
+    /// Arm each single RMW is an LDREX/STREX pair that repeats only if an
+    /// intervening event (an interrupt, or that `swap`) claims the word —
+    /// contention-bounded hardware retry, disclosed in contract B1; the
+    /// measured rows are the uncontended realisations.
     #[inline]
     pub fn increment(&self) {
         // Only this handle may increase `count`; the consumer can only reset it

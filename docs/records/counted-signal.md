@@ -57,8 +57,11 @@ IDs in parentheses; the clauses are the normative statements.
   destructors, or a forgotten handle, leaves the role held. There is
   deliberately no out-of-band forced release.
 - **Algorithmic bounds are not wall-clock claims (B1–B3, X5).**
-  `increment` is a fixed instruction sequence on every gated ISA
-  (no retry of any kind); `take_count` has no retry loop. Neither waits or
+  `increment` is a fixed sequence of source-level atomics with no
+  algorithmic retry; `take_count` is one source-level `swap`. On
+  exclusive-monitor Arm each single RMW is an LDREX/STREX pair that can
+  repeat only when an intervening event claims the word (B1's per-ISA
+  disclosure); the measured rows are uncontended. Neither waits or
   panics on the hot path. Instruction and latency numbers are
   environment-specific measurements; cite them with the pinned
   toolchain and QEMU stamp, never as universal cycle truths.
@@ -97,9 +100,14 @@ in contract §8 and proposal §3.1–§3.2):**
 
 - **Bounded exact saturation: sole-producer `fetch_add` with stale-MAX
   confirmation.** Below `MAX`, one Relaxed load and one Relaxed
-  `fetch_add`. Observed `MAX` is confirmed with `compare_exchange(MAX,
-  MAX)`; success is a saturated no-op, failure falls through to one
-  `fetch_add` into the post-take epoch (fixed sequence, no retry).
+  `fetch_add`. Observed `MAX` is confirmed with a no-op RMW re-read
+  (`fetch_or(0)`) — an RMW observes the latest value in modification
+  order, so `MAX` proves saturation and anything else falls through to
+  one `fetch_add` into the post-take epoch (fixed source-level
+  sequence, no algorithmic retry). The first accepted form confirmed
+  with a bounded `compare_exchange(MAX, MAX)`; review showed a strong
+  CAS lowers to an unbounded LR/SC loop on RISC-V, and the no-op RMW
+  replaced it.
   Rejected for this type: a load-and-skip-on-`MAX` short-circuit (fails
   T3/A1 after a completed take under Relaxed observation), an unbounded
   CAS loop (fails B1), silent wrap (fails A2/I3 and the crate's

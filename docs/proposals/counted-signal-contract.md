@@ -77,15 +77,22 @@ the call was invoked.
 Algorithmic bounds live here; instruction counts remain measured claims tied
 to a target, toolchain, and reference environment.
 
-- **B1.** `increment` performs a statically bounded amount of work independent
-  of signal history and consumer activity: a fixed instruction sequence on
-  every gated ISA — one load, at most one no-op RMW re-read on the saturation
-  sentinel, and at most one `fetch_add`; no compare-exchange (and therefore no
-  LR/SC retry loop), no dynamic allocation, no user code, and no wait for the
-  consumer.
-- **B2.** `take_count` performs a statically bounded amount of work independent
-  of the number of increments in the interval and producer activity: no retry
-  loop, no dynamic allocation, no user code, and no wait for the producer.
+- **B1.** `increment` performs a bounded amount of work independent of signal
+  history: at most three source-level atomic operations — one load, at most
+  one no-op RMW re-read on the saturation sentinel, and at most one
+  `fetch_add` — with no algorithmic retry of any of them, no compare-exchange,
+  no dynamic allocation, no user code, and no wait for the consumer. How each
+  single RMW is realised is per-ISA: one AMO instruction on RV32IMAC, a
+  portable-atomic path on the M0-class targets, and an LDREX/STREX pair on
+  exclusive-monitor Arm, where a reservation lost to an intervening interrupt
+  or the consumer's `swap` repeats that pair. That hardware retry is bounded
+  by contention on the one shared word — every repeat requires an actual
+  intervening event, so it cannot livelock on the single-core targets this
+  crate gates — but it is not a static instruction count. The measured rows
+  (code size, cycles) are the uncontended realisations.
+- **B2.** `take_count` is one source-level atomic `swap`, with the same
+  per-ISA realisation bound as B1's RMWs: no algorithmic retry, no dynamic
+  allocation, no user code, and no wait for the producer.
 - **B3.** No panic is reachable from either hot-path operation.
 
 ## 6. Handle clauses (H)

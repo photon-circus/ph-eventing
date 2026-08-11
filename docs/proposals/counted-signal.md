@@ -66,8 +66,8 @@ should remain statically sized and avoid a general dynamic registry.
 - Saturation uses the sole-producer algorithm in §3.1: a Relaxed load, with
   an observed `u32::MAX` re-read through a no-op RMW (`fetch_or(0)`) that is
   guaranteed to see the latest value in modification order — a fixed
-  instruction sequence on every gated ISA, with no compare-exchange and
-  therefore no LR/SC retry loop on RISC-V.
+  source-level sequence with no compare-exchange and no algorithmic retry
+  (per-ISA realisation disclosed in contract B1; a single AMO on RISC-V).
 - `u32::MAX` is the observable saturation sentinel, wrapped in
   `CountSnapshot`; exact excess beyond the sentinel is intentionally absent.
 - `take_count` is a `swap(0)` and reports one take interval, not a running
@@ -100,7 +100,8 @@ intervals (violating T3/A1). The sentinel path therefore re-reads through a
 no-op RMW — an RMW, unlike a load or a failed compare-exchange, observes the
 latest value in modification order, so `MAX` proves current saturation
 (absorbed no-op) and anything else falls through to `fetch_add` into the
-post-take epoch. Every path is a fixed instruction sequence under B1; the
+post-take epoch. Every path is a fixed source-level sequence under B1, which
+also discloses the per-ISA realisation of each single RMW; the
 original sentinel used a strong compare-exchange, which was replaced when
 review showed it lowers to an unbounded LR/SC retry loop on RISC-V.
 

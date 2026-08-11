@@ -137,9 +137,10 @@ assert!(producer.push(3).is_ok());     // space freed
 
 A saturating count for repeated events whose payload and ordering do not
 matter. The sole producer is load-bearing: it permits exact saturation with a
-fixed instruction sequence that treats observed `u32::MAX` as maybe-stale and
+fixed source-level sequence that treats observed `u32::MAX` as maybe-stale and
 confirms it through a no-op RMW re-read — an RMW observes the latest value in
-modification order, so there is no compare-exchange and no retry loop.
+modification order, so there is no compare-exchange and no algorithmic retry;
+the contract discloses how each single RMW is realised per ISA.
 
 ```rust
 use ph_eventing::CountedSignal;
