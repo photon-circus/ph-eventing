@@ -134,6 +134,27 @@ assert!(err.is_none());
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
 
+### Declarative static bring-up
+
+`static_spsc!` names the handle types for you, so a signature does not have to
+spell out `ph_eventing::event_buf::Producer<'static, u32, 64>`:
+
+```rust
+ph_eventing::static_spsc! {
+    pub mod telemetry: EventBuf<u32, 64>;
+}
+
+fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+
+let (tx, rx) = telemetry::take().expect("first take");
+```
+
+It expands to a `static`, two type aliases, and an all-or-nothing `take()` —
+no allocation, no indirection, and no instruction that would not be there
+written by hand. `SeqRing` works the same way. Note the handles are
+`Send + !Sync` by design, so they cannot themselves live in a `static`; taking
+them is a runtime step and always will be.
+
 ## Semantics
 
 ### RingBuf
@@ -244,7 +265,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 67 unit + 9 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 67 unit + 10 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —

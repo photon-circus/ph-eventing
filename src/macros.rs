@@ -162,59 +162,69 @@ macro_rules! static_spsc {
 
 #[cfg(all(test, not(loom)))]
 mod tests {
-    // The macro is used at module scope, so each case needs its own module.
-    crate::static_spsc! {
-        /// Doc attributes must pass through.
-        pub mod eb: EventBuf<u32, 4>;
-    }
+    // Each test gets its own generated module. The statics are process-wide and
+    // `take()` is once-only, so two tests sharing one module can only both pass
+    // if they never overlap -- and `#[test]` functions run in parallel by
+    // default. Sharing did not reproduce a failure here even with a widened
+    // window, because dispatch order happens to favour it, but that is a
+    // property of the current test count and thread pool, not a guarantee.
+    // Isolation costs nothing and removes the question.
 
     crate::static_spsc! {
-        pub mod sr: SeqRing<u32, 4>;
+        /// Doc attributes must pass through.
+        pub mod eb_round_trip: EventBuf<u32, 4>;
+    }
+    crate::static_spsc! {
+        mod eb_once: EventBuf<u32, 4>;
+    }
+    crate::static_spsc! {
+        mod eb_partial: EventBuf<u32, 2>;
+    }
+    crate::static_spsc! {
+        pub mod sr_round_trip: SeqRing<u32, 4>;
+    }
+    crate::static_spsc! {
+        mod send_check: EventBuf<u32, 4>;
+    }
+    crate::static_spsc! {
+        mod send_check_sr: SeqRing<u32, 4>;
     }
 
     #[test]
     fn event_buf_module_round_trips() {
-        let (tx, rx) = eb::take().expect("first take");
+        let (tx, rx) = eb_round_trip::take().expect("first take");
         tx.push(7).unwrap();
         assert_eq!(rx.pop(), Some(7));
-        assert_eq!(eb::buffer().capacity(), 4);
+        assert_eq!(eb_round_trip::buffer().capacity(), 4);
     }
 
     #[test]
     fn event_buf_take_is_once_only() {
-        // Ordering between tests is not guaranteed, so assert the invariant
-        // rather than a particular first/second outcome: there is never more
-        // than one live pair.
-        let first = eb::take();
-        let second = eb::take();
-        assert!(
-            first.is_none() || second.is_none(),
-            "take() handed out two live pairs"
-        );
+        let first = eb_once::take();
+        assert!(first.is_some(), "first take must succeed");
+        assert!(eb_once::take().is_none(), "second take must fail");
+        drop(first);
+        assert!(eb_once::take().is_some(), "take succeeds again after drop");
     }
 
     #[test]
     fn seq_ring_module_round_trips() {
-        let (tx, mut rx) = sr::take().expect("first take");
+        let (tx, mut rx) = sr_round_trip::take().expect("first take");
         tx.push(9);
         assert_eq!(rx.poll_one_value(), Some((1, 9)));
-        assert_eq!(sr::ring().capacity(), 4);
+        assert_eq!(sr_round_trip::ring().capacity(), 4);
     }
 
     /// The property that separates `take()` from two separate calls: a failed
     /// take must not leave the buffer half-claimed.
     #[test]
     fn failed_take_strands_nothing() {
-        crate::static_spsc! {
-            mod partial: EventBuf<u32, 2>;
-        }
-
         // Hold the consumer, so `take` gets past the producer and then fails.
-        let rx = partial::buffer().try_consumer().expect("consumer");
-        assert!(partial::take().is_none());
+        let rx = eb_partial::buffer().try_consumer().expect("consumer");
+        assert!(eb_partial::take().is_none());
 
         // If `take` had leaked the producer, this would be None.
-        let tx = partial::buffer()
+        let tx = eb_partial::buffer()
             .try_producer()
             .expect("producer must still be free after a failed take");
         tx.push(1).unwrap();
@@ -224,9 +234,9 @@ mod tests {
     #[test]
     fn handles_are_send() {
         fn assert_send<T: Send>() {}
-        assert_send::<eb::Tx>();
-        assert_send::<eb::Rx>();
-        assert_send::<sr::Tx>();
-        assert_send::<sr::Rx>();
+        assert_send::<send_check::Tx>();
+        assert_send::<send_check::Rx>();
+        assert_send::<send_check_sr::Tx>();
+        assert_send::<send_check_sr::Rx>();
     }
 }

@@ -21,6 +21,24 @@
 //! The [`traits::forward`] function transfers items from any `Source` to any
 //! `Sink`, making it easy to bridge different buffer types.
 //!
+//! # Static bring-up
+//!
+//! [`static_spsc!`](crate::static_spsc) declares a `static` buffer together with
+//! named handle types, so a signature need not spell out
+//! `event_buf::Producer<'static, T, N>`:
+//!
+//! ```
+//! ph_eventing::static_spsc! {
+//!     pub mod telemetry: EventBuf<u32, 64>;
+//! }
+//!
+//! fn on_sample(tx: &telemetry::Tx, v: u32) { let _ = tx.push(v); }
+//!
+//! let (tx, rx) = telemetry::take().expect("first take");
+//! on_sample(&tx, 1);
+//! assert_eq!(rx.pop(), Some(1));
+//! ```
+//!
 //! # Quick start — `RingBuf`
 //! ```
 //! use ph_eventing::RingBuf;
