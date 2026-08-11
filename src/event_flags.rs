@@ -205,7 +205,7 @@ impl core::fmt::Debug for EventFlags {
 /// This handle is `Send + !Sync`: it may move into an ISR or another execution
 /// context, but it may not be shared between contexts.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::event_flags::Producer;
 ///
 /// fn assert_sync<T: Sync>() {}
@@ -245,7 +245,7 @@ impl core::fmt::Debug for Producer<'_> {
 /// This handle is `Send + !Sync` and may take pending conditions while its
 /// paired producer raises them from another context.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::event_flags::Consumer;
 ///
 /// fn assert_sync<T: Sync>() {}

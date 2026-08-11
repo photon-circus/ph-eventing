@@ -164,8 +164,10 @@ a rejecting downstream sink could silently lose the mask.
 
 ### Common Traits
 
-All producers implement `Sink<T>` and all consumers implement `Source<T>`,
-so you can write generic code that works with any combination:
+All payload-buffer producers implement `Sink<T>` and their consumers
+implement `Source<T>`, so generic code works with any combination of the
+stream types (`EventFlags` is condition signalling, not a payload stream —
+its handles deliberately implement neither; see its section above):
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
