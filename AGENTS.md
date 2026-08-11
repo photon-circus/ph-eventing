@@ -30,7 +30,7 @@ It ships four primitives:
 - **`RingBuf<T, N>`** — a single-owner ring buffer (no atomics, `&mut` access). Ideal for local event logs, sample windows, and single-context collection.
 - **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
-- **`CountedSignal`** — an exploratory saturating SPSC count for identical,
+- **`CountedSignal`** — a saturating SPSC count for identical,
   payload-free events. The sole producer handle makes exact bounded saturation
   possible without a CAS retry loop.
 
@@ -184,6 +184,8 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 
 ### Memory Ordering Strategy (CountedSignal)
 
+- The semantic contract and stable clause IDs live in
+  `docs/proposals/counted-signal-contract.md`.
 - The sole producer performs a Relaxed load and, below `u32::MAX`, one Relaxed
   `fetch_add`. The consumer performs a Relaxed `swap(0)`.
 - Relaxed is sufficient because there is no payload publication; the atomic's
@@ -674,8 +676,8 @@ measures the other half of the determinism claim — that the hot paths cost a
 Measured in the reference environment — `scripts/verify/Dockerfile`
 (rustc 1.92.0, Debian trixie qemu-system-arm 10.0.x, thumbv7m / Cortex-M3),
 reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
-environment*, not universal: a 10.2 QEMU build shifted two measured regions
-regions by exactly one instruction (trace boundary attribution, not codegen).
+environment*, not universal: a 10.2 QEMU build shifted two measured regions by
+exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
 
 | | empty | loaded | rejected/empty |

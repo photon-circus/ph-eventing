@@ -135,8 +135,8 @@ assert!(producer.push(3).is_ok());     // space freed
 
 ### CountedSignal
 
-An exploratory saturating count for repeated events whose payload and ordering
-do not matter. The sole producer is load-bearing: it permits exact saturation
+A saturating count for repeated events whose payload and ordering do not
+matter. The sole producer is load-bearing: it permits exact saturation
 with a bounded load plus conditional `fetch_add`, without a CAS retry loop.
 
 ```rust
@@ -238,6 +238,10 @@ them is a runtime step and always will be.
 - `take_count` atomically clears the counter and reports whether it saturated.
 - A concurrent increment belongs wholly to the current take or the next one.
 - The sole `Send + !Sync` producer handle is part of the correctness contract.
+- Count operations do not publish unrelated application memory; payload data
+  needs a separate synchronization mechanism.
+- The reference Cortex-M3 probe measures 8 retired instructions for
+  `increment` and 7 for `take_count` (rustc 1.92.0, QEMU 10.0.11).
 
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
@@ -245,8 +249,9 @@ them is a runtime step and always will be.
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
   The panicking `producer()`/`consumer()` are **deprecated since 0.2.0** and will be removed in
-  0.3.0. Using unsafe to bypass the SPSC constraint (or sharing handles concurrently) is
-  undefined behavior.
+  0.3.0. Using unsafe to bypass `SeqRing`/`EventBuf` ownership can be undefined
+  behavior. Forging or concurrently sharing a `CountedSignal` producer breaks
+  its bounded no-wrap contract; the handle is `!Sync` to prevent that in safe Rust.
 - `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.

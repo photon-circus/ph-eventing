@@ -1,17 +1,18 @@
-# CountedSignal semantic contract (draft)
+# CountedSignal semantic contract
 
-- **Status:** Draft for review — promotion-bar item 3 in
-  [`counted-signal.md`](counted-signal.md) §4.
+- **Status:** Frozen for evaluation on the `candidate/counted-signal` lane.
+  Promotion-bar item 3 in [`counted-signal.md`](counted-signal.md) §4 is
+  complete.
 - **Rule of this document:** the clauses describe an **abstract counted
   signal**, independently of atomics, memory orderings, or the candidate
   algorithm. The design and its evidence must satisfy the clauses; they do
   not define them.
 - **Clause IDs are load-bearing.** Tests, models, and documentation cite these
   IDs. Do not renumber an existing clause; append a new one to its group.
-- **Handle-decision status:** the H clauses state the lane's recommended answer
-  to the still-open shared decision with EventFlags. Accepting this contract
-  accepts that answer for CountedSignal; choosing shareable raisers requires a
-  revised contract, algorithm, and evidence case. See §8.
+- **Handle-decision status:** accepted for CountedSignal and EventFlags. The H
+  clauses freeze sole-role `Send + !Sync` handles with `&self` hot-path
+  operations. A future shareable/multi-producer signal requires a separate
+  contract, type, algorithm, and evidence case. See §8.
 
 ## 1. Abstract model
 
@@ -111,7 +112,7 @@ to a target, toolchain, and reference environment.
 
 ## 8. Shared handle decision (H-decision)
 
-The candidate answer shared with EventFlags is H1–H4: sole-role
+The accepted answer shared with EventFlags is H1–H4: sole-role
 `Send + !Sync` handles with `&self` hot-path operations and state resident in
 the signal. For CountedSignal, this is a correctness choice rather than an API
 style preference. The bounded candidate implementation reads the state and
@@ -120,9 +121,9 @@ is the only possible intervening writer and can only reset the state; a second
 raiser would invalidate the no-wrap proof and the current evidence for B1.
 
 The independent LatestBuf A.3 decision currently recommends the same handle
-shape. Whether H and A.3 close as one crate-wide doctrine or as separate
-decisions remains a maintainer decision on issue #26; this contract does not
-silently take that broader decision.
+shape. This closes H for EventFlags and CountedSignal only. Whether the
+independent LatestBuf A.3 choice later becomes one crate-wide doctrine remains
+a separate maintainer decision on issue #26.
 
 ## 9. Evidence map
 
@@ -141,3 +142,7 @@ The candidate's relaxed atomic orderings and its load-plus-conditional-RMW
 proof are implementation evidence for this abstract contract. They remain in
 [`counted-signal.md`](counted-signal.md) §3.1 and the module documentation,
 not in the semantic clauses above.
+
+The candidate tree passed the complete pinned reference matrix with zero skips
+on 2026-08-11: CI/features/docs/deny/coverage, Miri host and proxy targets, all
+seven Loom models, eight-target code size, embedded checks, and QEMU cycles.

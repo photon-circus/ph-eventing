@@ -1,6 +1,7 @@
-# CountedSignal: multiplicity without payloads (exploratory design document)
+# CountedSignal: multiplicity without payloads
 
-- **Status:** EXPLORATORY — design exploration vehicle, not yet PROPOSED.
+- **Status:** PROPOSED — shared handle decision, contract, and admission
+  evidence complete; ready for evaluation.
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §5 (received
   2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
@@ -60,28 +61,22 @@ should remain statically sized and avoid a general dynamic registry.
   [`event-flags.md`](event-flags.md) §3 — the notes apply verbatim and are
   not duplicated here.
 
-## 3. Open questions
+## 3. Resolved candidate decisions
 
-- Saturating increment on a plain atomic needs care: a
-  `compare_exchange` loop is unbounded under contention, which violates the
-  producer bound — is the answer `fetch_add` with a saturation check that
-  tolerates a bounded overshoot window, a claimed-bit scheme, or accepting
-  `fetch_add` wrapping on a width wide enough that saturation is
-  unreachable in practice (and documenting that instead)? This is the
-  design's central question — the naive implementations are either
-  unbounded or not actually saturating.
-- How is saturation observed — a sticky flag in `take_count`'s return, a
-  reserved sentinel value, or a separate query?
-- `take_count` semantics: `swap(0)` is the obvious atomic take — confirm
-  the contract is "count since last take," not a running total.
-- Multi-counter form: fixed `[counter; K]` per event class — is that a
-  distinct type, or `CountedSignal` composed by the caller? (The taxonomy
-  pre-rejects a dynamic registry; the question is only whether the static
-  array earns a type.)
-- Counter width: `u32` everywhere (matching the crate's sequence width and
-  the 32-bit `usize` of every shipped target), or parameterised?
+- Saturation uses the sole-producer algorithm in §3.1: one Relaxed load and,
+  below `u32::MAX`, one Relaxed `fetch_add`. There is no retry loop.
+- `u32::MAX` is the observable saturation sentinel, wrapped in
+  `CountSnapshot`; exact excess beyond the sentinel is intentionally absent.
+- `take_count` is a `swap(0)` and reports one take interval, not a running
+  total.
+- The initial type is one `u32` counter. Applications compose a fixed array of
+  signals when they need multiple classes; a dedicated multi-counter type or
+  dynamic registry needs a concrete caller and separate evidence.
+- The width is `u32`, matching the crate's atomic shim and every shipped
+  32-bit target. Width genericity would create target-dependent contracts and
+  needs its own evidence before it can earn a separate type.
 
-## 3.1 Exploratory result: exact bounded saturation requires one producer
+## 3.1 Candidate result: exact bounded saturation requires one producer
 
 The candidate branch now carries an executable SPSC design. It found a fourth
 answer to the central question that is stronger than the three initially
@@ -159,18 +154,23 @@ environment, not a universal microarchitectural cycle claim. Together with
 the eight-target code-size rows, this closes the lane's missing pinned-cost
 evidence.
 
-This result refines rather than silently closes the handle decision: choose
-SPSC handles and the central bounded-saturation problem has a small exact
-solution; choose multiple raisers and this implementation must be rejected.
+## 3.2 Shared handle decision
+
+The accepted EventFlags/CountedSignal answer is sole-producer/sole-consumer
+`Send + !Sync` handles with `&self` hot-path operations. For CountedSignal the
+choice is load-bearing: it makes §3.1 exact and bounded. EventFlags does not
+need exclusivity for `fetch_or` correctness, but loses no guarantee under the
+same conservative ownership model. A future MPSC signal can be added as a
+separate type after it has its own contract and evidence; it cannot weaken this
+type's proof.
 
 ## 4. Promotion bar to PROPOSED
 
 1. **Complete for the SPSC candidate:** the bounded-saturating-increment
    question has the load-plus-conditional-RMW answer proved in §3.1.
-2. **Open maintainer decision:** settle the shared handle model with
-   [`event-flags.md`](event-flags.md) (one answer for both). The proof
-   dependency is recorded in the contract's H-decision section; choosing
-   multiple raisers rejects the current algorithm and its B1 evidence.
+2. **Complete:** the shared handle model is sole-role `Send + !Sync` handles
+   with `&self` operations for both this lane and EventFlags. The proof
+   dependency is recorded in the contract's H-decision section.
 3. **Complete:** the short
    [`counted-signal-contract.md`](counted-signal-contract.md) gives stable
    I/T/A/B/H/X clause IDs and maps each guarantee to evidence.
@@ -179,4 +179,4 @@ solution; choose multiple raisers and this implementation must be rejected.
    threaded stress, Miri, and two Loom models cover atomic take,
    no-lost-increment accounting, and saturation without wrapping.
 
-The shared handle decision is therefore the only remaining promotion gate.
+The promotion bar is complete; the candidate is ready for evaluation.

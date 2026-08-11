@@ -11,6 +11,11 @@
 //! but no other operation can increase it. Consequently `fetch_add` cannot
 //! wrap: it either advances the value observed by the producer or advances a
 //! newly reset epoch. Multiple producers would invalidate that proof.
+//!
+//! The counter carries no payload-publication semantics. These Relaxed
+//! operations order the count itself, but do not publish unrelated application
+//! memory. Use a separate synchronization mechanism when an occurrence makes
+//! payload data available.
 
 use core::cell::Cell;
 use core::marker::PhantomData;

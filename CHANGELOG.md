@@ -4,12 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 ### Added
-- Exploratory `CountedSignal`: a payload-free SPSC counter with a bounded
+- `CountedSignal`: a payload-free SPSC counter with a bounded
   `increment`, atomic `take_count`, exact `u32` saturation, and observable
   saturation. Loom models pin both ordinary take partitioning and the
-  saturation-boundary interleaving; cycle and code-size probes expose the
-  remaining cost decision. The proposal records why exact bounded saturation
-  depends on retaining a sole `Send + !Sync` producer handle.
+  saturation-boundary interleaving; its frozen contract maps citable clauses
+  to unit, threaded, Loom, Miri, code-size, and QEMU evidence. The reference
+  Cortex-M3 probe measures 8 retired instructions for `increment` and 7 for
+  `take_count`. Exact bounded saturation depends on retaining a sole
+  `Send + !Sync` producer handle.
 
 ### Documentation
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
