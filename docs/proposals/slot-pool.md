@@ -2,7 +2,8 @@
 
 - **Status:** **DEFERRED** (maintainer decision S, 2026-08-11) — evaluated
   in full on `candidate/slot-pool` (draft PR #32, closed as deferred;
-  branch preserved and archive-tagged), then deferred with its evidence
+  branch preserved and pinned at tag `archive/slot-pool-0.3.0-evaluation`,
+  commit `2c3d37f`), then deferred with its evidence
   banked: with cycle decision P closed as Copy composition, no in-release
   consumer exists, and standalone admission would commit the crate's first
   non-`Copy` RAII surface without a real adopter to shape the API.
