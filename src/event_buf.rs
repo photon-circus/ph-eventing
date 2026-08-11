@@ -48,6 +48,17 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
+// Const on the host path so `EventBuf::new` can be const. Loom's cell is not
+// const-constructible, so the Loom build keeps a non-const helper.
+//
+// Prefer `[const { … }; N]` over `array::from_fn`: the latter is not
+// const-callable with these constructors on the MSRV toolchain.
+#[cfg(not(loom))]
+const fn slot_array<T, const N: usize>() -> [TrackedCell<MaybeUninit<T>>; N] {
+    [const { TrackedCell::new(MaybeUninit::uninit()) }; N]
+}
+
+#[cfg(loom)]
 fn slot_array<T, const N: usize>() -> [TrackedCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| TrackedCell::new(MaybeUninit::uninit()))
 }
@@ -64,7 +75,8 @@ const RETRY_LIMIT: usize = 2;
 /// and can inspect the oldest item with [`Consumer::peek`] without consuming it.
 ///
 /// # Panics
-/// - `EventBuf::new()` panics if `N == 0`.
+/// - `EventBuf::new()` fails to compile (const assertion) when `N == 0` on the
+///   host path; under Loom it panics at runtime.
 /// - `producer()` / `consumer()` panic if called while another handle of
 ///   the same kind is already active. Use [`EventBuf::try_producer`] /
 ///   [`EventBuf::try_consumer`] for a fallible alternative.
@@ -85,8 +97,34 @@ unsafe impl<T: Copy + Send, const N: usize> Sync for EventBuf<T, N> {}
 impl<T: Copy, const N: usize> EventBuf<T, N> {
     /// Create a new, empty event buffer.
     ///
+    /// On the normal (non-Loom) build this is a `const fn`, so the buffer can
+    /// be placed in a `static`:
+    /// `static BUF: EventBuf<u32, 64> = EventBuf::new();`.
+    /// Under `--cfg loom` it is deliberately non-const — Loom's atomics are
+    /// not const-constructible.
+    ///
+    /// # Panics
+    /// Fails to compile via a const assertion when `N == 0` on the host path;
+    /// panics at runtime under Loom.
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "EventBuf capacity N must be > 0");
+        }
+        Self {
+            head: AtomicU32::new(0),
+            tail: AtomicU32::new(0),
+            slots: slot_array::<T, N>(),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a new, empty event buffer (Loom build — non-const).
+    ///
     /// # Panics
     /// Panics if `N == 0`.
+    #[cfg(loom)]
     pub fn new() -> Self {
         assert!(N > 0, "EventBuf capacity N must be > 0");
         Self {
@@ -646,5 +684,42 @@ mod tests {
         assert_eq!(c.peek(), Some(20));
         assert_eq!(c.pop(), Some(20));
         assert_eq!(c.peek(), None);
+    }
+
+    // Loom's `new` is deliberately non-const, so a `static` init only exists
+    // on the host path.
+    #[cfg(not(loom))]
+    #[test]
+    fn const_new_works_in_const_context() {
+        static BUF: EventBuf<u32, 4> = EventBuf::new();
+        assert!(BUF.is_empty());
+        assert_eq!(BUF.capacity(), 4);
+    }
+
+    // The point of the const `new` is not that a `static` compiles -- it is
+    // that handles borrowed from one are `'static` and `Send`, which is what
+    // lets the producer move into an ISR while the consumer stays in a task
+    // loop. A test that only builds the `static` would still pass if the
+    // lifetime were tied to a local, so pin the signature explicitly.
+    #[cfg(not(loom))]
+    #[test]
+    fn static_buf_yields_static_sendable_handles() {
+        static BUF: EventBuf<u32, 4> = EventBuf::new();
+
+        fn producer_for_isr() -> super::Producer<'static, u32, 4> {
+            BUF.producer()
+        }
+        fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
+            BUF.consumer()
+        }
+        fn assert_send<T: Send>(_: &T) {}
+
+        let p = producer_for_isr();
+        let c = consumer_for_task();
+        assert_send(&p);
+        assert_send(&c);
+
+        p.push(7).unwrap();
+        assert_eq!(c.pop(), Some(7));
     }
 }

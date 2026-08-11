@@ -131,10 +131,28 @@ use core::mem::MaybeUninit;
 #[cfg(test)]
 use core::sync::atomic::AtomicUsize;
 
-fn atomic_u32_array<const N: usize>(init: u32) -> [AtomicU32; N] {
-    core::array::from_fn(|_| AtomicU32::new(init))
+// Helpers are `const fn` on the host path so `SeqRing::new` can be const.
+// Loom's atomics are not const-constructible, so the Loom build keeps the
+// non-const variants used by the non-const `new` below.
+//
+// Prefer `[const { … }; N]` over `array::from_fn`: the latter is not
+// const-callable with these constructors on the MSRV toolchain.
+#[cfg(not(loom))]
+const fn atomic_u32_array<const N: usize>() -> [AtomicU32; N] {
+    [const { AtomicU32::new(0) }; N]
 }
 
+#[cfg(loom)]
+fn atomic_u32_array<const N: usize>() -> [AtomicU32; N] {
+    core::array::from_fn(|_| AtomicU32::new(0))
+}
+
+#[cfg(not(loom))]
+const fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
+    [const { UnsafeCell::new(MaybeUninit::uninit()) }; N]
+}
+
+#[cfg(loom)]
 fn unsafe_cell_array<T, const N: usize>() -> [UnsafeCell<MaybeUninit<T>>; N] {
     core::array::from_fn(|_| UnsafeCell::new(MaybeUninit::uninit()))
 }
@@ -183,14 +201,40 @@ unsafe impl<T: Copy + Send, const N: usize> Sync for SeqRing<T, N> {}
 impl<T: Copy, const N: usize> SeqRing<T, N> {
     /// Create a new ring buffer.
     ///
+    /// On the normal (non-Loom) build this is a `const fn`, so the ring can be
+    /// placed in a `static`: `static RING: SeqRing<u32, 64> = SeqRing::new();`.
+    /// Under `--cfg loom` it is deliberately non-const — Loom's atomics are
+    /// not const-constructible.
+    ///
     /// # Panics
-    /// Panics if `N == 0`.
-    pub fn new() -> Self {
-        assert!(N > 0);
+    /// Fails to compile via a const assertion when `N == 0` on the host path;
+    /// panics at runtime under Loom.
+    #[cfg(not(loom))]
+    pub const fn new() -> Self {
+        const {
+            assert!(N > 0, "SeqRing capacity N must be > 0");
+        }
         Self {
             next_seq: AtomicU32::new(0),
             published_seq: AtomicU32::new(0),
-            slot_seq: atomic_u32_array::<N>(0),
+            slot_seq: atomic_u32_array::<N>(),
+            slots: unsafe_cell_array::<T, N>(),
+            producer_taken: AtomicBool::new(false),
+            consumer_taken: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a new ring buffer (Loom build — non-const).
+    ///
+    /// # Panics
+    /// Panics if `N == 0`.
+    #[cfg(loom)]
+    pub fn new() -> Self {
+        assert!(N > 0, "SeqRing capacity N must be > 0");
+        Self {
+            next_seq: AtomicU32::new(0),
+            published_seq: AtomicU32::new(0),
+            slot_seq: atomic_u32_array::<N>(),
             slots: unsafe_cell_array::<T, N>(),
             producer_taken: AtomicBool::new(false),
             consumer_taken: AtomicBool::new(false),
@@ -1028,5 +1072,39 @@ mod tests {
         assert_eq!(consumer.poll_one_value(), None);
         // latest does not require an advanced cursor
         assert_eq!(consumer.latest_value(), Some((2, 20)));
+    }
+
+    // Loom's `new` is deliberately non-const, so a `static` init only exists
+    // on the host path.
+    #[cfg(not(loom))]
+    #[test]
+    fn const_new_works_in_const_context() {
+        static RING: SeqRing<u32, 4> = SeqRing::new();
+        assert_eq!(RING.capacity(), 4);
+    }
+
+    // See the matching test in `event_buf`: the value of the const `new` is
+    // `'static`, `Send` handles off a `static`, not merely that the `static`
+    // compiles. Pin the signatures so a lifetime regression fails the build.
+    #[cfg(not(loom))]
+    #[test]
+    fn static_ring_yields_static_sendable_handles() {
+        static RING: SeqRing<u32, 4> = SeqRing::new();
+
+        fn producer_for_isr() -> super::Producer<'static, u32, 4> {
+            RING.producer()
+        }
+        fn consumer_for_task() -> super::Consumer<'static, u32, 4> {
+            RING.consumer()
+        }
+        fn assert_send<T: Send>(_: &T) {}
+
+        let p = producer_for_isr();
+        let mut c = consumer_for_task();
+        assert_send(&p);
+        assert_send(&c);
+
+        p.push(9);
+        assert_eq!(c.poll_one_value(), Some((1, 9)));
     }
 }

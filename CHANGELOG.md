@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Added
+- `const fn new()` for `SeqRing` and `EventBuf` on the normal build, so
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. Under `--cfg loom`, both remain
+  non-const because Loom's atomics are not const-constructible.
+
+### Changed
+- **Breaking:** `SeqRing::new` and `EventBuf::new` reject `N == 0` with a const assertion on the
+  host path instead of a runtime `assert!`. `SeqRing::<T, 0>::new()` no longer compiles where it
+  previously panicked.
 
 ## 0.1.4 - 2026-08-10
 ### Added
@@ -48,6 +57,7 @@ All notable changes to this project will be documented in this file.
   `./scripts/ci.sh`, which never invokes an action and so cannot validate an actions bump. It now
   names the two checks that do: resolving the pinned SHA against the tag it claims, and dispatching
   the workflow after merge.
+- README / crate docs: static-init guidance updated for SPSC `const fn new`.
 
 ### Known issues
 - `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour.

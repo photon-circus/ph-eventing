@@ -200,11 +200,11 @@ in a task loop. That works, with three things to know:
   `try_consumer` return `None` instead.
 - **The buffer must outlive both handles.** The handles borrow it, so the usual
   answer is to own the buffer where it lives longest.
-- **`new()` is not a `const fn`**, so you cannot write
-  `static BUF: EventBuf<u32, 64> = EventBuf::new();` directly. Use a
-  `StaticCell`, a `OnceCell`, or a binding in `main` that outlives the tasks
-  borrowing it. This is the one ergonomic wrinkle on embedded targets and it is
-  worth knowing before you design around it.
+- **`new()` is a `const fn`** on the normal build, so
+  `static BUF: EventBuf<u32, 64> = EventBuf::new();` works. (Under `--cfg loom`
+  it is non-const because Loom's atomics are not const-constructible.) Handles
+  still borrow the buffer, so an ISR / task split typically pairs the `static`
+  with a `StaticCell` or similar for the handles themselves.
 
 ### Choosing `N`
 
@@ -242,7 +242,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 58 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
+| 62 unit + 7 doctests | Behaviour, including threaded stress tests for both SPSC types |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 
 **One known deviation.** `SeqRing` is a seqlock and carries a formal data race —
