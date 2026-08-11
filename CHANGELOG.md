@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Documentation
+- BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows, and an honest status header that **promotion still waits on decision P**.
 ### Added
 - `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample
   windows without introducing another queue policy. The builder rejects gaps
