@@ -37,12 +37,14 @@
 //! (contract §9, non-promise X7), and the absent impl is pinned by a
 //! `compile_fail` doctest on [`Consumer`].
 //!
-//! The remaining narrow choice requested by issue #27 is still a
-//! prototype default:
+//! Decision D3 (first deliverable form) is **closed**: `T` stays generic
+//! by decision, not default — a complete block is a payload
+//! (`LatestBuf<Block<T, N>>` via the BlockBuf composition),
+//! sample-versus-block is release scheduling and RAM, and no separate
+//! latest-block type exists (contract §9).
 //!
-//! - `T` is generic, so it can be one sample or a caller-defined complete
-//!   block without committing the first-deliverable policy (decision D3,
-//!   open).
+//! All three contract decision points (D1–D3) are closed; the contract's
+//! §9 carries each record.
 //!
 //! # Example
 //!
