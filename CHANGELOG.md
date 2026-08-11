@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Documentation
+- EventFlags engineering record (`docs/records/event-flags.md`) — Track 1 acceptance package: value statement, integrator risks (coalescing, sole-role H, no peek/traits, measured portable-atomic windows), claims×evidence, and the closed decision set (H/D2–D5).
 ### Added
 - `EventFlags` — a coalescing SPSC condition set for ISR-to-task notification. Exactly 32
   payload-free conditions are represented by a transparent `EventMask(u32)`; the producer raises
