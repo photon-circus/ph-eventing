@@ -18,6 +18,48 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 - [`slot-pool-measurements.md`](docs/proposals/slot-pool-measurements.md)
   records all eight gated flash targets and pinned QEMU state-path counts.
+- `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
+  (a) + (c) — `skipped` is one formula (wrap-aware distance minus one, saturated at zero):
+  exact within one wrap span, a documented under-count beyond it, and callers whose
+  requirement is the count itself are pointed at a wider producer-assigned payload sequence
+  or a saturating counter. The wrap family (C3, C5, O2) now carries its beyond-span text,
+  and a new non-promise **X6** states the limitation for adopters: the boundary is a
+  rate × take-interval property crossed exactly when a full span of publications separates
+  two takes, the channel deliberately does not detect the crossing, and a full-cycle gap
+  reports zero. Option (b) — an explicit
+  "wrapped/unknown" state — is rejected on the record: it prices wrap detection into every
+  hot-path operation and still cannot recover the lost count.
+- `LatestBuf` contract: decision **D2** (`Source<T>` policy) is closed as the proposal's
+  option 1 — the consumer does not implement `Source<T>`; `LatestSink`/`LatestSource` were
+  designed as the type's contract surface, solving what the existing traits structurally
+  could not (`try_pop` cannot report displacement, and displacement is the type's *designed*
+  overload behaviour, making the `RingBuf::pop` rejection apply with more force). New
+  non-promise **X7** states the substitution limitation honestly: no generic pipeline
+  composition without a caller-written adapter — discarding loss evidence is an application
+  decision, never the transport's. A convenience `Source` impl remains an additive,
+  adopter-evidence-gated future decision, and a compile-fail pin keeps it from arriving
+  silently.
+- `LatestBuf` contract: decision **D3** (first deliverable form) is closed as the convergent
+  answer from both coupled lanes — payload-agnostic `LatestBuf<T>`, with a complete block as
+  a payload (`LatestBuf<Block<T, N>>` latest / `EventBuf<Block<T, N>, Q>` queued / caller
+  policy for drop-new) and no separate `LatestBlockBuf`. The joint composition matrix is the
+  acceptance measurement set for both shapes; the closure binds a documentation obligation
+  on the block-payload surfaces (per-shape RAM, the small-`N` cost inversion, and the
+  no-partial-block limitation) and registers the only reopening condition: a separate block
+  transport must enforce a guarantee composition cannot, behind cycle decisions P/S. All
+  three contract decision points are now closed.
+- `LatestBuf` proposal: review caveat **A.3** (handle-state continuation) is closed as
+  channel-resident role state with stateless handles — the crate's stateless-handle
+  precedent and the sole-role doctrine of decision H, validated by drop-and-reacquire
+  continuation tests, both cross-context role-handoff Loom models, detector-on Miri, and
+  all four role-handoff ordering-mutation detections. Persist-on-drop is considered and
+  not selected (Drop-time state copy is a permanent failure surface; its L3 model does not
+  isolate the taken-flag handoff; register residency unmeasured), and narrowing H2's
+  registered condition was not met. New contract non-promise **X8** states the
+  role-recovery boundary for integrators: reacquisition requires the previous handle's
+  drop, handle lifetime is an application property, and there is deliberately no
+  out-of-band role reset because a forced release would break the exclusivity soundness
+  rests on — the facts of the exchange, informing downstream design without prescribing it.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so
