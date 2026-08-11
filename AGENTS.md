@@ -595,7 +595,7 @@ cargo test
 - `generic_drain_seq` — Trait-generic code with SeqRing
 - `generic_drain_event` — Trait-generic code with EventBuf
 
-**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 7 doctests, plus 2 `compile_fail` doctests.
+**Doctests:** Four doctests in `src/lib.rs` demonstrating `RingBuf`, `SeqRing`, `EventBuf`, and `forward` usage, plus one in `src/ring.rs`, one in `src/event_buf.rs`, and one in `src/traits.rs`. Total: 62 unit tests + 8 doctests, plus 2 `compile_fail` doctests.
 
 **Compile-fail coverage.** `N == 0` is a *const* assertion on all three types,
 so there is no runtime panic to catch and no way to write the negative case as
