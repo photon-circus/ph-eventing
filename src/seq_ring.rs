@@ -105,8 +105,10 @@
 //!
 //! **This is a data-loss bound, not a soundness problem.** The affected read fails its sequence
 //! check and is counted in [`PollStats::dropped`], so `read + dropped` still accounts for every
-//! published item and no stale or torn value is ever returned. It is indistinguishable from the
-//! ordinary lag-induced drops the consumer already reports.
+//! published item and no stale or torn value is returned — both within the span bound of the
+//! "Known limitation: whole-span sequence aliasing" section below, which is where each of those
+//! guarantees runs out. It is indistinguishable from the ordinary lag-induced drops the consumer
+//! already reports.
 //!
 //! The same misalignment makes the lag-recovery jump resume up to one sequence later than it
 //! strictly needs to. That is bounded by the table above and reported identically.
