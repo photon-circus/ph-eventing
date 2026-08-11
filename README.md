@@ -306,7 +306,7 @@ can be checked rather than believed.
 see [Safety and Concurrency](#safety-and-concurrency) above. `EventBuf` is
 race-free by construction and passes Miri with the detector enabled.
 
-Coverage is around 93% of lines, though it is a weak signal here: what matters
+Coverage is around 94% of lines, though it is a weak signal here: what matters
 is ordering and interleaving, which line coverage cannot see.
 
 Contributors: [CONTRIBUTING.md](CONTRIBUTING.md) has the commands for running

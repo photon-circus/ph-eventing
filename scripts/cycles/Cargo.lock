@@ -111,7 +111,7 @@ checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
 name = "ph-eventing"
-version = "0.1.4"
+version = "0.2.0"
 
 [[package]]
 name = "ph-eventing-cycles"

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.0 - 2026-08-10
 
 **What this release delivers.** 0.1.x was correct: verified lock-free buffers with no way to
 show what they cost. 0.2.0 makes the costs part of the contract. Buffers now const-construct
@@ -152,6 +152,17 @@ the feature.
 - **Breaking:** `SeqRing::new` and `EventBuf::new` reject `N == 0` with a const assertion on the
   host path instead of a runtime `assert!`. `SeqRing::<T, 0>::new()` no longer compiles where it
   previously panicked.
+
+### Known issues
+- `SeqRing` is a seqlock and has a formal data race that Miri reports as undefined behaviour.
+  **This affects downstream tooling:** running `cargo miri test` over a test that drives the ring
+  from two threads reports UB inside this crate. It is a deliberate trade — a ring restricted to a
+  word-sized payload could hold it in an atomic and be race-free; accepting any `T: Copy` is what
+  rules that out. The `seq_ring` module docs give the alternatives and why each was rejected.
+  `EventBuf` is unaffected and passes Miri with the detector on, but applies backpressure rather
+  than overwriting, so it is not a drop-in replacement. Unchanged from 0.1.x.
+- `SeqRing` drops a bounded number of extra entries once per `u32` sequence wrap (documented since
+  0.1.4). A data-loss bound, not a soundness issue; unchanged.
 
 ## 0.1.4 - 2026-08-10
 ### Added
