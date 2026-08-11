@@ -1,9 +1,13 @@
 //! Fixed-size, stack-allocated ring buffer — no heap, no alloc, no atomics.
 //!
 //! [`RingBuf`] is a single-owner (`&mut self`) ring that overwrites the
-//! oldest element when full. It requires `T: Copy + Default` and is ideal
-//! for sample windows, local event logs, and anywhere a simple circular
-//! buffer is needed without cross-thread sharing.
+//! oldest element when full. It requires only `T: Copy` and is ideal for
+//! sample windows, local event logs, and anywhere a simple circular buffer
+//! is needed without cross-thread sharing.
+//!
+//! Slots are `MaybeUninit<T>` and only live entries are ever read, which is
+//! what lets the `Default` bound go. The cost is that this type is no longer
+//! free of `unsafe`: see the safety note on [`RingBuf`].
 //!
 //! For a lock-free SPSC ring with sequence tracking, see [`crate::SeqRing`].
 //! For a lock-free SPSC ring with backpressure, see [`crate::EventBuf`].
@@ -19,27 +23,37 @@
 //! assert_eq!(r.get(0), Some(10)); // oldest
 //! ```
 
+use core::mem::MaybeUninit;
+
 /// A ring buffer of `N` elements stored entirely on the stack.
 ///
 /// Once full, new pushes overwrite the oldest entry. Iteration with
 /// [`iter()`](RingBuf::iter) yields elements from oldest to newest.
-pub struct RingBuf<T: Copy + Default, const N: usize> {
-    buf: [T; N],
+///
+/// # Safety note
+/// Slots are stored as `MaybeUninit<T>` so that `T: Default` is not required.
+/// Exactly one invariant makes every read sound: **the `len` entries ending at
+/// `head` have all been written by [`push`](RingBuf::push)**. Every read goes
+/// through the private `index` helper, which addresses only that range, and
+/// every public accessor checks `len` before calling it. A change that lets
+/// `len` outrun the number of writes is undefined behaviour, not a logic bug.
+pub struct RingBuf<T: Copy, const N: usize> {
+    buf: [MaybeUninit<T>; N],
     /// Write cursor — always points to the *next* slot to write.
     head: usize,
     /// Number of elements currently stored (≤ N).
     len: usize,
 }
 
-impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
-    /// Create a new, empty ring buffer with every slot default-initialised.
+impl<T: Copy, const N: usize> RingBuf<T, N> {
+    /// Create a new, empty ring buffer.
     ///
     /// # Panics
     /// Panics if `N == 0`.
     pub fn new() -> Self {
         assert!(N > 0, "RingBuf capacity N must be > 0");
         Self {
-            buf: [T::default(); N],
+            buf: [const { MaybeUninit::uninit() }; N],
             head: 0,
             len: 0,
         }
@@ -50,7 +64,7 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
     /// This never fails and never blocks; if losing the oldest entry is not
     /// acceptable, use [`crate::EventBuf`], whose `push` reports when full.
     pub fn push(&mut self, val: T) {
-        self.buf[self.head] = val;
+        self.buf[self.head] = MaybeUninit::new(val);
         self.head = (self.head + 1) % N;
         if self.len < N {
             self.len += 1;
@@ -88,13 +102,36 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         self.len = 0;
     }
 
+    /// Index of the `i`-th live element, 0 = oldest.
+    ///
+    /// Callers must ensure `i < self.len`; the result is only a valid slot
+    /// under that precondition.
+    ///
+    /// Steps back from `head` rather than computing `(head + N - len + i) % N`.
+    /// That form is easier to read but forms an intermediate up to `3N`, which
+    /// overflows for a large `N` -- and a large `N` is reachable, because a
+    /// zero-sized `T` makes `RingBuf<(), { usize::MAX }>` constructible. An
+    /// accessor that panics in an overflow-checking build would break the
+    /// no-panic guarantee. Here nothing exceeds `N`.
+    #[inline(always)]
+    const fn index(&self, i: usize) -> usize {
+        let back = self.len - i; // 1..=len, so no underflow given i < len
+        if self.head >= back {
+            self.head - back
+        } else {
+            N - (back - self.head)
+        }
+    }
+
     /// Read the `i`-th element (0 = oldest).
     pub fn get(&self, i: usize) -> Option<T> {
         if i >= self.len {
             return None;
         }
-        let idx = if self.len < N { i } else { (self.head + i) % N };
-        Some(self.buf[idx])
+        let idx = self.index(i);
+        // SAFETY: `i < len`, so `index` addresses one of the `len` slots
+        // written by `push`.
+        Some(unsafe { self.buf[idx].assume_init() })
     }
 
     /// Most recently pushed element.
@@ -102,8 +139,15 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
         if self.len == 0 {
             return None;
         }
-        let idx = if self.head == 0 { N - 1 } else { self.head - 1 };
-        Some(self.buf[idx])
+        // Routed through `index` like every other read. The open-coded
+        // `head - 1` it replaces was correct, but it was a second, independent
+        // slot calculation -- so a future change to the cursor representation
+        // could fix `get` and silently invalidate this one. One indexing path
+        // means one unsafe proof.
+        let idx = self.index(self.len - 1);
+        // SAFETY: `len > 0`, so `index(len - 1)` is the newest live slot,
+        // written by `push`.
+        Some(unsafe { self.buf[idx].assume_init() })
     }
 
     /// Iterate over elements oldest→newest.
@@ -112,13 +156,13 @@ impl<T: Copy + Default, const N: usize> RingBuf<T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> Default for RingBuf<T, N> {
+impl<T: Copy, const N: usize> Default for RingBuf<T, N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingBuf<T, N> {
+impl<T: Copy, const N: usize> core::fmt::Debug for RingBuf<T, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RingBuf")
             .field("len", &self.len)
@@ -128,12 +172,12 @@ impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingBuf<T, N> {
 }
 
 /// Iterator over [`RingBuf`] elements from oldest to newest.
-pub struct RingIter<'a, T: Copy + Default, const N: usize> {
+pub struct RingIter<'a, T: Copy, const N: usize> {
     ring: &'a RingBuf<T, N>,
     pos: usize,
 }
 
-impl<'a, T: Copy + Default, const N: usize> Iterator for RingIter<'a, T, N> {
+impl<'a, T: Copy, const N: usize> Iterator for RingIter<'a, T, N> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -148,9 +192,9 @@ impl<'a, T: Copy + Default, const N: usize> Iterator for RingIter<'a, T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> ExactSizeIterator for RingIter<'_, T, N> {}
+impl<T: Copy, const N: usize> ExactSizeIterator for RingIter<'_, T, N> {}
 
-impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingIter<'_, T, N> {
+impl<T: Copy, const N: usize> core::fmt::Debug for RingIter<'_, T, N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RingIter")
             .field("remaining", &(self.ring.len().saturating_sub(self.pos)))
@@ -158,7 +202,7 @@ impl<T: Copy + Default, const N: usize> core::fmt::Debug for RingIter<'_, T, N> 
     }
 }
 
-impl<'a, T: Copy + Default, const N: usize> IntoIterator for &'a RingBuf<T, N> {
+impl<'a, T: Copy, const N: usize> IntoIterator for &'a RingBuf<T, N> {
     type Item = T;
     type IntoIter = RingIter<'a, T, N>;
 
@@ -167,7 +211,7 @@ impl<'a, T: Copy + Default, const N: usize> IntoIterator for &'a RingBuf<T, N> {
     }
 }
 
-impl<T: Copy + Default, const N: usize> crate::traits::Sink<T> for RingBuf<T, N> {
+impl<T: Copy, const N: usize> crate::traits::Sink<T> for RingBuf<T, N> {
     type Error = core::convert::Infallible;
 
     #[inline]
@@ -180,6 +224,13 @@ impl<T: Copy + Default, const N: usize> crate::traits::Sink<T> for RingBuf<T, N>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Deliberately does not derive `Default`. If the bound ever comes back,
+    /// this stops compiling -- which is the point: the whole value of storing
+    /// slots as `MaybeUninit` is that `T` no longer has to have a meaningless
+    /// "zero" value invented for it.
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    struct NoDefault(u32);
 
     #[test]
     fn new_ring_is_empty() {
@@ -262,6 +313,35 @@ mod tests {
     #[should_panic(expected = "RingBuf capacity N must be > 0")]
     fn zero_capacity_panics() {
         let _ = RingBuf::<u32, 0>::new();
+    }
+
+    /// A zero-sized `T` makes an enormous `N` genuinely constructible, since
+    /// the backing array is zero-sized too. The earlier `(head + N - len + i)`
+    /// index formed an intermediate up to `3N` and panicked here in an
+    /// overflow-checking build -- which unit tests are. Accessors must stay
+    /// panic-free.
+    #[test]
+    fn huge_capacity_does_not_overflow_the_index() {
+        let mut r = RingBuf::<(), { usize::MAX }>::new();
+        r.push(());
+        assert_eq!(r.len(), 1);
+        assert_eq!(r.get(0), Some(()));
+        assert_eq!(r.latest(), Some(()));
+        r.push(());
+        assert_eq!(r.get(1), Some(()));
+        assert_eq!(r.latest(), Some(()));
+    }
+
+    #[test]
+    fn works_without_default_bound() {
+        let mut r = RingBuf::<NoDefault, 2>::new();
+        r.push(NoDefault(1));
+        r.push(NoDefault(2));
+        assert_eq!(r.get(0), Some(NoDefault(1)));
+        assert_eq!(r.latest(), Some(NoDefault(2)));
+        r.push(NoDefault(3)); // overwrites
+        assert_eq!(r.get(0), Some(NoDefault(2)));
+        assert_eq!(r.latest(), Some(NoDefault(3)));
     }
 
     #[test]
