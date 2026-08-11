@@ -97,7 +97,8 @@ obvious.
 > **Superseded (2026-08-11):** the type-identity questions below are
 > answered by §5 and by D3's closure (contract §9): composition, no new
 > named types; the stamp question resolves as stamps-inside-`T`, and
-> `Copy`-vs-`SlotPool` is the deferred **P** decision.
+> `Copy`-vs-`SlotPool` closed as decision **P** — Copy composition
+> (2026-08-11, the planning record's P/S closure).
 
 - Is `LatestBlockBuf` a new type or `LatestBuf<Block<T, Stamp, N>>` plus a
   fill-side helper? What, concretely, does a separate type buy?
