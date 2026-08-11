@@ -49,9 +49,12 @@ and all clauses below are stated against the sequence of those instants.
 
 - **P1.** `publish` always succeeds. There is no full state, no rejection,
   and no error path.
-- **P2.** `publish` never waits for, observes the progress of, or invokes
-  the consumer. Its behaviour and its cost are independent of whether the
-  consumer exists, is running, or has ever run.
+- **P2.** `publish` never waits for the consumer and never invokes it, and
+  its cost bound (B1) is independent of whether the consumer exists, is
+  running, or has ever run. Its *report* is allowed — and by P4 required —
+  to reflect consumer progress: `replaced_unread` observes whether the
+  previous publication was taken. That observation is part of the
+  operation's own bounded work, never a wait on the consumer.
 - **P3.** At the linearization point of `publish(v)`: the channel's
   `pending` becomes `Some((g, v))` where `g` is the newly assigned
   generation, and `last_published` becomes `g`.
@@ -120,9 +123,11 @@ the measured implementation, per environment.
 - **B3.** Neither operation's bound depends on channel occupancy, lag, or
   history. (Both bounds are permitted to depend on `size_of::<T>()`, which
   is fixed at compile time.)
-- **B4.** No panic is reachable from either operation. (Constructor-time
-  rejections, if any, must be compile-time, matching the crate's `N == 0`
-  convention.)
+- **B4.** No panic is reachable from either operation. (By analogy with
+  the ring types' `N == 0` convention: if the design ever grows a
+  constructor-time rejection, it must be a compile-time one. The abstract
+  channel has no capacity parameter, so today there is nothing to reject —
+  the clause exists so that never changes silently.)
 
 ## 7. Handle clauses (H)
 
@@ -136,6 +141,15 @@ the measured implementation, per environment.
   makes moving a handle into an ISR sound.)
 - **H3.** A channel is constructible in a `static` (const construction on
   the normal build), matching the existing primitives.
+- **H4.** Reacquisition continues, never restarts: a handle acquired after
+  a drop behaves as the dropped handle would have. The generation sequence
+  resumes (G1 holds across the drop), skipped accounting stays exact (C3),
+  and no storage is ever owned by two roles. Any state a handle carries
+  must therefore be persisted into the channel across the drop; a design
+  that cannot honour this must not offer reacquisition for that role
+  (narrowing H2 explicitly rather than weakening H4). *(Added after
+  review: the proposal's sketch carries producer state in the handle — see
+  proposal Appendix A.3.)*
 
 ## 8. What the contract does not promise (X)
 
@@ -181,10 +195,11 @@ without a row here is a clause nobody is keeping true.
 | G1–G3 | Unit tests at the wrap boundary (successor skips 0; distance excludes 0), mirroring `SeqRing`'s `seq_distance` test set; 32-bit Miri pass |
 | P1–P5, C1–C5 | Loom models of publish/take interleavings (tiny state, capacity is fixed by design); threaded stress test for the same properties at scale |
 | P6, C6 | Miri with the race detector **on** — this pass is the primitive's headline claim and must be pinned in `scripts/miri.sh`'s full-checking pass |
+| C7 | Loom/stress scenario with a stalled consumer: the consumer claims a value and holds it across many publishes while every P-clause is re-asserted — producer progress is proven, not assumed |
 | O1–O3 | Property assertions inside the Loom models and the stress test (conservation counting on both sides) |
 | B1–B3 | Code review of the final algorithm (no loops) + `cycles.sh` regions showing cost constant w.r.t. lag/occupancy |
 | B4 | `codesize.sh` panic-string probe (the 0.2.0 technique) |
-| H1–H3 | Unit tests mirroring the existing `try_producer`/`static`-handle test set |
+| H1–H4 | Unit tests mirroring the existing `try_producer`/`static`-handle test set, plus drop-and-reacquire continuation tests: the generation sequence resumes across the drop and no slot is ever owned twice |
 | Ordering-strength | Mutation runs: each weakened ordering must fail at least one Loom model (proposal §14) |
 
 ## 11. Relationship to the design sketch

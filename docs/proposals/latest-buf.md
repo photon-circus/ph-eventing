@@ -1087,3 +1087,38 @@ both the producer's generation succession (`u32::MAX` → 1, never 0) and the
 consumer's gap arithmetic across it, plus the 32-bit Miri pass — the
 `SeqRing` `dropped_accum` overflow was caught by exactly that pass and not by
 the 64-bit host run.
+
+### A.3 Handle-carried producer state does not survive reacquisition
+
+Found by Codex review on the capture PR (#24). The sketched `Producer`
+(§6.3) carries `back` and `next_generation` in the handle, while the
+sketched buffer (§6.2) stores only the exchange state and the taken flags.
+The contract makes roles re-acquirable after a handle drop (H2) — but with
+the sketch as written, a dropped producer takes its private slot index and
+the generation cursor with it. A fresh handle cannot compute which slot is
+safe to own (the buffer does not know the consumer's `front` either, so
+"the third slot" is not derivable), and cannot resume the sequence; any
+reset risks duplicated slot ownership or reused generations, breaking the
+ownership invariant, G1, and C3's skipped accounting at once. The same
+question applies to the consumer's `front` and `last_generation`.
+
+Note the crate precedent: `SeqRing` and `EventBuf` handles are stateless —
+every cursor lives in the buffer — which is exactly why their reacquisition
+is trivially sound. Handle-carried state is this design's novelty, and this
+is its cost.
+
+**Candidate refinements, to be decided at implementation:**
+
+- move the handle fields into the channel as role-owned (never shared)
+  storage, matching the crate's stateless-handle precedent; or
+- persist them into the channel in the handle's `Drop`; or
+- withdraw reacquisition for stateful roles (narrow H2 explicitly).
+
+Contract clause **H4** (added on the same review round) pins the
+requirement whichever way the design goes: reacquisition continues, never
+restarts.
+
+**Validation required before adoption:** drop-and-reacquire continuation
+tests — the generation sequence resumes across the drop, skipped accounting
+stays exact, no slot is ever owned by two roles — plus a Loom model of the
+persistence path if it touches shared state.
