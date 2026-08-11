@@ -334,7 +334,7 @@ impl<T: Copy> core::fmt::Debug for LatestBuf<T> {
 /// context, but it may not be shared between contexts. Sole-producer ownership
 /// is load-bearing for the exclusive-slot soundness argument (contract H2).
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::latest_buf::Producer;
 ///
 /// fn assert_sync<T: Sync>() {}
@@ -406,7 +406,7 @@ impl<T: Copy> core::fmt::Debug for Producer<'_, T> {
 /// This handle is `Send + !Sync`: it may move into a consumer context, but it
 /// may not be shared between contexts (contract H2).
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::latest_buf::Consumer;
 ///
 /// fn assert_sync<T: Sync>() {}
