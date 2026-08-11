@@ -8,10 +8,13 @@
 //! The single-producer handle is load-bearing. Below [`u32::MAX`] the producer
 //! uses a Relaxed `fetch_add`, which cannot wrap because only the consumer may
 //! write between the load and the RMW and it can only reset to zero. An
-//! observed `u32::MAX` is treated as maybe-stale: a successful `MAX → MAX` CAS
-//! confirms true saturation (no-op), while failure means a completed take
-//! reset the counter and the producer `fetch_add`s into the new epoch. That is
-//! at most one contention retry. Multiple producers would invalidate the proof.
+//! observed `u32::MAX` is treated as maybe-stale and re-read through a no-op
+//! RMW (`fetch_or(0)`), which — unlike a load — observes the latest value in
+//! modification order: `MAX` confirms true saturation (skip), anything else
+//! means a completed take reset the counter and the producer `fetch_add`s into
+//! the new epoch. Every path is a fixed instruction sequence on every gated
+//! ISA — no compare-exchange, so no LR/SC retry loop on RISC-V. Multiple
+//! producers would invalidate the proof.
 //!
 //! The counter carries no payload-publication semantics. These Relaxed
 //! operations order the count itself, but do not publish unrelated application
@@ -118,8 +121,8 @@ impl core::fmt::Debug for CountedSignal {
 /// The sole incrementing handle for a [`CountedSignal`].
 ///
 /// This handle is `Send + !Sync`. Its exclusivity is what keeps exact
-/// saturation wrap-free with at most one contention retry on the sentinel
-/// path from the consumer reset.
+/// saturation wrap-free with a fixed instruction sequence on every path —
+/// the sentinel re-read is a no-op RMW, never a retry loop.
 ///
 /// The load-bearing `!Sync` property is pinned at compile time:
 ///
@@ -138,25 +141,23 @@ impl Producer<'_> {
     /// Record one occurrence.
     ///
     /// Below `u32::MAX` this is one Relaxed load and one Relaxed `fetch_add`.
-    /// Observed `u32::MAX` is confirmed with a `MAX → MAX` CAS (saturated
-    /// no-op) or, on failure, one `fetch_add` into the post-take epoch. Under
-    /// sole-producer ownership the consumer's `swap(0)` is the only competing
-    /// write, so there is at most one contention retry and the counter never
-    /// wraps.
+    /// An observed `u32::MAX` is re-read through a no-op RMW (`fetch_or(0)`):
+    /// `MAX` confirms saturation (skip), anything else is a post-take epoch
+    /// and one `fetch_add` records the occurrence. Under sole-producer
+    /// ownership the consumer's `swap(0)` is the only competing write, so
+    /// every path is a fixed instruction sequence — no retry loop on any
+    /// gated ISA — and the counter never wraps.
     #[inline]
     pub fn increment(&self) {
         // Only this handle may increase `count`; the consumer can only reset it
         // to zero. A plain skip on MAX can be stale after take returns, so the
-        // sentinel path must CAS to distinguish true saturation from a reset
-        // epoch that still needs this occurrence (contract T3 / A1).
+        // sentinel path re-reads through an RMW: `fetch_or(0)` writes nothing
+        // back but, unlike a load or a failed compare_exchange, is guaranteed
+        // to observe the latest value in modification order — and it stays a
+        // single atomic op on LR/SC ISAs, where a strong compare_exchange
+        // lowers to a retry loop with no static bound (contract T3 / A1 / B1).
         let observed = self.signal.count.load(Ordering::Relaxed);
-        if observed == u32::MAX
-            && self
-                .signal
-                .count
-                .compare_exchange(u32::MAX, u32::MAX, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-        {
+        if observed == u32::MAX && self.signal.count.fetch_or(0, Ordering::Relaxed) == u32::MAX {
             return;
         }
         // Wrap-free under H1: intervening writes can only lower the value.

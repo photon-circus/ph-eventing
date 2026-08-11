@@ -7,7 +7,7 @@
 - **Normative sources:** [contract](../proposals/counted-signal-contract.md)
   (clause IDs cited below) · [proposal](../proposals/counted-signal.md) ·
   measurements inline in proposal §3.1 (eight-target code size; pinned
-  Cortex-M3 cycles via `./scripts/verify.sh cycles`, confirmed 8 / 7 post-CAS).
+  Cortex-M3 cycles via `./scripts/verify.sh cycles`, confirmed 8 / 7 post-fix).
 
 ## 1. Value statement
 
@@ -19,8 +19,10 @@ linearizes exactly once into a take interval; when the exact range is
 exhausted the signal saturates observably rather than wrapping — the
 same `dropped_accum` honesty the crate already requires of overload
 accounting. Its soundness argument for exact, wrap-free saturation is
-**sole-producer ownership**: between CAS attempts the consumer can only
-reset, so the RMW cannot wrap and there is at most one contention retry.
+**sole-producer ownership**: between the producer's reads and RMWs the
+consumer can only reset, so the RMW cannot wrap — and every path is a fixed
+instruction sequence (the saturation sentinel is re-read via a no-op
+`fetch_or(0)` RMW, never a compare-exchange, so no LR/SC retry on RISC-V).
 It complements `EventFlags` (presence) rather than replacing it, and it
 refuses to be: a payload channel, an ordering authority, a multi-producer
 bus, or an unbounded exact total past saturation.
@@ -54,8 +56,8 @@ IDs in parentheses; the clauses are the normative statements.
   destructors, or a forgotten handle, leaves the role held. There is
   deliberately no out-of-band forced release.
 - **Algorithmic bounds are not wall-clock claims (B1–B3, X5).**
-  `increment` allows at most one contention retry from the sole
-  consumer reset; `take_count` has no retry loop. Neither waits or
+  `increment` is a fixed instruction sequence on every gated ISA
+  (no retry of any kind); `take_count` has no retry loop. Neither waits or
   panics on the hot path. Instruction and latency numbers are
   environment-specific measurements; cite them with the pinned
   toolchain and QEMU stamp, never as universal cycle truths.
@@ -72,12 +74,12 @@ IDs in parentheses; the clauses are the normative statements.
 | Saturates at `u32::MAX`, never wraps; sticky until take (I2–I3, T2, A2–A3) | `saturates_instead_of_wrapping`; Loom `counted_signal_saturation_boundary_is_linearizable` | Proven |
 | Concurrent increment belongs to exactly one take interval (T1–T3, A1) | Loom `counted_signal_take_partitions_increments`; threaded take stress | Proven |
 | Post-take increment after saturated take is not dropped by a stale MAX observe (T3, A1) | Loom `counted_signal_post_take_increment_observes_reset_epoch` (Relaxed gate only) | Proven |
-| Wait-free bounded hot paths: load + `fetch_add`, sentinel CAS + ≤1 follow-up `fetch_add`; `swap(0)` take (B1–B2) | Source review; eight-target code size blessed after intentional +16…+36 B growth; Cortex-M3 cycles re-measured post-CAS at 8 / 7 (`./scripts/verify.sh cycles`) | Measured |
+| Wait-free bounded hot paths: load + `fetch_add`; sentinel no-op RMW re-read + ≤1 follow-up `fetch_add`; `swap(0)` take (B1–B2) | Source review; riscv32imac disassembly shows lw/amoor.w/amoadd.w with **no lr.w/sc.w**; eight-target code size re-blessed post-RMW; Cortex-M3 cycles 8 / 7 (common path untouched by the sentinel change) | Measured |
 | No panic reachable from hot paths (B3) | Source review; normal, Miri, Loom, and embedded-target executions | Proven |
 | Sole-role exclusive handles; reacquisition continues state (H1, H3) | `handles_are_exclusive_and_reusable_after_drop` | Proven |
 | Handles are `Send + !Sync` (H2) | `handles_are_send`; compile-fail doctests pin `!Sync` on both roles | Pinned |
 | Constructible in static storage (H4) | `const_new_works_in_static_context` | Proven |
-| Cost claims per target | Eight-target gated code-size rows (proposal §3.1); re-bless if CAS grows any gated row beyond +16 B | Measured |
+| Cost claims per target | Eight-target gated code-size rows (proposal §3.1), re-blessed after the sentinel-RMW change | Measured |
 
 Full CI for the lane (`0a22ada` admission package; `f26d4c3` H
 finalization): complete pinned `./scripts/verify.sh` matrix with zero
@@ -95,7 +97,7 @@ in contract §8 and proposal §3.1–§3.2):**
   confirmation.** Below `MAX`, one Relaxed load and one Relaxed
   `fetch_add`. Observed `MAX` is confirmed with `compare_exchange(MAX,
   MAX)`; success is a saturated no-op, failure falls through to one
-  `fetch_add` into the post-take epoch (at most one contention retry).
+  `fetch_add` into the post-take epoch (fixed sequence, no retry).
   Rejected for this type: a load-and-skip-on-`MAX` short-circuit (fails
   T3/A1 after a completed take under Relaxed observation), an unbounded
   CAS loop (fails B1), silent wrap (fails A2/I3 and the crate's

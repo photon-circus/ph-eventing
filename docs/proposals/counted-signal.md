@@ -63,9 +63,11 @@ should remain statically sized and avoid a general dynamic registry.
 
 ## 3. Resolved candidate decisions
 
-- Saturation uses the sole-producer algorithm in §3.1: a Relaxed load plus a
-  compare-exchange that treats observed `u32::MAX` as maybe-stale, with at most
-  one contention retry from the sole consumer reset.
+- Saturation uses the sole-producer algorithm in §3.1: a Relaxed load, with
+  an observed `u32::MAX` re-read through a no-op RMW (`fetch_or(0)`) that is
+  guaranteed to see the latest value in modification order — a fixed
+  instruction sequence on every gated ISA, with no compare-exchange and
+  therefore no LR/SC retry loop on RISC-V.
 - `u32::MAX` is the observable saturation sentinel, wrapped in
   `CountSnapshot`; exact excess beyond the sentinel is intentionally absent.
 - `take_count` is a `swap(0)` and reports one take interval, not a running
@@ -85,10 +87,8 @@ listed, but only under a deliberately narrow handle model:
 
 ```rust
 let observed = count.load(Relaxed);
-if observed == u32::MAX
-    && count.compare_exchange(u32::MAX, u32::MAX, Relaxed, Relaxed).is_ok()
-{
-    return; // confirmed saturated no-op
+if observed == u32::MAX && count.fetch_or(0, Relaxed) == u32::MAX {
+    return; // RMW re-read confirms current saturation: absorbed no-op
 }
 count.fetch_add(1, Relaxed);
 ```
@@ -96,14 +96,18 @@ count.fetch_add(1, Relaxed);
 A plain load-and-skip-on-`MAX` short-circuit is **not** exact: after
 `take_count` has returned, a later `increment` may still observe a stale
 `MAX` under Relaxed ordering and drop the occurrence from both take
-intervals (violating T3/A1). The sentinel path therefore confirms with
-`MAX → MAX` — success is a true saturated no-op; failure falls through to
-`fetch_add` into the post-take epoch (at most one contention retry under B1).
+intervals (violating T3/A1). The sentinel path therefore re-reads through a
+no-op RMW — an RMW, unlike a load or a failed compare-exchange, observes the
+latest value in modification order, so `MAX` proves current saturation
+(absorbed no-op) and anything else falls through to `fetch_add` into the
+post-take epoch. Every path is a fixed instruction sequence under B1; the
+original sentinel used a strong compare-exchange, which was replaced when
+review showed it lowers to an unbounded LR/SC retry loop on RISC-V.
 
 This remains **not** correct for multiple producers: two producers could both
 observe `u32::MAX - 1` and the second `fetch_add` would wrap. It is correct with the
 crate's existing sole `Send + !Sync` producer handle. Between the load and
-RMW (or between the failed sentinel CAS and the follow-up `fetch_add`), the
+RMW (or between the sentinel re-read and the follow-up `fetch_add`), the
 consumer's `swap(0)` is the only possible competing write and it can only lower
 the value, so the RMW cannot wrap.
 
@@ -111,7 +115,7 @@ Consequences for the deferred decisions:
 
 | Choice | Evaluation result |
 |---|---|
-| Sole `Send + !Sync` producer, methods take `&self` | Exact saturation; common path is one load plus one `fetch_add`; sentinel path adds one confirming CAS and at most one follow-up `fetch_add`; matches existing handle ownership. |
+| Sole `Send + !Sync` producer, methods take `&self` | Exact saturation; common path is one load plus one `fetch_add`; sentinel path adds one no-op RMW re-read and at most one follow-up `fetch_add`; matches existing handle ownership. |
 | Shareable/multiple raisers | The intervening-writer proof fails; needs an unbounded CAS loop, a weaker overflow contract, or a substantially more complex bounded algorithm. |
 | `u32::MAX` reserved sentinel wrapped by `CountSnapshot` | Full exact range below the sentinel; `is_saturated()` observes saturation in the take that clears it; the snapshot remains one word and needs no second sticky atomic. |
 | `swap(0)` take, relaxed ordering | Counts only, with no payload publication to order. Atomic modification order partitions each increment into exactly one take epoch. |
@@ -137,7 +141,7 @@ Evidence added with the prototype:
   per-target measurements rather than from source shape.
 
 The isolated release-mode code-size rows on the pinned Rust 1.92.0 toolchain
-(after the sentinel-CAS fix) expose the architecture split for review:
+(after the sentinel-RMW fix) expose the architecture split for review:
 
 | Target family | `increment` | `take_count` |
 |---|---:|---:|
@@ -148,12 +152,16 @@ The isolated release-mode code-size rows on the pinned Rust 1.92.0 toolchain
 | RV32IMAC | 34 B | 8 B |
 
 The M0/M23 rows use the existing portable-atomic single-core probe backend.
-Versus the pre-fix load-and-skip path this is a deliberate +16…+36 B growth
-on gated rows: exactness after a completed take requires the confirming CAS.
+Versus the pre-fix load-and-skip path this remains a deliberate growth on
+gated rows — exactness after a completed take requires the confirming RMW
+re-read — but the RMW refinement recovered 8–12 B on seven of the eight
+rows relative to the interim compare-exchange form (thumbv6m's
+critical-section row is unchanged), and on RV32IMAC the sentinel is a
+single `amoor.w` with no `lr.w`/`sc.w` pair in the disassembly.
 
 Re-measured in the pinned reference environment via `./scripts/verify.sh cycles`
-after the sentinel-CAS fix. The probe brackets the common below-`MAX` path
-(`load` + `fetch_add`) and a `swap(0)` take — the confirming CAS only runs when
+after the sentinel fix. The probe brackets the common below-`MAX` path
+(`load` + `fetch_add`) and a `swap(0)` take — the sentinel re-read only runs when
 the producer observes `MAX`, so these rows stay the hot-path cost:
 
 | Cortex-M3 hot path | Retired guest instructions |
@@ -180,7 +188,7 @@ type's proof.
 ## 4. Promotion bar to PROPOSED
 
 1. **Complete for the SPSC candidate:** the bounded-saturating-increment
-   question has the sole-producer CAS answer proved in §3.1.
+   question has the sole-producer sentinel-RMW answer proved in §3.1.
 2. **Complete:** the shared handle model is sole-role `Send + !Sync` handles
    with `&self` operations for both this lane and EventFlags. The proof
    dependency is recorded in the contract's H-decision section.

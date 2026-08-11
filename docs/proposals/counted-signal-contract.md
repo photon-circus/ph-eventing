@@ -78,9 +78,11 @@ Algorithmic bounds live here; instruction counts remain measured claims tied
 to a target, toolchain, and reference environment.
 
 - **B1.** `increment` performs a statically bounded amount of work independent
-  of signal history and consumer activity: at most one contention retry from
-  the sole consumer's reset (no unbounded retry loop), no dynamic allocation,
-  no user code, and no wait for the consumer.
+  of signal history and consumer activity: a fixed instruction sequence on
+  every gated ISA — one load, at most one no-op RMW re-read on the saturation
+  sentinel, and at most one `fetch_add`; no compare-exchange (and therefore no
+  LR/SC retry loop), no dynamic allocation, no user code, and no wait for the
+  consumer.
 - **B2.** `take_count` performs a statically bounded amount of work independent
   of the number of increments in the interval and producer activity: no retry
   loop, no dynamic allocation, no user code, and no wait for the producer.
