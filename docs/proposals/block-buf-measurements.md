@@ -85,9 +85,12 @@ ranges from 159 to 8,658 retired instructions; preserving a rejected complete
 block is within 5–31 instructions of the accepted path rather than being a
 cheap scalar error return.
 
-The record still contains no named ISR/task instruction budget and no RAM
-envelope. Therefore this measurement does **not** close decision **P** and does
-not authorize either branch of **S**:
+At measurement time the record contained no named ISR/task instruction
+budget and no RAM envelope, so this measurement deliberately closed
+nothing — it made the decision readable, and the reading followed:
+**decision P closed 2026-08-11 as Copy composition, and S closed as
+deferred** (planning-record P/S closure). The decision logic below is
+retained as the record of how the rows were to be read:
 
 - if a selected shape's budget covers its accepted row and the extra
   builder-sized storage is acceptable, Copy composition remains the safe
@@ -97,6 +100,7 @@ not authorize either branch of **S**:
   BlockBuf-over-SlotPool integration.
 
 Choosing a threshold here would substitute an arbitrary library-wide number
-for the application budget the proposal explicitly requires. The maintainer's
-next input is a named instruction/time budget and RAM envelope for the shapes
-the cycle intends to support.
+for the application budget the proposal explicitly requires. That input
+arrived as the P closure's budget posture: the per-shape measured rows are
+the budget statement, adopters own the arithmetic for their shape, and the
+one unserved corner exits through S's registered trigger.

@@ -47,6 +47,7 @@ use core::mem::MaybeUninit;
 /// Sequence `0` is reserved. The first and last sequence values describe the
 /// inclusive range represented by `samples`; wrap skips the reserved value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "a completed block is the publishable window; dropping it discards N samples"]
 pub struct Block<T: Copy, const N: usize> {
     first_sequence: u32,
     last_sequence: u32,
@@ -81,6 +82,7 @@ impl<T: Copy, const N: usize> Block<T, N> {
 
 /// Why a sample could not be appended to a [`BlockBuilder`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "the rejected sample rides in this error; dropping it unseen loses the sample"]
 pub enum FillError<T: Copy> {
     /// Sequence `0` is reserved and never identifies a sample.
     ReservedSequence {

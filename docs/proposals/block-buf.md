@@ -241,19 +241,22 @@ On the reference Cortex-M3, accepted completion plus publication ranges from
 accepted path because the complete rejected block is preserved and returned to
 the caller. Logical payload traffic ranges from 48 to 4,112 bytes per path.
 
-This supplies the missing measurements but does not close the foundation
-decision: no named ISR/task instruction budget or RAM envelope exists in the
-record. Decision **P** therefore remains open, and decision **S** must continue
-to wait. The next maintainer input is the budget for the supported shapes; only
-then can the branch choose Copy composition or authorize the representative
-BlockBuf-over-SlotPool integration.
+At measurement time this supplied the missing numbers without closing the
+foundation decision — no named ISR/task budget existed in the record, so
+the branch deliberately chose nothing. **The maintainer input has since
+arrived: decision P closed 2026-08-11 as Copy composition** (the per-shape
+rows above are the budget statement; no library-wide threshold is
+claimed), **and decision S closed as deferred** — the SlotPool branch is
+banked behind an adopter-gated trigger (a measured budget breach at a
+supported shape, or a direct-to-granted-slot requirement). See the
+planning record's P/S closure and §9 below.
 
 ## 7. Deferred choices and decision evidence
 
 | Choice | Safe default | Evidence that changes it |
 |---|---|---|
 | Block or sample LatestBuf first (D3 scheduling) | Implement generic `LatestBuf<T>`; blocks already compose | A block-first integration partner or benchmark showing the sample payload misses the relevant costs |
-| Copy composition or SlotPool | Copy composition | Section 6 exceeds a named ISR/task budget or RAM envelope |
+| Copy composition or SlotPool — **closed as Copy** (decision P, 2026-08-11) | Copy composition | Closed — reopening runs through decision S's adopter-gated trigger (a measured budget breach at a supported shape, or a direct-to-granted-slot requirement), from the evidence banked at `archive/slot-pool-0.3.0-evaluation` |
 | Automatic reset after a gap | Reject without mutation | Real integrations converge on one restart and accounting policy |
 | Mandatory per-sample timestamps | Caller-selected `T` | A transport-level time contract cannot be expressed in payload |
 | Dedicated `DropBlockBuf` | Observe and handle `Err(block)` | A distinct synchronization/accounting contract, not convenience |
