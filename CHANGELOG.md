@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
+### Documentation
+- SlotPool engineering record (`docs/records/slot-pool.md`) — Track 1 acceptance package: non-Copy RAII ownership transfer framed as the decide-against edge, SP-* claims×evidence (`d3f252e`), and an honest status header that **admission waits on P then S**.
 ### Added
 - An `experimental-slot-pool` feature exposing an evaluation-only SPSC
   `SlotPool<T, N>`. It transfers reusable non-`Copy` slots through RAII grants
