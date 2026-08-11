@@ -49,7 +49,7 @@ impl<T: Copy, const N: usize> RingBuf<T, N> {
     /// Create a new, empty ring buffer.
     ///
     /// This is a `const fn`, so the buffer can be built in a `const` or
-    /// `static` initialiser. Note that `push`, `pop`, and `clear` take
+    /// `static` initialiser. Note that `push` and `clear` take
     /// `&mut self`, so a bare `static RingBuf` is read-only and of little use,
     /// and `static mut` is a hard error to reference under edition 2024. The
     /// pattern this actually enables is const-initialising the buffer *inside*
