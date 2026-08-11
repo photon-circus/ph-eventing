@@ -219,9 +219,17 @@ pub struct Producer<'a> {
 impl Producer<'_> {
     /// Raise every condition in `mask`.
     ///
-    /// The operation is exactly one atomic `fetch_or`: it never loops, waits,
-    /// allocates, calls user code, or panics. A concurrent take observes this
-    /// raise in its own snapshot or leaves it pending for the following take.
+    /// The operation is exactly one source-level atomic `fetch_or`: no
+    /// algorithmic retry loop, and it never waits, allocates, calls user
+    /// code, or panics. How the single RMW is realised is per-ISA — a lone
+    /// `amoor.w` on RISC-V, a gated four-instruction PRIMASK critical
+    /// section on Cortex-M0, and an LDREX/STREX pair on exclusive-monitor
+    /// ARM, where a lost reservation (an intervening interrupt, or the
+    /// concurrent take's `swap`) repeats the pair. That hardware retry is
+    /// bounded by contention on the one shared word, not by anything this
+    /// code does; the uncontended cost is the measured row. A concurrent
+    /// take observes this raise in its own snapshot or leaves it pending
+    /// for the following take.
     #[inline]
     pub fn raise(&self, mask: EventMask) {
         self.flags.pending.fetch_or(mask.bits(), Ordering::Release);
