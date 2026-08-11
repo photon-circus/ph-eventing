@@ -32,6 +32,18 @@ All notable changes to this project will be documented in this file.
   no-partial-block limitation) and registers the only reopening condition: a separate block
   transport must enforce a guarantee composition cannot, behind cycle decisions P/S. All
   three contract decision points are now closed.
+- `LatestBuf` proposal: review caveat **A.3** (handle-state continuation) is closed as
+  channel-resident role state with stateless handles — the crate's stateless-handle
+  precedent and the sole-role doctrine of decision H, validated by drop-and-reacquire
+  continuation tests, both cross-context role-handoff Loom models, detector-on Miri, and
+  all four role-handoff ordering-mutation detections. Persist-on-drop is considered and
+  not selected (Drop-time state copy is a permanent failure surface; its L3 model does not
+  isolate the taken-flag handoff; register residency unmeasured), and narrowing H2's
+  registered condition was not met. New contract non-promise **X8** states the
+  role-recovery boundary for integrators: reacquisition requires the previous handle's
+  drop, handle lifetime is an application property, and there is deliberately no
+  out-of-band role reset because a forced release would break the exclusivity soundness
+  rests on — the facts of the exchange, informing downstream design without prescribing it.
 - `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
   deliberately rejected (its data loss would be unreportable under overwrite; see the worked
   rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so

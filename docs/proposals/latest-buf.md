@@ -1130,6 +1130,31 @@ is its cost.
 - persist them into the channel in the handle's `Drop`; or
 - withdraw reacquisition for stateful roles (narrow H2 explicitly).
 
+**Decision (A.3, closed 2026-08-11): the first refinement.** Role state is
+channel-resident in role-owned storage; handles are stateless — matching
+the `SeqRing`/`EventBuf` precedent and the sole-role handle doctrine
+accepted for the signal primitives (cycle decision H). Continuation holds
+by construction: state never leaves the channel, so a drop-and-reacquire
+has nothing to lose. The validation this appendix required exists in
+full: drop-and-reacquire continuation tests, Loom models of both
+cross-context role handoffs, race-detector-on Miri coverage, and
+ordering-mutation runs detecting all four weakened role-handoff orderings.
+
+The persist-on-drop alternative is **considered and not selected**, with
+its partial evidence preserved in the evaluation record (§7): its
+Drop-time state copy is a permanent failure surface — a missing or
+reordered write-back silently restarts accounting, the exact H4 violation
+this appendix exists to prevent — its L3 model does not isolate the
+taken-flag handoff, and its register-residency claim is unmeasured.
+Narrowing H2 was the registered fallback if both candidates failed the
+evidence bar; the condition was not met.
+
+Contract non-promise **X8** states the boundary implications for
+integrators — reacquisition requires the previous handle's drop; handle
+lifetime is an application property; there is deliberately no out-of-band
+role reset — informing downstream design without prescribing or solving
+it.
+
 Contract clause **H4** (added on the same review round) pins the
 requirement whichever way the design goes: reacquisition continues, never
 restarts.

@@ -177,8 +177,9 @@ the measured implementation, per environment.
   design that cannot honour this must not offer reacquisition for that
   role (narrowing H2 explicitly rather than weakening H4). *(How
   continuation state survives the drop is an implementation concern,
-  deliberately not specified here — the proposal's sketch carries producer
-  state in the handle, and Appendix A.3 lists candidate mechanisms.)*
+  deliberately not specified here — the proposal's Appendix A.3 records
+  the closed mechanism decision, 2026-08-11. X8 states the boundary
+  facts of role recovery for integrators.)*
 
 ## 8. What the contract does not promise (X)
 
@@ -226,6 +227,21 @@ the measured implementation, per environment.
   code, never the transport's. Adding a convenience `Source` impl later
   remains an additive, adopter-evidence-gated decision (§9 D2); it must
   never arrive as a silent convenience.
+- **X8.** Role recovery beyond `Drop`. Reacquisition is promised only
+  after the previous handle is dropped (H2/H4): the drop is the exchange's
+  handoff point, and a successful reacquisition orders against it. Whether
+  and when a handle is dropped is a property of the application and its
+  execution environment, never of this contract — an environment that
+  destroys an execution context without running destructors, or code that
+  forgets a handle, leaves the role held, with channel state intact and
+  every other clause still holding. The contract deliberately offers no
+  out-of-band role reset: a forced release could clear a role while a
+  live handle still exists, and double acquisition is exactly what the
+  exclusive-ownership soundness argument exists to prevent. These are the
+  facts of the exchange, stated so an integrator can design against them
+  with full information; how an application manages handle lifetime —
+  supervision, task teardown, restart strategy — is beyond this
+  contract's scope, in the same posture as X3 and X5.
 
 ## 9. Decision points (D)
 
