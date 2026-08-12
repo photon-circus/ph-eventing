@@ -7,9 +7,9 @@
 - **Normative sources:** [contract](../proposals/latest-buf-contract.md)
   (clause IDs cited below) · [proposal](../proposals/latest-buf.md) ·
   merged with #35 (repo-relative on the release branch):
-  [evaluation record](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-evaluation.md) ·
-  [measurements](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md) ·
-  [joint composition matrix](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md).
+  [evaluation record](../proposals/latest-buf-evaluation.md) ·
+  [measurements](../proposals/latest-buf-measurements.md) ·
+  [joint composition matrix](../proposals/latest-block-composition-measurements.md).
 
 ## 1. Value statement
 
@@ -147,7 +147,7 @@ overclaimed stall-only trigger — every finding confirmed, none
 disputed). The corrected text is *stricter* than the drafts it replaced.
 
 **Where the numbers live** (lane-resident until #35 merges):
-[`latest-buf-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md)
+[`latest-buf-measurements.md`](../proposals/latest-buf-measurements.md)
 (11-target code size, pinned cycles, A.1 comparison, RAM);
-[`latest-block-composition-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md)
+[`latest-block-composition-measurements.md`](../proposals/latest-block-composition-measurements.md)
 (the joint D3 matrix); tracking: issues #26/#27, PRs #35/#37.
