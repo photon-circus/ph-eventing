@@ -265,20 +265,24 @@ printf '\n%s\n' "$report"
 # same on a clear flag as on an already-set one, and take_all the same
 # nonempty as empty. Printing divergent counts under a success footer would
 # un-pin exactly the property those four regions exist to hold, so a
-# divergence (or a missing row) fails the run.
-check_state_pair() {
-    op="$1"; a="$2"; b="$3"
-    va="$(printf '%s\n' "$report" | awk -v n="$a" '$0 ~ ("^  " n " +[0-9]+$") { print $NF; exit }')"
-    vb="$(printf '%s\n' "$report" | awk -v n="$b" '$0 ~ ("^  " n " +[0-9]+$") { print $NF; exit }')"
-    if [ -z "$va" ] || [ -z "$vb" ] || [ "$va" -ne "$vb" ]; then
-        printf '\nerror: EventFlags %s cost diverges by state: "%s" = %s, "%s" = %s.\n' \
-            "$op" "$a" "${va:--}" "$b" "${vb:--}" >&2
-        printf 'State-independence is a documented claim; divergence is a regression, not noise.\n' >&2
-        exit 1
-    fi
-}
-check_state_pair raise    'ef raise clear'   'ef raise already set'
-check_state_pair take_all 'ef take nonempty' 'ef take empty'
+# divergence (or a missing row) fails the run. Default probe only: the three
+# matrix modes deliberately compile the EventFlags regions out, so there the
+# rows are absent by design, not by regression.
+if [ -z "$PROBE_FEATURES" ]; then
+    check_state_pair() {
+        op="$1"; a="$2"; b="$3"
+        va="$(printf '%s\n' "$report" | awk -v n="$a" '$0 ~ ("^  " n " +[0-9]+$") { print $NF; exit }')"
+        vb="$(printf '%s\n' "$report" | awk -v n="$b" '$0 ~ ("^  " n " +[0-9]+$") { print $NF; exit }')"
+        if [ -z "$va" ] || [ -z "$vb" ] || [ "$va" -ne "$vb" ]; then
+            printf '\nerror: EventFlags %s cost diverges by state: "%s" = %s, "%s" = %s.\n' \
+                "$op" "$a" "${va:--}" "$b" "${vb:--}" >&2
+            printf 'State-independence is a documented claim; divergence is a regression, not noise.\n' >&2
+            exit 1
+        fi
+    }
+    check_state_pair raise    'ef raise clear'   'ef raise already set'
+    check_state_pair take_all 'ef take nonempty' 'ef take empty'
+fi
 
 printf '\n'
 printf 'Instructions retired on the guest, marker overhead subtracted.\n'
