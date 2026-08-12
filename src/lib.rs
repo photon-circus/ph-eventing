@@ -23,6 +23,12 @@
 //! | [`Sink<T>`](traits::Sink) | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 //! | [`Source<T>`](traits::Source) | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 //! | [`Link<In,Out>`](traits::Link) | Both | Blanket impl for any `Sink<In> + Source<Out>` |
+//! | [`LatestSink<T>`](traits::LatestSink) | Publish a newest value | `latest_buf::Producer` |
+//! | [`LatestSource<T>`](traits::LatestSource) | Take the newest value with loss evidence | `latest_buf::Consumer` |
+//!
+//! [`forward`](traits::forward) bridges the stream pair only; `LatestBuf`
+//! deliberately stands outside it (decision D2), and the signal types
+//! implement neither family.
 //!
 //! The [`traits::forward`] function transfers items from any `Source` to any
 //! `Sink`, making it easy to bridge different buffer types.
@@ -107,7 +113,8 @@
 //! The crate is `#![no_std]` by default. Tests require `std`.
 //!
 //! # Targets without atomics
-//! `SeqRing`, `EventBuf`, and `EventFlags` require 32-bit atomics. For targets that lack them
+//! Every concurrent primitive — `SeqRing`, `EventBuf`, `EventFlags`,
+//! `CountedSignal`, and `LatestBuf` — requires 32-bit atomics. For targets that lack them
 //! (for example `thumbv6m-none-eabi`), enable
 //! `portable-atomic-unsafe-assume-single-core` or `portable-atomic-critical-section`.
 //! The crate always compiles those modules, so no-atomic targets need one of

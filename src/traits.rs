@@ -8,6 +8,13 @@
 //! | [`Sink`] | Accept events | [`RingBuf`], [`seq_ring::Producer`], [`event_buf::Producer`] |
 //! | [`Source`] | Yield events | [`seq_ring::Consumer`], [`event_buf::Consumer`] |
 //! | [`Link`] | Both — accept *and* yield | Blanket impl for any `Sink<In> + Source<Out>` |
+//! | [`LatestSink`] | Publish a newest value | [`latest_buf::Producer`](crate::latest_buf::Producer) |
+//! | [`LatestSource`] | Take the newest value with replacement/skipped evidence | [`latest_buf::Consumer`](crate::latest_buf::Consumer) |
+//!
+//! [`forward`] bridges `Source` into `Sink` only — the stream pair.
+//! `LatestBuf`'s handles implement the latest-value pair instead, by decision
+//! D2: `try_pop` cannot report the displacement that is that channel's
+//! designed overload behaviour.
 //!
 //! The free function [`forward`] transfers items from any [`Source`] to any
 //! [`Sink`], stopping when the source is empty or the sink rejects a value.
