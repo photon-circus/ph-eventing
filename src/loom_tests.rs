@@ -212,7 +212,7 @@ fn latest_buf_reused_slot_keeps_exclusive_ownership() {
             // The phase marker orders scheduling only; visibility of the
             // publication itself must arrive through the exchange, so the
             // take retries until it does.
-            let mut take_spinning = |expected: u32| loop {
+            let take_spinning = |expected: u32| loop {
                 if let Some(item) = consumer.take_latest() {
                     assert_eq!(item.generation, expected);
                     assert_eq!(item.value, [expected; 2]);

@@ -151,7 +151,7 @@ impl core::fmt::Debug for CountedSignal {
 ///
 /// The load-bearing `!Sync` property is pinned at compile time:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::counted_signal::Producer;
 ///
 /// fn assert_sync<T: Sync>() {}
@@ -212,7 +212,7 @@ impl core::fmt::Debug for Producer<'_> {
 /// This handle is `Send + !Sync` and may atomically take counts while its
 /// paired producer increments from another context.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use ph_eventing::counted_signal::Consumer;
 ///
 /// fn assert_sync<T: Sync>() {}

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.3.0 - 2026-08-12
 
 ### Added
 - `LatestBuf<T>` — a three-slot, freshness-first SPSC snapshot channel for
@@ -158,6 +158,24 @@ All notable changes to this project will be documented in this file.
   measured against 256 payload bytes) and scopes `len`'s consistency claim to
   a successful bracketed sample, with the bounded clamped-estimate fallback
   named.
+
+### Known issues
+- `SeqRing` is a seqlock and has a formal data race that Miri reports as
+  undefined behaviour. **This affects downstream tooling:** running
+  `cargo miri test` over a test that drives the ring from two threads reports
+  UB inside this crate. It is a deliberate trade — a ring restricted to a
+  word-sized payload could hold it in an atomic and be race-free; accepting
+  any `T: Copy` is what rules that out. The `seq_ring` module docs give the
+  alternatives and why each was rejected. `EventBuf` is unaffected and passes
+  Miri with the detector on, but applies backpressure rather than overwriting,
+  so it is not a drop-in replacement. Unchanged from 0.2.0.
+- `SeqRing` exact loss accounting and the torn-copy discard argument are both
+  bounded at the `2^32 − 1` sequence span measured from the consumer's resume
+  cursor (see the module's whole-span section). A whole-span gap can silent-
+  zero; that is a documented limitation, not a new 0.3.0 regression.
+- `LatestBuf::skipped` is exact only while the consumer's resume generation
+  stays within one non-zero `u32` span of the newest publication (contract
+  non-promise X6); a full-cycle gap can also report `skipped = 0`.
 
 ## 0.2.0 - 2026-08-10
 

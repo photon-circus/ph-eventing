@@ -35,7 +35,9 @@ include = [
     "build.rs",
     "Cargo.toml",
     "LICENSE",
-    "README.md",
+    # Root-anchored: a bare `README.md` is gitignore-style and matches every
+    # README.md in the tree (e.g. docs/records/README.md), which must not ship.
+    "/README.md",
 ]
 
 [dependencies]
