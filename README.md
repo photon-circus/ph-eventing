@@ -28,8 +28,8 @@ All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 
 - **Predictability first.** No unbounded loops, no hidden allocation, and no
   panic reachable from a hot path. For the two SPSC types, no data loss that
-  cannot be observed either — every drop is reported (`SeqRing`) or prevented
-  (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
+  cannot be observed either — every drop is reported (`SeqRing`, exact within
+  one sequence span; see its section) or prevented (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
   window that overwrites silently, with no drop counter and no backpressure.
   Reach for it when losing the oldest entry is the point, not when delivery
   matters.
@@ -286,8 +286,13 @@ them is a runtime step and always will be.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 - Once every `2^32 - 1` pushes the sequence counter wraps and a few extra entries are dropped —
   exactly one for a power-of-two `N`, none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. They
-  are reported as ordinary drops; no stale or torn value is ever returned. See
-  [Choosing `N`](#choosing-n).
+  are reported as ordinary drops; no stale or torn value is returned (within the span bound
+  below). See [Choosing `N`](#choosing-n).
+- Sequence arithmetic is modular over that `2^32 - 1` span, and both headline guarantees carry
+  its bound: a whole-span gap from the consumer's resume cursor aliases to "nothing new" and
+  reports **zero** drops, and the torn-copy re-check shares the same counter-width ABA limit for
+  a consumer stalled mid-read. Reachability arithmetic and the structural escape hatches are in
+  the rustdoc ("Known limitation: whole-span sequence aliasing").
 
 ### EventBuf
 - FIFO order: `pop` always returns the oldest item.
@@ -363,8 +368,9 @@ in a task loop. That works, with three things to know:
   | A divisor of `2^32 - 1` (3, 5, 15, 17, 51, 85, 255, 257, 65537, …) | 0 |
   | Anything else | Up to `N - 1` — `N = 48` drops 15, `N = 96` drops 33, `N = 121` drops 58 |
 
-  These are reported through `PollStats` like any other drop, and no stale or torn value is ever
-  returned — it is a data-loss bound, not a correctness one. One lost entry per `2^32` pushes is
+  These are reported through `PollStats` like any other drop, and no stale or torn value is
+  returned (within the whole-span bound stated in the SeqRing section and rustdoc) — it is a
+  data-loss bound, not a correctness one. One lost entry per `2^32` pushes is
   beneath the noise floor for anything that already tolerates overwrite, so a power of two is
   almost always the right call. `EventBuf` has no wrap boundary of this kind.
 

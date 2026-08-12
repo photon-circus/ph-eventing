@@ -143,11 +143,16 @@
 //! ~4.29 billion publications. At a sustained 1 MHz push rate a poll gap must exceed ~71.6
 //! minutes — and the mid-read stall must hold the consumer *between two instructions of one
 //! copy* for that long — before either case is reachable; at 10 kHz it is ~5 days. The escape
-//! hatch is structural: bound the interval between ordered polls (`poll_one` or a
-//! nonzero-budget `poll_up_to` resynchronizes the resume point — even one item drained runs the
-//! lag-recovery jump to within `N` of newest — as does [`Consumer::skip_to_latest`];
-//! `poll_up_to(0, …)` returns before touching the resume point, and the non-advancing
-//! [`Consumer::latest`] never moves it) below one span, and bound consumer preemption during a single
+//! hatch is structural, and the bound is measured from the **resume cursor**, not from call
+//! cadence: aliasing needs the distance from the resume cursor to the newest publication to
+//! reach one whole span, and a partial drain leaves residual backlog that counts against it. A
+//! nonzero ordered poll (`poll_one`, or `poll_up_to` with a nonzero budget) always leaves the
+//! cursor at most `N - 1` behind the newest publication it observed — the lag-recovery jump
+//! handles a lag over `N`, and draining even one item brings a lag of at most `N` below that —
+//! so keeping the publications between consecutive nonzero polls below one span *minus*
+//! `N - 1` suffices. [`Consumer::skip_to_latest`] zeroes the distance outright.
+//! `poll_up_to(0, …)` returns before touching the resume cursor, and the non-advancing
+//! [`Consumer::latest`] never moves it. Separately, bound consumer preemption during a single
 //! read to less than a span of publications. If neither bound can be stated for your system,
 //! [`crate::EventBuf`] has no sequence wrap of any kind.
 //!

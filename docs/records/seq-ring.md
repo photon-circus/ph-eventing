@@ -63,12 +63,15 @@ channel (`LatestBuf` is, with a race-free ownership argument).
   span is ~4.29 billion publications (~71.6 minutes at a sustained
   1 MHz push rate; ~5 days at 10 kHz). The module docs carry the full
   disclosure — span, silent-zero case, reachability arithmetic — and
-  the structural escape hatches: bound the interval between ordered
-  polls (`poll_one` or a nonzero-budget `poll_up_to` resynchronizes,
-  as does `skip_to_latest`; `poll_up_to(0, …)` returns before touching
-  the resume point and the non-advancing `latest` never moves it),
-  bound mid-read preemption, or use `EventBuf`, which has no sequence
-  wrap.
+  the structural escape hatches, with the bound measured from the
+  *resume cursor*, not call cadence (a partial drain leaves residual
+  backlog that counts against the span): a nonzero ordered poll leaves
+  the cursor at most `N − 1` behind the newest it observed, so
+  publications between consecutive nonzero polls must stay below one
+  span minus `N − 1`; `skip_to_latest` zeroes the distance;
+  `poll_up_to(0, …)` and the non-advancing `latest` never move the
+  cursor. Bound mid-read preemption separately, or use `EventBuf`,
+  which has no sequence wrap.
 - **Loss is designed behaviour.** Overwrite is the overload policy; the
   counters report it, nothing prevents it. Consumers that must see every
   event belong on `EventBuf`.
