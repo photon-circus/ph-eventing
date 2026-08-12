@@ -139,16 +139,26 @@ ph-eventing/
 │   ├── ci.sh               # Local CI matrix (Git Bash on Windows)
 │   ├── miri.sh             # Miri UB/concurrency checks
 │   ├── loom.sh             # Loom model checking
-│   ├── codesize.sh         # Per-target flash cost across 11 embedded targets
+│   ├── codesize.sh         # Per-target flash cost; default + block/latest/latest-block matrix modes
+│   ├── cycles.sh           # QEMU instruction-cost probe (same four modes)
+│   ├── verify.sh           # Runs everything inside the pinned reference image
 │   ├── event-flags-atomic-window.sh # EventFlags interrupt-mask disassembly gate
-│   └── codesize/           # no_std probe crate it measures (own workspace)
+│   ├── codesize/           # no_std probe crate (own workspace; baseline*.tsv gate files)
+│   ├── cycles/             # QEMU probe crate (own workspace)
+│   ├── probes/             # shared probe sources (block_shape.rs structural twin)
+│   └── verify/             # Dockerfile pinning the reference environment
 ├── build.rs                # guards the mutually exclusive portable-atomic features
 ├── .github/                # CI workflow (push + PR), issue/PR templates, CODEOWNERS, dependabot
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
+├── docs/
+│   ├── records/            # engineering records: the enduring per-type briefing layer
+│   ├── proposals/          # design-decision documents: proposals, frozen contracts, measurements
+│   └── 0.3.0-candidates.md # the 0.3.0 cycle's planning record (historical)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up
+    ├── block.rs            # Block / BlockBuilder complete contiguous sample windows
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
     ├── counted_signal.rs   # Saturating payload-free SPSC counter
     ├── event_flags.rs      # Coalesced SPSC condition notification
@@ -157,7 +167,7 @@ ph-eventing/
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
     ├── sync.rs             # Atomic/cell shim — swaps in Loom's primitives under --cfg loom
     ├── loom_tests.rs       # Exhaustive concurrency models (--cfg loom only)
-    └── traits.rs           # Sink, Source, Link traits and forward() utility
+    └── traits.rs           # Sink/Source/Link and LatestSink/LatestSource traits, forward()
 ```
 
 ## Architecture
@@ -381,7 +391,11 @@ Changes that must land together, none of which the compiler enforces:
 
 - `poll_one(hook)` - Drain one item in-order
 - `poll_one_value()` - Same, returning `Option<(u32, T)>`
-- `poll_up_to(max, hook)` - Drain up to N items in-order
+- `poll_up_to(max, hook)` - Drain up to `max` items in-order from the window
+  that existed at entry: the newest sequence is sampled **once** and frozen as
+  the drain goal, which is what bounds every call (one lag-recovery jump +
+  at most `N` slot walks + at most `max` reads); items published mid-poll
+  wait for the next call
 - `latest(hook)` / `latest_value()` - Read newest item (not in-order, doesn't advance cursor)
 - `skip_to_latest()` - Fast-forward to newest, skip backlog
 
@@ -752,15 +766,21 @@ environment*, not universal: a 10.2 QEMU build shifted two measured regions by
 exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
 
-The BlockBuf candidate's large-payload mode is isolated from the standard
-probe so its monomorphisations cannot perturb the standard LTO decisions:
+The large-payload matrix modes are isolated from the standard probe so their
+monomorphisations cannot perturb the standard LTO decisions:
 
 ```bash
-./scripts/cycles.sh block-matrix
-./scripts/verify.sh cycles block-matrix  # pinned reference environment
+./scripts/cycles.sh block-matrix          # Block completion + publication shapes
+./scripts/cycles.sh latest-matrix         # LatestBuf payload matrix
+./scripts/cycles.sh latest-block-matrix   # LatestBuf/Block D3 composition
+./scripts/verify.sh cycles <mode>         # any of them, pinned reference environment
 ```
 
-Run the default probe as well when changing shared measurement infrastructure.
+`./scripts/verify.sh` (the full matrix) runs all four modes. Run the default
+probe as well when changing shared measurement infrastructure. Probe layout is
+measurement-sensitive: keep a new region in its own `#[inline(never)]` frame
+and diff the full row output against the pristine tip (a shared frame was
+measured to perturb a neighbouring region by +2).
 
 | | empty | loaded | rejected/empty |
 |---|---:|---:|---:|
@@ -801,7 +821,7 @@ with `./scripts/verify.sh cycles latest-block-matrix`; its 2/8/16-byte by
 Four results carry the argument:
 
 1. **Every `push` is constant.** Empty vs loaded differs by at most one
-   instruction on all three types. Cost does not scale with occupancy or `N`.
+   instruction on all three push-bearing types (LatestBuf publish shows the same constancy, 41/40). Cost does not scale with occupancy or `N`.
 2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind and one
    ~2000 behind both cost **90 instructions** (re-measured after the 0.3.0
    bounded-poll fix froze the drain goal at entry; it was 115 with the
@@ -945,6 +965,7 @@ cargo test
 - `works_without_default_bound` -- `T: Copy` only, no `Default`
 - `default_and_capacity_match_new` -- constructor/default introspection
 - `event_buf_composition_queues_and_returns_a_rejected_block` -- composed FIFO/rejection policy
+- `discontinuity_check_is_modular_over_the_span` -- the F2 span-alias policy pin: contiguity compares `u32` identity only
 
 **`ring::tests`:**
 - `new_ring_is_empty` — Fresh ring state
@@ -1010,6 +1031,7 @@ cargo test
 - `read_seq_inner_rejects_invalidated_slot` — Slot invalidated mid-overwrite reads as absent
 - `read_seq_inner_detects_overwrite_during_read` — The `TEST_AFTER_READ_*` hook changes the slot seq between the copy and the re-check; the read is discarded
 - `consumer_skips_reserved_seq_zero_on_wrap` — Sequence wrap skips reserved `0`
+- `poll_window_is_frozen_at_entry` — The bounded-poll pin: a publish from inside the hook waits for the next call, nothing lost or double-counted
 - `push_wraps_seq_from_zero_to_one` — Producer side of the same wrap: `next_seq = u32::MAX` yields `1`, not `0`
 - `lag_across_wrap_counts_drops_exactly` — Drop accounting across the `u32` wrap
 - `seq_distance_skips_the_reserved_zero` — Sequence distance excludes reserved `0`
@@ -1133,6 +1155,10 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `head.wrapping_sub(tail)` always represents the item count
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
+- `SeqRing`: `poll_up_to` freezes its drain goal at entry — the frozen window is
+  what bounds every call. Do not reintroduce a live `newest` re-read into the
+  loop: the pre-0.3.0 loop did exactly that and could be starved indefinitely
+  by a producer that stayed ahead
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
 - `CountedSignal`: Producer and Consumer handles are `Send + !Sync`; producer
   exclusivity is load-bearing for wrap-free saturation (B1)

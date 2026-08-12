@@ -87,8 +87,9 @@ decision, not a formality.
 
 ### Concurrency changes
 
-If you touch atomics, orderings, fences, or unsafe blocks in `SeqRing` or
-`EventBuf`, `cargo test` passing is not evidence — a strongly-ordered x86 host
+If you touch atomics, orderings, fences, or unsafe blocks in any concurrent
+primitive — `SeqRing`, `EventBuf`, `LatestBuf`, `EventFlags`, or
+`CountedSignal` — `cargo test` passing is not evidence — a strongly-ordered x86 host
 cannot exhibit the bugs that appear on ARM and RISC-V. Run both checkers:
 
 ```bash
@@ -129,9 +130,16 @@ If you change an API shape that embedded callers reach for -- especially
 anything touching atomics -- measure it before arguing about it:
 
 ```bash
-./scripts/codesize.sh              # 8 upstream targets
-XTENSA=1 ./scripts/codesize.sh     # plus ESP32, needs the esp-rs fork
+./scripts/codesize.sh                     # 8 upstream targets, default API rows
+./scripts/codesize.sh block-matrix        # Block completion/publication shapes
+./scripts/codesize.sh latest-matrix       # LatestBuf payload matrix
+./scripts/codesize.sh latest-block-matrix # LatestBuf/Block composition matrix
+XTENSA=1 ./scripts/codesize.sh            # plus ESP32, needs the esp-rs fork
 ```
+
+Each mode gates against its own committed `baseline*.tsv` and `ci.sh` runs all
+of them — growth past the tolerance fails, and a re-bless is a deliberate,
+reviewed act, never a side effect.
 
 A design that looks cheaper on Cortex-M4 can be markedly worse on Cortex-M0+,
 where portable-atomic turns each read-modify-write into an interrupt-disable
@@ -146,7 +154,10 @@ that `rust-toolchain.toml` already declares.
 If you change a hot path, measure the time cost as well as the size cost:
 
 ```bash
-./scripts/cycles.sh
+./scripts/cycles.sh                      # default hot-path regions
+./scripts/cycles.sh block-matrix         # and the three matrix modes,
+./scripts/cycles.sh latest-matrix        # same names as codesize.sh
+./scripts/cycles.sh latest-block-matrix
 ```
 
 Needs `qemu-system-arm` (`sudo apt-get install qemu-system-arm`); it skips
@@ -154,9 +165,10 @@ cleanly without it. It is deliberately **not** part of `./scripts/ci.sh` —
 every other check is satisfied by the pinned toolchain alone, and a check most
 contributors cannot run would make a green `ci.sh` mean less rather than more.
 
-The counts are deterministic per QEMU build, not across builds (two of the
-eighteen regions were observed to shift by one instruction between builds), so
-when comparing against the documented numbers, run inside the reference
+The counts are deterministic per QEMU build, not across builds (regions have
+been observed to shift by one instruction between builds), and the merged
+binary's layout matters too — the documented numbers are measured on the
+assembled release tree. When comparing against them, run inside the reference
 environment below.
 
 Paste the numbers into your PR, as with `codesize.sh`.
@@ -168,7 +180,8 @@ matrix with zero SKIPs — are measured in one pinned Docker image, so that
 anyone can reproduce the evidence rather than take the README's word for it:
 
 ```bash
-./scripts/verify.sh            # ci + miri + loom + cycles, all inside the image
+./scripts/verify.sh            # ci + miri + loom + all four cycle modes +
+                               # the EventFlags atomic-window gate, in the image
 ./scripts/verify.sh cycles     # just one of them
 ./scripts/verify.sh shell      # look around
 ```
