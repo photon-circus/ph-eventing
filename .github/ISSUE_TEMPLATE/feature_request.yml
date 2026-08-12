@@ -11,9 +11,13 @@ body:
         Constraints any proposal has to live within:
 
         - `#![no_std]`, zero heap allocation, and **zero runtime dependencies**.
-        - Fixed-size, `T: Copy`, stack-allocated.
-        - The buffers are SPSC by design. Multi-producer or multi-consumer is a
-          different data structure, not a flag on this one.
+        - Fixed-size and zero-allocation; payload-carrying types are `T: Copy`.
+        - The concurrent primitives are SPSC by design. Multi-producer or
+          multi-consumer is a different data structure, not a flag on one of
+          these.
+        - Every guarantee ships with measured evidence: expect a proposal to be
+          asked for its cost story (code size, cycles) across targets, not
+          just its API.
 
   - type: textarea
     id: problem
@@ -36,7 +40,12 @@ body:
       label: Alternatives considered
       description: >
         Including whether an existing type already covers it — `RingBuf`,
-        `SeqRing`, and `EventBuf` deliberately trade off differently.
+        `SeqRing`, `EventBuf`, `LatestBuf`, `EventFlags`, `CountedSignal`, and
+        the `Block`/`BlockBuilder` composition deliberately trade off
+        differently. If this is a zero-copy / direct-to-slot request, note
+        that a `SlotPool` design was evaluated in full and deferred with an
+        adopter-gated reopening trigger (`docs/proposals/slot-pool.md`) — a
+        real adopter naming that trigger reopens it.
 
   - type: checkboxes
     id: constraints
