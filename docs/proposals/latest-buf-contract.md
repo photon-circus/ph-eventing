@@ -167,8 +167,10 @@ the measured implementation, per environment.
   (`try_producer` / `try_consumer` returning `Option`, matching the crate's
   0.2.0+ convention); a second concurrent acquisition of the same role
   fails.
-- **H2.** Handles are `Send + !Sync`, and dropping a handle makes its role
-  re-acquirable. (Same model as `SeqRing`/`EventBuf`; the `!Sync` is what
+- **H2.** Handles are `Send` when `T: Send` — the handle can move a payload
+  across contexts, so a non-`Send` payload correctly pins it; `T: Copy` alone
+  does not imply `T: Send` — always `!Sync`, and dropping a handle makes its
+  role re-acquirable. (Same model as `SeqRing`/`EventBuf`; the `!Sync` is what
   makes moving a handle into an ISR sound.)
 - **H3.** A channel is constructible in a `static` (const construction on
   the normal build), matching the existing primitives.

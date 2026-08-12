@@ -330,9 +330,12 @@ impl<T: Copy> core::fmt::Debug for LatestBuf<T> {
 
 /// Unique, stateless write handle for a [`LatestBuf`].
 ///
-/// This handle is `Send + !Sync`: it may move into an ISR or another execution
-/// context, but it may not be shared between contexts. Sole-producer ownership
-/// is load-bearing for the exclusive-slot soundness argument (contract H2).
+/// This handle is `Send` **when `T: Send`** (the handle can move a payload
+/// across contexts, so a non-`Send` payload correctly pins it — `T: Copy`
+/// alone does not imply `T: Send`) and always `!Sync`: it may move into an
+/// ISR or another execution context, but it may not be shared between
+/// contexts. Sole-producer ownership is load-bearing for the exclusive-slot
+/// soundness argument (contract H2).
 ///
 /// ```compile_fail,E0277
 /// use ph_eventing::latest_buf::Producer;
@@ -403,8 +406,9 @@ impl<T: Copy> core::fmt::Debug for Producer<'_, T> {
 
 /// Unique, stateless read handle for a [`LatestBuf`].
 ///
-/// This handle is `Send + !Sync`: it may move into a consumer context, but it
-/// may not be shared between contexts (contract H2).
+/// This handle is `Send` **when `T: Send`** (a non-`Send` payload correctly
+/// pins it to one context) and always `!Sync`: it may move into a consumer
+/// context, but it may not be shared between contexts (contract H2).
 ///
 /// ```compile_fail,E0277
 /// use ph_eventing::latest_buf::Consumer;

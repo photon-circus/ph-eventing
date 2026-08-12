@@ -76,6 +76,9 @@ run_script() {
         miri) run sh scripts/miri.sh ;;
         loom) run sh scripts/loom.sh ;;
         cycles) run sh scripts/cycles.sh ;;
+        cycles-block-matrix) run sh scripts/cycles.sh block-matrix ;;
+        cycles-latest-matrix) run sh scripts/cycles.sh latest-matrix ;;
+        cycles-latest-block-matrix) run sh scripts/cycles.sh latest-block-matrix ;;
         # thumbv6m only inside the image; ESP rows need esp-rs and stay opt-in
         # (ESP=1) outside Docker — see event-flags-atomic-window.sh.
         atomic-window) run sh scripts/event-flags-atomic-window.sh ;;
@@ -100,7 +103,10 @@ case "${1:-all}" in
         # Version stamp first, so any pasted output carries its environment.
         run sh -c 'rustc --version; rustc "+$MIRI_TOOLCHAIN" --version; qemu-system-arm --version | head -1'
         failed=0
-        for s in ci miri loom cycles atomic-window; do
+        # All four cycle modes: the release records cite the matrix probes'
+        # numbers, so a "full matrix" that never compiled them could pass
+        # while a special probe was broken or a cycle claim stale.
+        for s in ci miri loom cycles cycles-block-matrix cycles-latest-matrix             cycles-latest-block-matrix atomic-window; do
             printf '\n########## %s ##########\n' "$s"
             run_script "$s" || failed=$((failed + 1))
         done

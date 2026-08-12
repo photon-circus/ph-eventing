@@ -139,9 +139,14 @@
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
-//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. The
-//!   copy is never returned and never becomes an invalid value, but the access
-//!   is undefined behaviour by the letter of the memory model. Practical
+//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. A
+//!   raced copy is discarded and never becomes an invalid value — within the
+//!   whole-span bound: the discard compares `u32` sequences, so a consumer
+//!   stalled mid-read for a full `2^32 - 1` publications can pass both checks
+//!   against a rewritten slot (the [`seq_ring`] "whole-span sequence
+//!   aliasing" section carries the reachability arithmetic and escape
+//!   hatches). The access itself is undefined behaviour by the letter of the
+//!   memory model. Practical
 //!   consequence: running Miri over a test that drives this ring from two
 //!   threads reports UB inside this crate — that is the deviation, not a new
 //!   bug. It is a deliberate trade of formal soundness for accepting any
@@ -179,7 +184,8 @@
 //! - Once every `2^32 - 1` pushes the sequence counter wraps, and a few extra entries are dropped
 //!   there because `push` skips the reserved sequence `0`: exactly one for a power-of-two `N`,
 //!   none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. Reported as ordinary drops, never a
-//!   stale or torn value. Prefer a power of two for `N`; see the [`seq_ring`] module docs.
+//!   stale or torn value within the whole-span bound stated in the [`seq_ring`]
+//!   module docs. Prefer a power of two for `N`.
 //! - `Consumer::dropped` saturates rather than wrapping; `usize` is 32 bits on
 //!   the targets this crate ships to, so a long-lived lagging consumer can
 //!   reach the top of the range.

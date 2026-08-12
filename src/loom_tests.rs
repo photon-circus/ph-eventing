@@ -122,14 +122,13 @@ fn latest_buf_returns_only_complete_publications() {
         let producer_channel = Arc::clone(&channel);
         let producer = thread::spawn(move || {
             let producer = producer_channel.try_producer().unwrap();
-            // Each publication's report is preserved: `replaced_unread` is
-            // the producer-side half of the loss ledger, and the conservation
-            // assert after the joins checks it against the consumer's takes.
-            let mut replaced = 0u32;
+            // Every individual report is preserved — P4 is a per-call claim,
+            // and a per-call bitmap is what catches a report that is right in
+            // aggregate but wrong on two calls (e.g. [false, true, false]
+            // where [false, false, true] is correct).
+            let mut replaced = [false; 3];
             for value in 1..=3u32 {
-                if producer.publish([value, value]).replaced_unread {
-                    replaced += 1;
-                }
+                replaced[(value - 1) as usize] = producer.publish([value, value]).replaced_unread;
             }
             replaced
         });
@@ -143,7 +142,7 @@ fn latest_buf_returns_only_complete_publications() {
             // generations passed over since the previous take (C3/O2; no wrap
             // at these magnitudes, so the formula reduces to the difference).
             let mut last_generation = 0u32;
-            let mut taken = 0u32;
+            let mut taken = [false; 3];
             for _ in 0..3 {
                 if let Some(item) = consumer.take_latest() {
                     assert!((1..=3).contains(&item.generation));
@@ -151,7 +150,7 @@ fn latest_buf_returns_only_complete_publications() {
                     assert!(item.generation > last_generation);
                     assert_eq!(item.skipped, item.generation - last_generation - 1);
                     last_generation = item.generation;
-                    taken += 1;
+                    taken[(item.generation - 1) as usize] = true;
                 }
                 thread::yield_now();
             }
@@ -160,13 +159,37 @@ fn latest_buf_returns_only_complete_publications() {
 
         let replaced = producer.join().unwrap();
         let taken = consumer.join().unwrap();
+        let pending = channel
+            .try_consumer()
+            .unwrap()
+            .take_latest()
+            .map(|item| item.generation);
 
-        // Every publication ends in exactly one bucket — taken by the
-        // consumer, displaced while unread (the producer's report), or still
-        // pending at the end. The exchange's linearization makes this hold in
-        // every interleaving; a report derived from stale state breaks it.
-        let pending = u32::from(channel.try_consumer().unwrap().take_latest().is_some());
-        assert_eq!(replaced + taken + pending, 3);
+        // Per-publication correlation (P4): publish(k) displaced an unread
+        // value if and only if generation k-1 was neither taken by the
+        // consumer nor left pending at the end. Once publish(k) lands,
+        // generation k-1 is either already taken or displaced — it can never
+        // be taken later — so this holds in every interleaving. publish(1)
+        // found an empty channel and can never report a displacement.
+        assert!(!replaced[0]);
+        for k in 2..=3u32 {
+            let predecessor_survived = taken[(k - 2) as usize] || pending == Some(k - 1);
+            assert_eq!(
+                replaced[(k - 1) as usize],
+                !predecessor_survived,
+                "publish({k}) report disagrees with its predecessor's fate"
+            );
+        }
+
+        // Aggregate conservation stays as a second, independent check: every
+        // publication ends in exactly one bucket — taken, displaced while
+        // unread, or pending at the end.
+        let replaced_count = replaced.iter().filter(|&&r| r).count();
+        let taken_count = taken.iter().filter(|&&t| t).count();
+        assert_eq!(
+            replaced_count + taken_count + usize::from(pending.is_some()),
+            3
+        );
     });
 }
 

@@ -401,9 +401,11 @@ them is a runtime step and always will be.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.
 - `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
-  the producer is overwriting, then discard the copy when the sequence re-check fails. The copy is
-  never returned and never becomes an invalid value, but the access is undefined behaviour by the
-  letter of the memory model.
+  the producer is overwriting, then discard the copy when the sequence re-check fails. A raced
+  copy is discarded and never becomes an invalid value within the whole-span bound (the re-check
+  compares `u32` sequences, so a consumer stalled mid-read for a full `2^32 − 1` publications can
+  pass both checks against a rewritten slot; see the SeqRing section above and the rustdoc). The
+  access itself is undefined behaviour by the letter of the memory model.
   - **This affects your tooling, not just ours:** if you run `cargo miri test` over a test that
     drives `SeqRing` from two threads, Miri will report UB pointing into this crate. That is the
     known deviation, not a new bug.

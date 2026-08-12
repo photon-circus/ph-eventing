@@ -15,14 +15,35 @@
 //! Timestamps are payload policy: use a timestamped sample type for `T` when
 //! each sample needs a stamp. The transport does not impose one.
 //!
+//! # Known limitation: sequence-span aliasing
+//!
+//! The contiguity check compares `u32` sequence values and nothing else, and
+//! the successor skips reserved `0`, so sequence identity is modular over the
+//! `2^32 - 1` nonzero span — the same counter-width boundary the transports
+//! disclose. A partial builder held while upstream omits *exactly one whole
+//! span* of sequences (or any whole multiple) sees the recurring value as the
+//! expected successor and completes the block as "contiguous" despite
+//! ~4.29 billion omitted samples; the gap-rejection promise (F2) is exact
+//! only below one span. Reachability: the omission must span `2^32 - 1`
+//! sequences while the same partial builder stays live — ~71.6 minutes of
+//! outage at a sustained 1 MHz sample rate, ~5 days at 10 kHz. The chosen
+//! policy is to keep the sequence one word and disclose the bound rather than
+//! carry a wider epoch: recovery from outages is the application's job —
+//! `clear()` the builder when your staleness watchdog or link-layer detects a
+//! gap it cannot bound below one span.
+//!
 //! # Costs and integration (measured; bound by decisions D3 and P)
 //!
 //! **RAM is multiple complete blocks, always.** The latest composition
 //! (`LatestBuf<Block<T, N>>`) holds three block slots plus this private
 //! builder — 136–8,280 bytes of combined channel + builder RAM across the
 //! measured 2/8/16-byte × `N = 8/32/128` grid. The queued composition
-//! stores `Q` blocks plus the builder. The cost is fixed and in `.bss`,
-//! but it is not small: state the number for your shape.
+//! stores `Q` blocks plus the builder. The cost is fixed in size but lives
+//! wherever you place the value: a `const`-constructed `static` lands in
+//! `.bss` (no flash image, no startup copy); a local consumes **stack**,
+//! and at up to 8,280 bytes per combined shape that is a real stack
+//! budget, not a rounding error. It is not small either way: state the
+//! number for your shape and charge it to the right budget.
 //!
 //! **Small windows can invert the economics.** Continuous block release
 //! beats `N` individual sample publications for every measured 2-byte row
@@ -290,6 +311,32 @@ mod tests {
         assert_eq!(block.last_sequence(), 43);
         assert_eq!(block.samples(), &[4, 5, 6]);
         assert!(fill.is_empty());
+    }
+
+    #[test]
+    fn discontinuity_check_is_modular_over_the_span() {
+        // The chosen policy's pin (F2 span non-promise): contiguity compares
+        // `u32` sequence identity and nothing else. The recurring value after
+        // exactly one whole `2^32 - 1` span is therefore indistinguishable
+        // from the true successor and is accepted — including across the
+        // reserved-zero wrap. If this test's expectation ever changes, the
+        // policy changed (an epoch was added) and the module-doc disclosure,
+        // record row, and proposal F2 text must change with it.
+        let mut fill = BlockBuilder::<u16, 2>::new();
+        assert_eq!(fill.push(u32::MAX, 1), Ok(None));
+        // Successor skips reserved 0: expected is 1, and any occurrence of
+        // sequence 1 — the immediate successor or the wrap-aliased ordinal a
+        // whole span later — completes the block as contiguous.
+        assert!(matches!(
+            fill.push(2, 9),
+            Err(FillError::Discontinuous {
+                expected: 1,
+                received: 2,
+                ..
+            })
+        ));
+        let block = fill.push(1, 2).unwrap().unwrap();
+        assert_eq!(block.samples(), &[1, 2]);
     }
 
     #[test]

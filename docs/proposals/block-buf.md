@@ -271,7 +271,10 @@ the same substitution. The block-only, pre-publication delta is:
 - **F1 Complete-only:** no public `Block` is yielded before all `N` samples are
   initialized.
 - **F2 Contiguous:** represented sequences are consecutive under the successor
-  that skips reserved zero.
+  that skips reserved zero — exact below one `2^32 - 1` sequence span; a whole
+  span omitted while a partial builder is held aliases the recurring value to
+  the expected successor (span non-promise, disclosed in the module docs with
+  the recovery guidance).
 - **F3 Explicit interruption:** reserved/discontinuous input is returned and
   does not silently alter the partial block.
 - **F4 Teardown:** clearing or dropping partial state publishes nothing.

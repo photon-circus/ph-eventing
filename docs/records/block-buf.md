@@ -99,7 +99,7 @@ section and contract IDs in parentheses; those texts are normative.
 |---|---|---|
 | Type identity is composition — no `LatestBlockBuf` (D3, §5.1) | Maintainer closure 2026-08-11 (contract §9, PR #37); candidate implements `Block`/`BlockBuilder` only | Closed |
 | Complete-only yield; teardown publishes nothing (F1, F4) | Unit pins on completion boundary; drop/clear of partial builder; Miri on `MaybeUninit` completion copy | Proven |
-| Contiguous wrap-aware sequences; reserved `0` rejected (F2) | Fill-error unit set incl. wrap; `T: Copy` without `Default` | Pinned |
+| Contiguous wrap-aware sequences; reserved `0` rejected (F2) | Fill-error unit set incl. wrap; the modular-identity policy is pinned by `discontinuity_check_is_modular_over_the_span`; `T: Copy` without `Default` | Pinned — exact below one sequence span: the check compares `u32` values only, so an upstream omission of exactly one whole span aliases to contiguous (module docs carry the disclosure and the `clear()`-on-outage guidance) |
 | Discontinuity preserves partial block and returns sample (F3) | Explicit interruption tests; no silent mutate-or-count | Proven |
 | Accepted/rejected publication cost measured per shape (§6.1) | Matrix `bc54a9a`: 18 instruction rows (159–8,658 accepted; rejection within 5–31); reproduced on QEMU 10.0.11 and 10.2.1 | Measured |
 | Flash cost bounded across gated targets | 8-target codesize matrix: 110–312 B per completion-plus-publication shape | Measured |

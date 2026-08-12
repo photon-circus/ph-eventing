@@ -60,10 +60,13 @@ IDs in parentheses; the clauses are the normative statements.
   out-of-band reset — a forced release could free a role while a live
   handle exists, defeating the exclusive-ownership soundness argument.
   Handle lifetime is the application's property.
-- **Memory is three payload slots, always (B3).** Fixed and in `.bss`,
-  but real: measured channels are 48/84/420 B for the shipped payload
-  matrix, and the block-payload shapes run 136–8,280 B of combined
-  channel + builder RAM across the measured grid. State the per-shape
+- **Memory is three payload slots, always (B3).** Fixed in size, and it
+  lives wherever the value is placed: a `const`-constructed `static`
+  lands in `.bss` (the measured no-flash/no-startup-copy claim); a local
+  consumes stack. Real either way: measured channels are 48/84/420 B for
+  the shipped payload matrix, and the block-payload shapes run
+  136–8,280 B of combined channel + builder RAM across the measured
+  grid — charged to stack if built as locals. State the per-shape
   number for your payload; the docs are required to.
 - **Block payloads invert at small N (D3 obligation).** Publishing
   complete blocks through `LatestBuf<Block<T, N>>` beats per-sample
@@ -89,7 +92,7 @@ IDs in parentheses; the clauses are the normative statements.
 | Reacquisition continues, never restarts (H4) | Drop-and-reacquire continuation tests; both cross-context role-handoff Loom models; detector-on Miri | Proven |
 | Empty poll costs one `Acquire` load, no RMW (A.1) | Loom equivalence model; measured: 7–8 instructions off empty polls, +5–6 on pending Cortex-M3 paths | Measured, selected |
 | No `Source<T>` impl can arrive silently (D2, X7) | `compile_fail,E0277` doctest on `Consumer` | Pinned |
-| Handles stay `Send + !Sync` (H2) | `compile_fail` doctests on `Producer` and `Consumer` | Pinned |
+| Handles are `Send` when `T: Send`, always `!Sync` (H2) | `compile_fail` doctests on `Producer` and `Consumer` pin `!Sync`; the `Send` bound is the compiler's own (`T: Copy` does not imply `T: Send`, and a `PhantomData<*const ()>` payload correctly fails an `assert_send` probe) | Pinned |
 | Cost claims per target | 11-target code-size matrix incl. ESP32-S2/S3; pinned QEMU 10.0.11 cycle regions; 66-region joint block matrix reproduced across two QEMU versions | Measured |
 
 Full CI at lane acceptance (per-lane tree; the assembled 0.3.0 release matrix supersedes these totals): 76 unit tests, 12 doctests, 6 compile-fail, 94.12%
