@@ -48,6 +48,13 @@ use block_probe::{BlockBuilderShape, BlockShape};
 #[cfg(all(feature = "latest-matrix", feature = "latest-block-matrix"))]
 compile_error!("latest-matrix and latest-block-matrix are mutually exclusive probes");
 
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+use ph_eventing::CountedSignal;
+
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     debug::exit(debug::EXIT_FAILURE);
@@ -57,7 +64,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Declares region markers.
 ///
 /// Each body embeds a **unique immediate**, and that is load-bearing: with
-/// identical `nop`-only bodies the linker folded all nineteen markers onto a
+/// identical `nop`-only bodies the linker folded every marker onto a
 /// single address, the runner saw one label, and the output was silently empty.
 /// `r12` is call-clobbered under AAPCS, so writing it in a `-> ()` function is
 /// free and harmless. The assembly deliberately does not claim `nomem`: each
@@ -110,6 +117,56 @@ markers! {
     17 => m_rb_get,
     18 => m_rb_latest,
     19 => m_sr_poll_lagged_far,
+    // CountedSignal -- payload-free SPSC
+    20 => m_cs_increment,
+    21 => m_cs_take_count,
+    22 => m_cs_increment_saturated,
+}
+
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+fn counted_signal_costs() {
+    let signal = CountedSignal::new();
+    let tx = signal.try_producer().expect("producer");
+    let rx = signal.try_consumer().expect("consumer");
+
+    m_cs_increment();
+    tx.increment();
+    m_end();
+
+    m_cs_take_count();
+    let _ = black_box(rx.take_count());
+    m_end();
+}
+
+/// The sentinel arm only runs when the load observes `u32::MAX`, which is
+/// unreachable through the public API in bounded time. The hidden
+/// `_cycles-probe` feature seeds it directly so the saturated worst case is a
+/// measured region, not a source-review claim. The third arm (stale `MAX`
+/// re-read below `MAX` after a take) needs a racing consumer and is bounded by
+/// this region plus one `fetch_add` by construction.
+///
+/// Kept in its own never-inlined frame with the signal reference escaped
+/// through `black_box`: sharing `counted_signal_costs`'s frame was measured to
+/// perturb the hot-path region (`cs increment` 8 -> 10) by changing its
+/// codegen, and an unescaped local signal would let the optimiser fold the
+/// seeded `MAX` into the branch being measured.
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+#[inline(never)]
+fn counted_signal_saturated_costs() {
+    let saturated = CountedSignal::with_count_for_probe(u32::MAX);
+    let tx = black_box(&saturated).try_producer().expect("producer");
+
+    m_cs_increment_saturated();
+    tx.increment();
+    m_end();
 }
 
 #[cfg(feature = "block-matrix")]
@@ -758,6 +815,8 @@ fn main() -> ! {
         event_buf_costs();
         seq_ring_costs();
         ring_buf_costs();
+        counted_signal_costs();
+        counted_signal_saturated_costs();
     }
     #[cfg(feature = "block-matrix")]
     block_publication_costs();

@@ -26,10 +26,13 @@ prose when it disagrees.
 
 **ph-eventing** provides stack-allocated ring buffers for no-std embedded targets.
 
-It ships four primitives:
+It ships five primitives:
 - **`RingBuf<T, N>`** — a single-owner ring buffer (no atomics, `&mut` access). Ideal for local event logs, sample windows, and single-context collection.
 - **`SeqRing<T, N>`** — a lock-free SPSC ring that **overwrites** old entries. Designed for high-rate telemetry where a fast producer and a potentially slower consumer run on different contexts.
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
+- **`CountedSignal`** — a saturating SPSC count for identical,
+  payload-free events. The sole producer handle makes exact bounded saturation
+  possible without a CAS retry loop.
 - **`LatestBuf<T>`** — a freshness-first SPSC snapshot channel that retains one newest unread publication and reports replacement/skipped evidence.
 
 `Block<T, N>` + `BlockBuilder<T, N>` is the non-concurrent complete-window
@@ -144,6 +147,7 @@ ph-eventing/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up
     ├── event_buf.rs        # Bounded SPSC event buffer with backpressure
+    ├── counted_signal.rs   # Saturating payload-free SPSC counter
     ├── latest_buf.rs       # Three-slot freshness-first SPSC snapshot channel
     ├── ring.rs             # Single-owner stack-allocated ring buffer
     ├── seq_ring.rs         # Lock-free SPSC overwrite ring with sequence tracking
@@ -168,6 +172,9 @@ ph-eventing/
 | `LatestBuf<T: Copy>` | Three-slot SPSC snapshot channel with observable replacement and gaps |
 | `event_buf::Producer<'a, T, N>` | EventBuf write handle; `push(T) -> Result<(), T>` |
 | `event_buf::Consumer<'a, T, N>` | EventBuf read handle; `pop() -> Option<T>`, `peek()`, `drain()` |
+| `CountedSignal` | Saturating count for payload-free SPSC events |
+| `counted_signal::Producer<'a>` | Sole incrementing handle; `fetch_add` below MAX, no-op-RMW-confirmed sentinel |
+| `counted_signal::Consumer<'a>` | Sole taking handle; `swap(0)` partitions count epochs |
 | `Sink<T>` | Trait — accept events via `try_push(&mut self, T) -> Result<(), Error>` |
 | `Source<T>` | Trait — yield events via `try_pop(&mut self) -> Option<T>` |
 | `Link<In, Out>` | Trait — blanket impl for any `Sink<In> + Source<Out>` |
@@ -183,6 +190,27 @@ The `SeqRing` implementation uses careful atomic ordering for thread safety:
 - **Sequence arithmetic:** use `seq_distance`, not raw `wrapping_sub` — the latter over-counts by one across the wrap because `push` skips the reserved `0`.
 
 `RingBuf` uses no atomics — it is a plain struct with `&mut self` mutation.
+
+### Memory Ordering Strategy (CountedSignal)
+
+- The semantic contract and stable clause IDs live in
+  `docs/proposals/counted-signal-contract.md`.
+- The sole producer loads the counter (Relaxed). Below `u32::MAX` it
+  `fetch_add`s once (Relaxed). Observed `u32::MAX` is maybe-stale: the
+  producer re-reads through a no-op `fetch_or(0)` RMW — an RMW, unlike a load
+  or a failed compare-exchange, observes the latest value in modification
+  order. A `MAX` re-read confirms saturation; anything else means a completed
+  take reset the epoch and the producer `fetch_add`s once into it. No
+  compare-exchange, no retry: on RISC-V the sentinel is a single `amoor.w`,
+  where a strong CAS lowers to an unbounded LR/SC loop. Under sole-producer
+  ownership the follow-up `fetch_add` cannot wrap.
+- The consumer performs a Relaxed `swap(0)`.
+- Relaxed is sufficient because there is no payload publication; the atomic's
+  modification order alone partitions increments between take epochs.
+- Producer exclusivity is load-bearing. Never make the producer handle `Sync`
+  without replacing this algorithm. Do not restore a load-and-skip-on-`MAX`
+  short-circuit — after a completed take it can drop an occurrence from both
+  intervals (T3/A1).
 
 ### Memory Ordering Strategy (EventBuf)
 
@@ -689,8 +717,8 @@ measures the other half of the determinism claim — that the hot paths cost a
 Measured in the reference environment — `scripts/verify/Dockerfile`
 (rustc 1.92.0, Debian trixie qemu-system-arm 10.0.x, thumbv7m / Cortex-M3),
 reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
-environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
-regions by exactly one instruction (trace boundary attribution, not codegen).
+environment*, not universal: a 10.2 QEMU build shifted two measured regions by
+exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
 
 The BlockBuf candidate's large-payload mode is isolated from the standard
@@ -715,6 +743,7 @@ Run the default probe as well when changing shared measurement infrastructure.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
+| `CountedSignal::increment` (below `MAX` / saturated arm) / `take_count` | 8, 9 / 7 | | |
 
 LatestBuf uses a separate payload matrix (`./scripts/verify.sh cycles
 latest-matrix`) so the larger stack shapes do not disturb the standing probe:
@@ -736,7 +765,7 @@ with `./scripts/verify.sh cycles latest-block-matrix`; its 2/8/16-byte by
 8/32/128 cycle, code-size, and RAM record is
 `docs/proposals/latest-block-composition-measurements.md`.
 
-Two results carry the argument:
+Three results carry the argument:
 
 1. **Every `push` is constant.** Empty vs loaded differs by at most one
    instruction on all three types. Cost does not scale with occupancy or `N`.
@@ -744,6 +773,15 @@ Two results carry the argument:
    ~2000 behind both cost **115 instructions**. If recovery walked the backlog
    the second would be two orders of magnitude larger. It is a jump, and now
    that is measured rather than asserted.
+3. **CountedSignal's SPSC hot paths are small and bounded.** `increment`
+   retires 8 instructions on the below-`MAX` common path and 9 on the
+   probe-seeded saturated sentinel arm; `take_count` retires 7 — all in the
+   reference Cortex-M3 environment, all uncontended single-pass counts (the
+   contract discloses the per-ISA RMW realisation and its hardware retry
+   bound). The producer region contains no CAS retry loop; the fixed
+   source-level sequence is the measured counterpart to the sole-producer
+   no-wrap proof. The stale-`MAX` third arm is the saturated arm plus one
+   `fetch_add` by construction.
 
 The rejected push is *cheaper* than an accepted one — backpressure is an early
 return, not extra work.
@@ -760,7 +798,7 @@ verified deterministic by diffing two runs.
 **Two traps, both hit during development:**
 
 - **Markers must embed a unique immediate.** With identical `nop`-only bodies
-  the linker folded all nineteen onto one address, the runner saw a single
+  the linker folded all markers onto one address, the runner saw a single
   label, and the output was silently empty — it looked like the probe measured
   nothing rather than like a bug. `cycles.sh` now fails loudly if the count of
   distinct marker addresses does not match the count of markers.
@@ -845,7 +883,9 @@ Individual checks are also available as cargo aliases (see
 
 ## Testing
 
-Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`, and `src/traits.rs` in their respective `tests` modules. They require std and use the standard Rust test framework.
+Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`,
+`src/counted_signal.rs`, and `src/traits.rs` in their respective `tests`
+modules. They require std and use the standard Rust test framework.
 
 **Run tests:**
 ```bash
@@ -895,6 +935,14 @@ cargo test
 - `const_new_works_in_const_context` — `static` / const `new()` (`#[cfg(not(loom))]`)
 - `static_buf_yields_static_sendable_handles` — `'static`, `Send` handles off a `static` buffer
 
+**`counted_signal::tests`:**
+- `increments_accumulate_and_take_clears` — Exact accumulate + take clears (I1, T1, T4, A1)
+- `saturates_instead_of_wrapping` — Boundary at `u32::MAX` (I2–I3, T2, A2–A3)
+- `handles_are_exclusive_and_reusable_after_drop` — Role exclusivity and state continuation (H1, H3)
+- `handles_are_send` — Producer/Consumer are Send (H2); compile-fail doctests pin `!Sync`
+- `const_new_works_in_static_context` — `static` / const `new()` (`#[cfg(not(loom))]`) (H4)
+- `concurrent_takes_do_not_lose_increments` — Threaded no-loss stress (T3, A1)
+
 **`seq_ring::tests`:**
 - `poll_one_empty_returns_false` — Empty ring behavior
 - `polls_in_order` — Sequential consumption
@@ -942,12 +990,14 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-`src/latest_buf.rs`, `src/block.rs`, and `src/traits.rs`. Total: 85 unit tests + 13 doctests,
-plus 7 `compile_fail` doctests: the `N == 0` rejection (`E0080`) on the three
-ring types and `BlockBuilder`, the deliberately absent `Source<T>` impl on
-`LatestBuf`'s consumer (`E0277`, decision D2 — the pin keeps a convenience impl
-from arriving silently), and two pins that `LatestBuf` producer/consumer handles
-are `!Sync` (contract H2).
+`src/latest_buf.rs`, `src/block.rs`, and `src/traits.rs` (`src/counted_signal.rs`
+carries only its two `compile_fail` pins, no ordinary example).
+Total: 91 unit tests + 13 doctests, plus 9 `compile_fail` doctests: the
+`N == 0` rejection (`E0080`) on the three ring types and `BlockBuilder`, the
+deliberately absent `Source<T>` impl on `LatestBuf`'s consumer (`E0277`,
+decision D2 — the pin keeps a convenience impl from arriving silently), two
+pins that `LatestBuf` producer/consumer handles are `!Sync` (contract H2), and
+two pins that the CountedSignal handles are `!Sync`.
 
 ## Code Conventions
 
@@ -964,6 +1014,17 @@ are `!Sync` (contract H2).
 - `T: Copy` required by `RingBuf`, `SeqRing`, and `EventBuf` for value-copy returns
 - `T: Send` required for `SeqRing` and `EventBuf` to be `Sync`
 - Unsafe code is confined to `MaybeUninit` / `UnsafeCell` slot access in all three buffers
+- `CountedSignal` handles are `Send + !Sync`; the producer's `!Sync` property
+  is part of the saturation proof, not merely API uniformity
+- `CountedSignal`: `increment` uses `fetch_add` below `MAX` and confirms the
+  sentinel with a no-op `fetch_or(0)` re-read (plus one follow-up `fetch_add`
+  after a take reset) — never a plain load-and-skip on `MAX`, which drops
+  post-take occurrences under Relaxed observation (T3/A1), and never a
+  compare-exchange, which lowers to an unbounded LR/SC retry loop on RISC-V
+- `CountedSignal`: under sole producer the instruction sequence is fixed —
+  no source-level operation retries; the counter never wraps
+- `CountedSignal`: `take_count` is a single Relaxed `swap(0)` that partitions
+  every increment into exactly one take epoch
 - No panics in hot paths. All three `new()` reject `N == 0` with a **const**
   assertion, so a zero-capacity buffer fails the build rather than panicking —
   which also means no test can cover the rejection, and the const assertion is
@@ -1015,6 +1076,12 @@ The project supports these targets (defined in `rust-toolchain.toml`):
 - `EventBuf`: `len()` never exceeds `N` and never blocks, even while both handles are active
 - `SeqRing`: `dropped_accum` saturates — it must never overflow, and `usize` is 32-bit on every shipped target
 - `EventBuf`: Producer and Consumer handles are `Send + !Sync`
+- `CountedSignal`: Producer and Consumer handles are `Send + !Sync`; producer
+  exclusivity is load-bearing for wrap-free saturation (B1)
+- `CountedSignal`: never restore a load-and-skip-on-`MAX` short-circuit; the
+  no-op `fetch_or(0)` re-read exists so a post-take increment cannot vanish
+  under Relaxed observation of a stale sentinel (and never becomes a
+  compare-exchange, which lowers to an unbounded LR/SC loop on RISC-V)
 - `SeqRing` / `EventBuf`: the panicking `producer()` / `consumer()` were deprecated in 0.2.0 and
   **removed in 0.3.0**. `try_producer()` / `try_consumer()` are the only handle-acquisition API;
   a panic is a reset on the targets this crate exists for. Do not reintroduce a panicking

@@ -9,6 +9,7 @@
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use ph_eventing::EventBuf;
+use ph_eventing::counted_signal::{Consumer as CountConsumer, Producer as CountProducer};
 #[cfg(feature = "block-matrix")]
 use ph_eventing::{Block, BlockBuilder, event_buf::Producer};
 #[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
@@ -56,6 +57,18 @@ pub extern "C" fn bringup_two_calls() -> i32 {
         Some(_) => 0,
         None => -4,
     }
+}
+
+/// ISR-side CountedSignal operation, isolated from bring-up and take costs.
+#[unsafe(no_mangle)]
+pub fn counted_increment(producer: &CountProducer<'_>) {
+    producer.increment();
+}
+
+/// Consumer-side CountedSignal take, isolated from bring-up costs.
+#[unsafe(no_mangle)]
+pub fn counted_take(consumer: &CountConsumer<'_>) -> u32 {
+    consumer.take_count().count()
 }
 
 /// Bring-up via a single `try_split`. Only present on branches that have it.

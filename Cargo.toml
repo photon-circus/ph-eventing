@@ -54,6 +54,11 @@ portable-atomic = { version = "1.13", optional = true, default-features = false,
 # crate. Test combinations individually — `scripts/ci.sh` does.
 [features]
 default = []
+# Internal, underscore-prefixed, and not part of the public contract: lets the
+# QEMU cycle probe (scripts/cycles) construct a saturated CountedSignal so the
+# sentinel arm of `increment` is a measured region rather than a source-review
+# claim. Enables one #[doc(hidden)] constructor; nothing else.
+_cycles-probe = []
 portable-atomic = ["dep:portable-atomic"]
 portable-atomic-unsafe-assume-single-core = [
     "portable-atomic",
