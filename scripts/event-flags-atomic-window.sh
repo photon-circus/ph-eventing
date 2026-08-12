@@ -145,7 +145,7 @@ fi
 # Both portable paths must remain straight-line. Any branch in a hot function
 # means the claimed single critical section has acquired a retry/dispatch path.
 if sed -n '/<event_flags_raise>:/,/^$/p; /<event_flags_take>:/,/^$/p' "$tmp_dir/thumbv6m.txt" \
-    | grep -Eq '^[[:space:]]*[0-9a-f]+:.*[[:space:]](b[a-z]*(\.n)?|c(b|bn)z|call[0-9x]*|jx?(\.n)?|loop[a-z]*)[[:space:]]'; then
+    | grep -Eq '^[[:space:]]*[0-9a-f]+:.*[[:space:]]((b|b(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)|bl|blx|bx|cbz|cbnz)(\.[nw])?)[[:space:]]'; then
     printf 'error: thumbv6m EventFlags hot path contains a branch.\n' >&2
     exit 1
 fi
@@ -169,7 +169,7 @@ if [ "$want_esp" -eq 1 ]; then
         exit 1
     fi
     if sed -n '/<event_flags_raise>:/,/^$/p; /<event_flags_take>:/,/^$/p' "$tmp_dir/esp32s2.txt" \
-        | grep -Eq '^[[:space:]]*[0-9a-f]+:.*[[:space:]](b[a-z]*(\.n)?|call[0-9x]*|jx?(\.n)?|loop[a-z]*)[[:space:]]'; then
+        | grep -Eq '^[[:space:]]*[0-9a-f]+:.*[[:space:]]((beq|bne|bge|blt|bgeu|bltu|ball|bnall|bany|bnone|bbc|bbci|bbs|bbsi|beqi|bnei|bgei|blti|bgeui|bltui|beqz|bnez|bgez|bltz)(\.n)?|call[0-9x]*|jx?(\.n)?|loop[a-z]*)[[:space:]]'; then
         printf 'error: ESP32-S2 EventFlags hot path contains a branch.\n' >&2
         exit 1
     fi

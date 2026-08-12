@@ -476,6 +476,10 @@ macro_rules! measure_block_shape {
             .expect("complete");
         let _ = black_box(tx.push(block));
         m_end();
+        // The builder outlives the region: a production builder is reused, so
+        // the completion reset inside the measured push must not be removable
+        // as a dead store just because this probe's builder dies here.
+        black_box(&mut accepted_fill);
 
         let mut rejected_fill = BlockBuilder::<$sample, $n>::new();
         for sequence in 1..$n {
@@ -489,6 +493,7 @@ macro_rules! measure_block_shape {
             .expect("complete");
         let _ = black_box(tx.push(block));
         m_end();
+        black_box(&mut rejected_fill);
     }};
 }
 

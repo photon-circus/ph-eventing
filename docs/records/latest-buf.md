@@ -30,10 +30,13 @@ timestamp authority, or a multi-producer/multi-consumer bus.
 Ordered by how likely they are to surprise an integrator. Contract clause
 IDs in parentheses; the clauses are the normative statements.
 
-- **Loss is the designed behaviour, not a fault mode (X1).** Under any
-  producer/consumer rate mismatch, intermediate publications are
-  displaced. The type is wrong for any consumer that must observe every
-  value — that is `EventBuf`'s niche.
+- **Loss is the designed behaviour, not a fault mode (X1).** When the
+  producer outpaces the consumer, publications that were still pending
+  unread are displaced by the next publish and reported through
+  `replaced_unread` (P4 sets it only when an unread value was actually
+  pending — a consumer that keeps up, including any consumer-faster
+  rate mismatch, sees no displacement at all). The type is wrong for any
+  consumer that must observe every value — that is `EventBuf`'s niche.
 - **The skipped count has a documented exactness boundary (C3, X6).**
   `skipped` is exact while fewer than one full generation span (2³²−1
   publications) separates two takes; beyond that it under-counts, and a

@@ -138,7 +138,18 @@ demonstrates their need — this one.
   out-of-scope list — the pool transfers ownership; target-specific
   visibility effects belong to the integration layer.
 
-## 4. Open questions
+## 4. Open questions *(historical — preserved as written before the evaluation)*
+
+The questions below were the pre-evaluation state of this document. The
+`candidate/slot-pool` evaluation (banked at tag
+`archive/slot-pool-0.3.0-evaluation`) subsequently answered them — the
+atomic representation, initialization proof, and measured rows live on that
+branch — and decision S then deferred the primitive. They are kept as
+written because they define what a reopened evaluation must re-derive if
+the banked branch has rotted.
+
+<!-- historical section follows -->
+### Original questions
 
 - Ordering discipline for the state transitions: the
   `Free → ProducerOwned → Published → ConsumerOwned → Free` cycle is a
@@ -160,7 +171,14 @@ demonstrates their need — this one.
   [`BlockBuf`](block-buf.md) — i.e., does it earn admission standalone or
   as the foundation the block primitive demonstrates?
 
-## 5. Promotion bar to PROPOSED
+## 5. Promotion bar to PROPOSED *(historical — superseded by decision S)*
+
+This bar described promotion into the 0.3.0 cycle. Decision S closed as
+DEFERRED with the evaluation evidence banked, so the operative gate is now
+the **reopening trigger** in the status header, not this list; a future
+reopening still owes everything below before PROPOSED.
+
+### Original bar
 
 1. Answer the ownership-model questions above; write the state machine down
    precisely (it is the whole primitive).

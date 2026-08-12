@@ -38,8 +38,8 @@ All notable changes to this project will be documented in this file.
   with the overload policy you need: `EventBuf<Block<T, N>, Q>` queues and
   rejects when full, `LatestBuf<Block<T, N>>` retains the newest. Publication
   copies the complete block (decision P: Copy composition) — the measured
-  per-shape rows are the budget statement (159–8,658 reference instructions
-  across the 2/8/16-byte × N = 8/32/128 grid; rejection within 5–31
+  per-shape rows are the budget statement (150–8,651 reference instructions
+  across the 2/8/16-byte × N = 8/32/128 grid; rejection within 2–25
   instructions of acceptance; per-shape RAM disclosed), the small-`N` cost
   inversion is documented, and the double-copy DMA hazard is stated in the
   module docs: the builder's storage is deliberately private, so budget both

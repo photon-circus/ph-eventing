@@ -317,35 +317,38 @@ fn latest_buf_empty_fast_path_preserves_concurrent_publication() {
 fn latest_buf_producer_reacquisition_continues_across_threads() {
     loom::model(|| {
         let channel = Arc::new(LatestBuf::<u32>::new());
-        let first_acquired = Arc::new(AtomicBool::new(false));
+        let first_dropped = Arc::new(AtomicBool::new(false));
         let first_channel = Arc::clone(&channel);
-        let first_signal = Arc::clone(&first_acquired);
+        let first_signal = Arc::clone(&first_dropped);
         let first = thread::spawn(move || {
             let producer = first_channel.try_producer().unwrap();
-            // Signal before mutating role state. This orders initial role
-            // selection but deliberately does not publish the continuation
-            // write; that must travel through handle drop/acquisition.
-            first_signal.store(true, Ordering::Release);
             assert_eq!(producer.publish(1).generation, 1);
+            drop(producer);
+            // Relaxed deliberately: the role handoff's own Release-drop /
+            // AcqRel-swap edge must carry the continuation state; this flag
+            // only sequences the model and supplies no happens-before for it.
+            first_signal.store(true, Ordering::Relaxed);
         });
 
         let second = thread::spawn(move || {
-            if first_acquired.load(Ordering::Acquire) {
-                channel
-                    .try_producer()
-                    .map(|producer| producer.publish(2).generation)
-            } else {
-                None
+            while !first_dropped.load(Ordering::Relaxed) {
+                thread::yield_now();
             }
+            // The acquisition swap is an RMW, so it reads the latest
+            // `producer_taken` value in modification order: after the
+            // observed drop it succeeds on the first try, and every
+            // terminating execution completes the cross-context handoff
+            // (evaluation L3) instead of treating a failed claim as a
+            // vacuous pass.
+            let producer = channel
+                .try_producer()
+                .expect("role released by the observed drop");
+            producer.publish(2).generation
         });
 
         first.join().unwrap();
-        // Loom explores both outcomes: acquisition while the first handle is
-        // live fails, while acquisition after its Release drop succeeds and
-        // must observe the channel-resident continuation state.
-        if let Some(generation) = second.join().unwrap() {
-            assert_eq!(generation, 2);
-        }
+        // Continuation is unconditional: generation resumes, never restarts.
+        assert_eq!(second.join().unwrap(), 2);
     });
 }
 
@@ -369,6 +372,7 @@ fn latest_buf_consumer_reacquisition_continues_across_threads() {
         let first = thread::spawn(move || {
             let consumer = first_channel.try_consumer().unwrap();
             assert_eq!(consumer.take_latest().unwrap().generation, 1);
+            drop(consumer);
             // Relaxed deliberately: successful reacquisition, not this test
             // signal, must publish the role-owned continuation state.
             first_signal.store(true, Ordering::Relaxed);
@@ -378,31 +382,40 @@ fn latest_buf_consumer_reacquisition_continues_across_threads() {
         let publisher_start = Arc::clone(&first_took);
         let publisher_done = Arc::clone(&later_published);
         let publisher = thread::spawn(move || {
-            if publisher_start.load(Ordering::Relaxed) {
-                let producer = publisher_channel.try_producer().unwrap();
-                let _ = producer.publish(2);
-                let _ = producer.publish(3);
-                publisher_done.store(true, Ordering::Release);
+            // Yield-retry until the first take happened: every terminating
+            // execution publishes generations 2 and 3 into the post-take
+            // channel state instead of skipping the scenario.
+            while !publisher_start.load(Ordering::Relaxed) {
+                thread::yield_now();
             }
+            let producer = publisher_channel.try_producer().unwrap();
+            let _ = producer.publish(2);
+            let _ = producer.publish(3);
+            publisher_done.store(true, Ordering::Release);
         });
 
         let second = thread::spawn(move || {
-            if later_published.load(Ordering::Acquire) {
-                channel
-                    .try_consumer()
-                    .and_then(|consumer| consumer.take_latest())
-            } else {
-                None
+            while !later_published.load(Ordering::Acquire) {
+                thread::yield_now();
             }
+            // The first handle was dropped before this flag chain fired, and
+            // the acquisition swap is an RMW reading the latest role flag in
+            // modification order — the handoff completes in every
+            // terminating execution (evaluation L3), no vacuous branch.
+            let consumer = channel
+                .try_consumer()
+                .expect("role released by the observed drop");
+            consumer
+                .take_latest()
+                .expect("generation 3 pending after the Release/Acquire handoff")
         });
 
         first.join().unwrap();
         publisher.join().unwrap();
-        if let Some(item) = second.join().unwrap() {
-            assert_eq!(item.generation, 3);
-            assert_eq!(item.value, 3);
-            assert_eq!(item.skipped, 1);
-        }
+        let item = second.join().unwrap();
+        assert_eq!(item.generation, 3);
+        assert_eq!(item.value, 3);
+        assert_eq!(item.skipped, 1);
     });
 }
 

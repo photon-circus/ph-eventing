@@ -51,8 +51,8 @@
 //! the 8/16-byte `N = 8` corners. For tiny windows, per-sample
 //! publication through a plain channel may be the cheaper shape.
 //!
-//! **Publication cost scales with block bytes** — 159–8,658 reference
-//! instructions across the measured grid — and rejection is within 5–31
+//! **Publication cost scales with block bytes** — 150–8,651 reference
+//! instructions across the measured grid — and rejection is within 2–25
 //! instructions of acceptance, because the complete rejected block is
 //! preserved and returned rather than reduced to a scalar error. Budget
 //! rejection like acceptance, not like error plumbing.

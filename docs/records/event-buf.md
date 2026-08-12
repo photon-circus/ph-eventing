@@ -29,7 +29,7 @@ it outright. It refuses to be: lossy (that is `SeqRing`), freshness-first
   every time. A producer that cannot afford to handle "full" belongs on
   `SeqRing`, where overload is absorbed and counted instead of returned.
   With `Block` payloads the returned value is the *entire completed
-  block* (`#[must_use]`, within 5–31 instructions of the accepted path)
+  block* (`#[must_use]`, within 2–25 instructions of the accepted path)
   — budget rejection like acceptance, not like error plumbing.
 - **`N` is the backpressure threshold, chosen per application.** The
   point at which `push` starts failing is a sizing decision the crate
@@ -70,8 +70,8 @@ it outright. It refuses to be: lossy (that is `SeqRing`), freshness-first
 - **D3 (closed 2026-08-11):** `EventBuf<Block<T, N>, Q>` is the queued
   arm of the confirmed block composition — no `QueuedBlockBuf` type
   exists; existing admission, rejection, and race-freedom carry over
-  unchanged. Decision P's publication-cost rows (159–8,658 reference
-  instructions; rejection within 5–31 of acceptance) are the measured
+  unchanged. Decision P's publication-cost rows (150–8,651 reference
+  instructions; rejection within 2–25 of acceptance) are the measured
   cost basis.
 - **Shared worked rejections (AGENTS):** `try_split()` rejected on the
   0.2.0 measurement (+43–59% flash on constrained cores); the panic

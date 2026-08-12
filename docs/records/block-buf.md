@@ -39,7 +39,7 @@ section and contract IDs in parentheses; those texts are normative.
 
 - **Publication cost scales with block bytes, not with the O(1)
   synchronization step (proposal §6, §6.1).** Accepted
-  completion-plus-publication on the reference Cortex-M3 runs 159–8,658
+  completion-plus-publication on the reference Cortex-M3 runs 150–8,651
   retired instructions across the measured grid (2/8/16-byte samples ×
   `N = 8/32/128`) and grows roughly linearly with logical payload
   traffic (48–4,112 B per path). Synchronization being constant does
@@ -48,7 +48,7 @@ section and contract IDs in parentheses; those texts are normative.
   handoff myth.
 - **Rejection is nearly as expensive as acceptance (§6.1).** Preserving
   and returning the complete rejected block keeps the rejected path
-  within 5–31 instructions of the accepted path on every measured row —
+  within 2–25 instructions of the accepted path on every measured row —
   not a cheap scalar `Err(())`. Callers that treat rejection as free
   error plumbing will mis-budget the ISR/task.
 - **Small-N publication can lose to per-sample LatestBuf (D3
@@ -101,7 +101,7 @@ section and contract IDs in parentheses; those texts are normative.
 | Complete-only yield; teardown publishes nothing (F1, F4) | Unit pins on completion boundary; drop/clear of partial builder; Miri on `MaybeUninit` completion copy | Proven |
 | Contiguous wrap-aware sequences; reserved `0` rejected (F2) | Fill-error unit set incl. wrap; the modular-identity policy is pinned by `discontinuity_check_is_modular_over_the_span`; `T: Copy` without `Default` | Pinned — exact below one sequence span: the check compares `u32` values only, so an upstream omission of exactly one whole span aliases to contiguous (module docs carry the disclosure and the `clear()`-on-outage guidance) |
 | Discontinuity preserves partial block and returns sample (F3) | Explicit interruption tests; no silent mutate-or-count | Proven |
-| Accepted/rejected publication cost measured per shape (§6.1) | Matrix `bc54a9a`: 18 instruction rows (159–8,658 accepted; rejection within 5–31); reproduced on QEMU 10.0.11 and 10.2.1 | Measured |
+| Accepted/rejected publication cost measured per shape (§6.1) | Matrix `bc54a9a`: 18 instruction rows (150–8,651 accepted; rejection within 2–25); reproduced on QEMU 10.0.11 and 10.2.1 | Measured |
 | Flash cost bounded across gated targets | 8-target codesize matrix: 110–312 B per completion-plus-publication shape | Measured |
 | Joint D3 composition cost vs per-sample (D3) | Matrix `8593b4a`: 171–6,958 instructions; 136–8,280 B combined channel+builder RAM; small-N inversion documented | Measured |
 | No block-layer atomics; transport evidence unchanged (§8) | Block path: unit + Miri; LatestBuf/EventBuf: detector-on Miri and Loom on selected transport | Proven (transport) |

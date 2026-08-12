@@ -94,10 +94,10 @@ newest when full; `LatestBuf<Block<T, N>>` retains only the
 latest complete block.
 
 **Budget the composition before choosing it.** Publication copies the
-complete block, so cost scales with block bytes (159–8,658 reference
+complete block, so cost scales with block bytes (150–8,651 reference
 instructions across the measured 2/8/16-byte × N = 8/32/128 grid), a
 rejected push costs nearly as much as an accepted one (the complete block
-is preserved and returned, within 5–31 instructions), and RAM is multiple
+is preserved and returned, within 2–25 instructions), and RAM is multiple
 complete blocks — `Q` slots plus the private builder. Small windows can
 invert the economics (per-sample publication beats blocks at the
 8/16-byte `N = 8` corners), and DMA integrations currently cannot avoid

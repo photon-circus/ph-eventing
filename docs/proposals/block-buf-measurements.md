@@ -1,5 +1,17 @@
 # BlockBuf publication-cost matrix
 
+> **0.3.0 restatement (2026-08-12).** The committed probe now pins both
+> builders live past their measured regions (`black_box(&mut fill)` after
+> `m_end`), so dead-store elimination cannot remove the completion reset a
+> reusable production builder pays — a review finding on the assembly PR.
+> Re-measured on the assembled `release/0.3.0` tree in the same reference
+> image: accepted completion-plus-publication runs **150–8,651** reference
+> instructions across the grid and rejection lands **within 2–25
+> instructions** of the accepted path on every row (w2: 155/150, 605/598,
+> 1372/1365; w8: 621/612, 1388/1379, 4499/4497; w16: 871/846, 2408/2406,
+> 8651/8644 for N = 8/32/128). The table below is the original lane-time
+> measurement, preserved as recorded.
+
 - **Measured:** 2026-08-11
 - **Source branch:** `candidate/block-buf` at `e21c7fa`, plus the isolated
   measurement harness recorded with this document.

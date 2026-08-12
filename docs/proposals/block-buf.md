@@ -237,7 +237,7 @@ counts from the pinned QEMU 10.0.11 reference environment.
 
 On the reference Cortex-M3, accepted completion plus publication ranges from
 159 instructions for 2-byte samples at `N = 8` to 8,658 instructions for
-16-byte samples at `N = 128`. Rejection is within 5–31 instructions of the
+16-byte samples at `N = 128`. Rejection is within 2–25 instructions of the
 accepted path because the complete rejected block is preserved and returned to
 the caller. Logical payload traffic ranges from 48 to 4,112 bytes per path.
 
