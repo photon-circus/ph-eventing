@@ -4,13 +4,15 @@
 //!
 //! | Type | When to reach for it |
 //! |------|----------------------|
+//! | [`Block`] / [`BlockBuilder`] | Complete contiguous sample windows; compose with a transport. |
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
 //! | [`EventFlags`] | Coalesced SPSC condition set — one bit per condition, one atomic operation per hot path. |
+//! | [`LatestBuf`] | Freshness-first SPSC snapshot — retains one newest unread value. |
 //!
-//! All four are fixed-size and zero-allocation. The three buffers are generic
-//! over `T: Copy`; `EventFlags` provides exactly 32 payload-free conditions.
+//! All are fixed-size and zero-allocation. The buffer types are generic
+//! over `T: Copy`; [`EventFlags`] provides exactly 32 payload-free conditions.
 //!
 //! # Common traits
 //!
@@ -210,18 +212,22 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 #[macro_use]
 mod macros;
 
+pub mod block;
 pub mod event_buf;
 pub mod event_flags;
+pub mod latest_buf;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
+pub use block::{Block, BlockBuilder, FillError};
 pub use event_buf::EventBuf;
 pub use event_flags::{EventFlags, EventMask};
+pub use latest_buf::{LatestBuf, LatestItem, PublishReport};
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
-pub use traits::{Link, Sink, Source};
+pub use traits::{LatestSink, LatestSource, Link, Sink, Source};
 
 #[cfg(all(loom, test))]
 mod loom_tests;

@@ -29,6 +29,9 @@
 # Usage:
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
+#   ./scripts/codesize.sh block-matrix     # Block completion + publication shapes
+#   ./scripts/codesize.sh latest-matrix    # LatestBuf target/payload matrix
+#   ./scripts/codesize.sh latest-block-matrix # LatestBuf sample/block D3 matrix
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
 # Reading the output: each number is the byte size of one function, so it
@@ -47,9 +50,24 @@ export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
 BLESS=0
+BLOCK_MATRIX=0
+LATEST_MATRIX=0
+LATEST_BLOCK_MATRIX=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
+        block-matrix)
+            PROBE_FEATURES="block-matrix"
+            BLOCK_MATRIX=1
+            ;;
+        latest-matrix)
+            PROBE_FEATURES="latest-matrix"
+            LATEST_MATRIX=1
+            ;;
+        latest-block-matrix)
+            PROBE_FEATURES="latest-block-matrix"
+            LATEST_BLOCK_MATRIX=1
+            ;;
         --bless) BLESS=1 ;;
         # Not 2: that is reserved for "could not run", which ci.sh maps to SKIP.
         *) printf 'unknown argument: %s
@@ -58,6 +76,15 @@ for arg in "$@"; do
 done
 
 BASELINE="scripts/codesize/baseline.tsv"
+REGEN="./scripts/codesize.sh --bless"
+# Block-matrix rows gate against their own baseline file: a bless from a
+# block-matrix run writes only block rows, and letting that touch the
+# default baseline would silently drop every default row -- the exact
+# partial-bless hazard the refusal below exists to prevent.
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    BASELINE="scripts/codesize/baseline-block.tsv"
+    REGEN="./scripts/codesize.sh block-matrix --bless"
+fi
 # Growth beyond this many bytes on any row fails the gate. Absolute, not a
 # percentage: at 100-200 bytes a percentage is noise, and the regression this
 # exists to catch was +60 on Cortex-M0+ and +78 on ESP32-S2. Shrinkage never
@@ -112,16 +139,42 @@ fn_size() {
         END { if (found) print total }'
 }
 
+section_size() {
+    "$SIZE" -A "$1" 2>/dev/null | awk -v s="$2" '
+        $1 == s { total += $2; found = 1 }
+        END { if (found) print total }'
+}
+
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
-    TARGET two_calls split flags_acq flags_raise flags_take bss data
-printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
-    '------------------------------' '---------' '-----' '---------' '-----------' '----------' '---' '----'
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        TARGET SHAPE code_B block_B accepted_B rejected_B
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        '------------------------------' '----------' '------' '-------' '----------' '----------'
+elif [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+    printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+        TARGET PAYLOAD publish_B take_B complete_B channel_B builder_B init
+    printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+        '------------------------------' '----------------' '---------' '------' \
+        '----------' '---------' '---------' '----'
+elif [ "$LATEST_MATRIX" = "1" ]; then
+    printf '%-30s %-16s %10s %10s %10s %6s\n' \
+        TARGET PAYLOAD publish_B take_B channel_B init
+    printf '%-30s %-16s %10s %10s %10s %6s\n' \
+        '------------------------------' '----------------' '---------' '------' '---------' '----'
+else
+    printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
+        TARGET two_calls split flags_acq flags_raise flags_take bss data
+    printf '%-30s %10s %8s %8s %8s %8s %8s %6s\n' \
+        '------------------------------' '---------' '-----' '---------' '-----------' '----------' '---' '----'
+fi
 
 skipped=0
 failed=0
+matrix_missing=0
+matrix_not_bss=0
 
 for entry in $TARGETS; do
     target="$(printf '%s' "$entry" | cut -d'|' -f1)"
@@ -163,6 +216,127 @@ for entry in $TARGETS; do
     fi
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
+
+    if [ "$BLOCK_MATRIX" = "1" ]; then
+        for shape in w2_n8 w2_n32 w2_n128 w8_n8 w8_n32 w8_n128 w16_n8 w16_n32 w16_n128; do
+            width="$(printf '%s' "$shape" | sed 's/^w\([0-9]*\)_.*/\1/')"
+            count="$(printf '%s' "$shape" | sed 's/.*_n//')"
+            code="$(fn_size "$ar" "block_${shape}_publish")"
+            block_bytes=$((width * count + 8))
+            accepted_bytes=$((block_bytes * 2))
+            # A rejected push preserves and returns the complete block, so it
+            # crosses a caller-visible result boundary instead of a slot-write
+            # boundary. Both paths therefore carry two block-sized moves after
+            # the final sample: builder completion plus publish-or-return.
+            rejected_bytes=$((block_bytes * 2))
+            [ -z "$code" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-10s %8s %8s %10s %10s\n' \
+                "$target" "$shape" "${code:--}" "$block_bytes" \
+                "$accepted_bytes" "$rejected_bytes"
+            # Persist gated rows so the baseline machinery below can bless
+            # and compare them; Xtensa stays ungated as in the default mode.
+            case "$target" in
+                xtensa-*) ;;
+                *) [ -n "$code" ] && printf '%s\tblock_%s\t%s\n' \
+                    "$target" "$shape" "$code" >> "$RESULTS" ;;
+            esac
+        done
+        continue
+    fi
+
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        for shape in u32 w16 block128; do
+            case "$shape" in
+                u32)
+                    publish_fn=latest_u32_publish
+                    take_fn=latest_u32_take
+                    static_name=LATEST_U32_BUF
+                    ;;
+                w16)
+                    publish_fn=latest_w16_publish
+                    take_fn=latest_w16_take
+                    static_name=LATEST_W16_BUF
+                    ;;
+                block128)
+                    publish_fn=latest_block_publish
+                    take_fn=latest_block_take
+                    static_name=LATEST_BLOCK_BUF
+                    ;;
+            esac
+            publish="$(fn_size "$ar" "$publish_fn")"
+            take="$(fn_size "$ar" "$take_fn")"
+            channel_data="$(section_size "$ar" ".data.$static_name")"
+            channel_bss="$(section_size "$ar" ".bss.$static_name")"
+            if [ -n "$channel_data" ]; then
+                # Admission claim: const LatestBuf lands in .bss (all-zero image).
+                # .data would charge flash and a startup copy proportional to T.
+                channel="$channel_data"
+                init=data
+                matrix_not_bss=$((matrix_not_bss + 1))
+            else
+                channel="$channel_bss"
+                init=bss
+            fi
+            [ -z "$publish" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$take" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$channel" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-10s %10s %10s %10s %6s\n' \
+                "$target" "$shape" "${publish:--}" "${take:--}" \
+                "${channel:--}" "${init:--}"
+        done
+
+        producer_role="$(fn_size "$ar" latest_producer_reacquire)"
+        consumer_role="$(fn_size "$ar" latest_consumer_reacquire)"
+        [ -z "$producer_role" ] && matrix_missing=$((matrix_missing + 1))
+        [ -z "$consumer_role" ] && matrix_missing=$((matrix_missing + 1))
+        printf '%-30s %-10s %10s %10s %10s %6s\n' \
+            "$target" roles "${producer_role:--}" "${consumer_role:--}" '-' '-'
+        continue
+    fi
+
+    if [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+        for shape in sample_w2 sample_w8 sample_w16 block_w2_n8 block_w2_n32 block_w2_n128 block_w8_n8 block_w8_n32 block_w8_n128 block_w16_n8 block_w16_n32 block_w16_n128; do
+            publish_fn="latest_${shape}_publish"
+            take_fn="latest_${shape}_take"
+            static_name="$(printf 'LATEST_%s_BUF' "$shape" | tr '[:lower:]' '[:upper:]')"
+            publish="$(fn_size "$ar" "$publish_fn")"
+            take="$(fn_size "$ar" "$take_fn")"
+            complete='-'
+            builder='-'
+            case "$shape" in
+                block_*)
+                    block_shape="${shape#block_}"
+                    publish='-'
+                    complete="$(fn_size "$ar" "latest_complete_${block_shape}_publish")"
+                    builder_name="$(printf 'LATEST_BUILDER_%s' "$block_shape" | tr '[:lower:]' '[:upper:]')"
+                    builder="$(section_size "$ar" ".bss.$builder_name")"
+                    [ -z "$builder" ] && builder="$(section_size "$ar" ".rodata.$builder_name")"
+                    [ -z "$complete" ] && matrix_missing=$((matrix_missing + 1))
+                    [ -z "$builder" ] && matrix_missing=$((matrix_missing + 1))
+                    ;;
+            esac
+            channel_data="$(section_size "$ar" ".data.$static_name")"
+            channel_bss="$(section_size "$ar" ".bss.$static_name")"
+            if [ -n "$channel_data" ]; then
+                # Admission claim: const LatestBuf lands in .bss (all-zero image).
+                # .data would charge flash and a startup copy proportional to T.
+                channel="$channel_data"
+                init=data
+                matrix_not_bss=$((matrix_not_bss + 1))
+            else
+                channel="$channel_bss"
+                init=bss
+            fi
+            [ -z "$publish" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$take" ] && matrix_missing=$((matrix_missing + 1))
+            [ -z "$channel" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
+                "$target" "$shape" "${publish:--}" "${take:--}" \
+                "${complete:--}" "${channel:--}" "${builder:--}" "${init:--}"
+        done
+        continue
+    fi
+
     two="$(fn_size "$ar" bringup_two_calls)"
     spl="$(fn_size "$ar" bringup_split)"
     flags_acq="$(fn_size "$ar" event_flags_acquire_roles)"
@@ -192,6 +366,57 @@ if [ "$skipped" -gt 0 ]; then
     printf 'per-architecture differences this script exists to find.\n\n'
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
+
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    if [ "$matrix_missing" -gt 0 ]; then
+        printf '%s block-matrix function(s) had no code-size measurement.\n' \
+            "$matrix_missing" >&2
+        exit 1
+    fi
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'block_B is size_of::<Block<T, N>>(). accepted_B counts builder\n'
+    printf 'completion plus publication; rejected_B counts completion plus\n'
+    printf 'returning the complete rejected block to the caller.\n'
+    printf 'These are logical payload-traffic bounds; code_B is emitted flash.\n'
+    printf 'Run scripts/cycles.sh for accepted/rejected instruction paths.\n'
+    printf '\n'
+    # Fall through to the baseline gate: block rows bless into and compare
+    # against baseline-block.tsv, so post-promotion regressions are gated.
+fi
+
+if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+    if [ "$matrix_missing" -gt 0 ]; then
+        printf '%s LatestBuf matrix section(s) had no code-size measurement.\n' \
+            "$matrix_missing" >&2
+        exit 1
+    fi
+    if [ "$matrix_not_bss" -gt 0 ]; then
+        printf '%s LatestBuf channel(s) landed in .data instead of .bss.\n' \
+            "$matrix_not_bss" >&2
+        printf 'Const channels must be an all-zero .bss image; .data charges flash\n' >&2
+        printf 'and a startup copy proportional to the payload.\n' >&2
+        exit 1
+    fi
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'publish_B and take_B are emitted flash for one operation monomorph.\n'
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        printf 'The roles row reports producer and consumer claim+release code size.\n'
+    else
+        printf 'complete_B adds the final BlockBuilder push to block publication.\n'
+        printf 'Block and builder rows use the exact shapes from #28 at bc54a9a.\n'
+    fi
+    printf 'channel_B is target-object RAM for three slots plus channel state.\n'
+    printf 'init must be .bss (all-zero const image); a .data row fails the matrix\n'
+    printf 'because .data occupies flash and is copied during startup.\n'
+    if [ "$LATEST_MATRIX" = "1" ]; then
+        printf 'Run scripts/cycles.sh latest-matrix for state-dependent paths.\n'
+    else
+        printf 'Run scripts/cycles.sh latest-block-matrix for state-dependent paths.\n'
+    fi
+    exit 0
+fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Baseline gate
@@ -214,8 +439,8 @@ if [ "$BLESS" = "1" ]; then
         exit 1
     fi
     {
-        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless
-'
+        printf '# ph-eventing code-size baseline. Regenerate: %s
+' "$REGEN"
         printf '# rustc-commit: %s
 ' "$RUSTC_ID"
         printf '#
@@ -250,8 +475,8 @@ if [ ! -f "$BASELINE" ]; then
     printf '
 SKIP baseline gate: %s does not exist yet.
 ' "$BASELINE"
-    printf 'Create it with: ./scripts/codesize.sh --bless
-'
+    printf 'Create it with: %s
+' "$REGEN"
     exit 2
 fi
 
@@ -269,8 +494,8 @@ SKIP baseline gate: baseline was recorded with rustc %s, this is %s.
 '
     printf 'signal. Re-bless deliberately after reviewing the diff:
 '
-    printf '  ./scripts/codesize.sh --bless
-'
+    printf '  %s
+' "$REGEN"
     exit 2
 fi
 
@@ -325,8 +550,8 @@ if [ "${regressions:-0}" -gt 0 ]; then
     printf '
 %s row(s) grew by more than %s bytes.
 ' "$regressions" "$TOLERANCE"
-    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless
-'
+    printf 'If the growth is intended, review it and run: %s
+' "$REGEN"
     exit 1
 fi
 printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"

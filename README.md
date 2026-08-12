@@ -13,13 +13,15 @@ Deterministic zero-allocation handoff primitives for no-std embedded targets.
 
 | Type | Use case |
 |------|----------|
+| [`Block<T, N>` / `BlockBuilder<T, N>`](#complete-blocks) | Build complete contiguous sample windows, then compose them with a transport. |
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
 | [`EventFlags`](#eventflags) | Coalesced SPSC condition set — 32 payload-free conditions, one atomic hot-path operation. |
+| [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
-All four are fixed-size, `#![no_std]`, and zero-allocation. The three buffers
-are generic over `T: Copy`; `EventFlags` carries an `EventMask(u32)`.
+All types are fixed-size, `#![no_std]`, and zero-allocation. The buffers are
+generic over `T: Copy`; `EventFlags` carries an `EventMask(u32)`.
 
 ## What this optimises for
 
@@ -49,7 +51,8 @@ tooling that costs nothing at runtime — not a friendlier API that allocates,
 panics, or hides a cost.
 
 ## Features
-- Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
+- Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
+- Complete contiguous sample blocks with an explicit fill-side builder.
 - `EventFlags` for coalesced ISR-to-task condition notification.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
@@ -61,6 +64,7 @@ panics, or hides a cost.
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` and `EventBuf::new()` assert `N > 0`.
 - `SeqRing`, `EventBuf`, and `EventFlags` require 32-bit atomics by default.
+- `LatestBuf` also requires 32-bit atomics and stores exactly three payload slots.
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
@@ -71,6 +75,47 @@ panics, or hides a cost.
   combinations individually; `scripts/ci.sh` enumerates the supported set.
 
 ## Usage
+
+### Complete blocks
+
+`BlockBuilder<T, N>` privately accumulates sequenced samples and yields a
+`Block<T, N>` only when all `N` contiguous samples are present. A gap is
+returned to the caller without changing the partial block, and clearing or
+dropping a partial builder publishes nothing. Timestamping is payload policy:
+use a timestamped type for `T` when required.
+
+`Block` is deliberately not another queue. Compose it with the overload policy
+you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
+newest when full; the proposed `LatestBuf<Block<T, N>>` will retain only the
+latest complete block.
+
+**Budget the composition before choosing it.** Publication copies the
+complete block, so cost scales with block bytes (159–8,658 reference
+instructions across the measured 2/8/16-byte × N = 8/32/128 grid), a
+rejected push costs nearly as much as an accepted one (the complete block
+is preserved and returned, within 5–31 instructions), and RAM is multiple
+complete blocks — `Q` slots plus the private builder. Small windows can
+invert the economics (per-sample publication beats blocks at the
+8/16-byte `N = 8` corners), and DMA integrations currently cannot avoid
+the double copy in ISR context — the builder's storage is deliberately
+private, so either budget both copies or publish from task context. The
+`block` module docs carry the full measured disclosure.
+
+```rust
+use ph_eventing::{BlockBuilder, EventBuf};
+
+let mut fill = BlockBuilder::<i16, 4>::new();
+for (sequence, sample) in [(10, 1), (11, 2), (12, 3)] {
+    assert!(fill.push(sequence, sample).unwrap().is_none());
+}
+let block = fill.push(13, 4).unwrap().unwrap();
+
+let queue = EventBuf::<_, 2>::new();
+let producer = queue.try_producer().unwrap();
+let consumer = queue.try_consumer().unwrap();
+producer.push(block).unwrap();
+assert_eq!(consumer.pop().unwrap().samples(), &[1, 2, 3, 4]);
+```
 
 ### RingBuf
 
@@ -110,6 +155,39 @@ producer.push(123);
 assert_eq!(consumer.poll_one_value(), Some((1, 123)));
 // hook form still available:
 // consumer.poll_one(|seq, v| { ... });
+```
+
+### LatestBuf
+
+A three-slot SPSC snapshot channel for state where freshness dominates FIFO
+delivery. Publishing never rejects; it reports whether an unread value was
+replaced. Taking returns the newest complete value with generation and skipped
+counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap
+span; beyond it the count **under-counts, and a gap of exactly one or more
+whole cycles reports `skipped = 0`** — silence there is not evidence that
+nothing was lost. The boundary is a rate × take-interval property (~49.7
+days between takes at 1 kHz publishing, ~72 minutes at 1 MHz); if the
+count itself is your requirement, carry a wider producer-assigned sequence
+in `T`, and if consumer liveness is, use a watchdog — the
+`LatestItem::skipped` docs carry the full disclosure. The
+consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
+is not silently discarded. `T` may be one sample or a complete block. Empty
+polls use an Acquire load rather than an atomic RMW; pending polls transfer
+ownership with one `AcqRel` swap. The all-zero initial representation keeps a
+const-initialized channel in `.bss` with no payload-proportional flash or
+startup-copy cost.
+
+```rust
+use ph_eventing::LatestBuf;
+
+let channel = LatestBuf::<u32>::new();
+let producer = channel.try_producer().expect("producer");
+let consumer = channel.try_consumer().expect("consumer");
+
+let _ = producer.publish(10);
+assert!(producer.publish(20).replaced_unread);
+let item = consumer.take_latest().expect("latest");
+assert_eq!((item.value, item.generation, item.skipped), (20, 2, 1));
 ```
 
 ### EventBuf
@@ -164,10 +242,15 @@ a rejecting downstream sink could silently lose the mask.
 
 ### Common Traits
 
-All payload-buffer producers implement `Sink<T>` and their consumers
+The ring-buffer producers implement `Sink<T>` and their consumers
 implement `Source<T>`, so generic code works with any combination of the
-stream types (`EventFlags` is condition signalling, not a payload stream —
-its handles deliberately implement neither; see its section above):
+listed handles. `EventFlags` is condition signalling, not a payload
+stream — its handles deliberately implement neither (see its section
+above). `LatestBuf` deliberately stands outside that pair as well: its
+consumer implements `LatestSource<T>` (and its producer `LatestSink<T>`),
+because `try_pop` cannot report the displacement that is this channel's
+designed overload behaviour — a generic `Source` bound will not compile
+against it, by decision D2:
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
@@ -193,6 +276,8 @@ assert!(err.is_none());
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+| `LatestSink<T>` | Publish latest | `latest_buf::Producer` (reports replacement) |
+| `LatestSource<T>` | Take latest | `latest_buf::Consumer` (reports generation + skipped) |
 
 ### Declarative static bring-up
 
@@ -336,7 +421,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 77 unit + 11 doctests + 5 compile-fail | Behaviour, including threaded stress for all concurrent types; `N == 0` and EventFlags handle `!Sync` contracts rejected at compile time |
+| 95 unit + 13 doctests + 9 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2); EventFlags handle `!Sync` pinned |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

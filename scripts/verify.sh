@@ -19,6 +19,9 @@
 #   ./scripts/verify.sh loom
 #   ./scripts/verify.sh cycles
 #   ./scripts/verify.sh atomic-window
+#   ./scripts/verify.sh cycles block-matrix
+#   ./scripts/verify.sh cycles latest-matrix
+#   ./scripts/verify.sh cycles latest-block-matrix
 #   ./scripts/verify.sh shell      # interactive shell in the image
 #
 # Requires Docker. Everything else is inside the image.
@@ -86,6 +89,12 @@ run_script() {
 case "${1:-all}" in
     shell)
         DOCKER_TTY=1 run bash
+        ;;
+    # Matrix modes need their arguments forwarded; every other single script
+    # routes through run_script below.
+    cycles)
+        shift
+        run sh scripts/cycles.sh "$@"
         ;;
     all)
         # Version stamp first, so any pasted output carries its environment.
