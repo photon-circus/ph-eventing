@@ -329,8 +329,12 @@ them is a runtime step and always will be.
 - The sole `Send + !Sync` producer handle is part of the correctness contract.
 - Count operations do not publish unrelated application memory; payload data
   needs a separate synchronization mechanism.
-- The reference Cortex-M3 probe measures 8 retired instructions for
-  `increment` and 7 for `take_count` (rustc 1.92.0, QEMU 10.0.11).
+- The reference Cortex-M3 probe measures `increment` at 8 retired
+  instructions on the below-`MAX` hot path and 9 on the saturated sentinel
+  arm, and `take_count` at 7 (rustc 1.92.0, QEMU 10.0.11). The third arm — a
+  stale `MAX` re-read below `MAX` after a take — is the saturated arm plus
+  one `fetch_add` by construction; all rows are uncontended single-pass
+  counts (the contract discloses the per-ISA RMW realisation).
 
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
