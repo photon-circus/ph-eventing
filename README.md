@@ -17,6 +17,7 @@ Stack-allocated ring buffers for no-std embedded targets.
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+| [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
 All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
@@ -48,7 +49,7 @@ tooling that costs nothing at runtime — not a friendlier API that allocates,
 panics, or hides a cost.
 
 ## Features
-- Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
+- Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
 - Complete contiguous sample blocks with an explicit fill-side builder.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
@@ -60,6 +61,7 @@ panics, or hides a cost.
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` and `EventBuf::new()` assert `N > 0`.
 - `SeqRing` and `EventBuf` require 32-bit atomics by default.
+- `LatestBuf` also requires 32-bit atomics and stores exactly three payload slots.
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
@@ -152,6 +154,39 @@ assert_eq!(consumer.poll_one_value(), Some((1, 123)));
 // consumer.poll_one(|seq, v| { ... });
 ```
 
+### LatestBuf
+
+A three-slot SPSC snapshot channel for state where freshness dominates FIFO
+delivery. Publishing never rejects; it reports whether an unread value was
+replaced. Taking returns the newest complete value with generation and skipped
+counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap
+span; beyond it the count **under-counts, and a gap of exactly one or more
+whole cycles reports `skipped = 0`** — silence there is not evidence that
+nothing was lost. The boundary is a rate × take-interval property (~49.7
+days between takes at 1 kHz publishing, ~72 minutes at 1 MHz); if the
+count itself is your requirement, carry a wider producer-assigned sequence
+in `T`, and if consumer liveness is, use a watchdog — the
+`LatestItem::skipped` docs carry the full disclosure. The
+consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
+is not silently discarded. `T` may be one sample or a complete block. Empty
+polls use an Acquire load rather than an atomic RMW; pending polls transfer
+ownership with one `AcqRel` swap. The all-zero initial representation keeps a
+const-initialized channel in `.bss` with no payload-proportional flash or
+startup-copy cost.
+
+```rust
+use ph_eventing::LatestBuf;
+
+let channel = LatestBuf::<u32>::new();
+let producer = channel.try_producer().expect("producer");
+let consumer = channel.try_consumer().expect("consumer");
+
+let _ = producer.publish(10);
+assert!(producer.publish(20).replaced_unread);
+let item = consumer.take_latest().expect("latest");
+assert_eq!((item.value, item.generation, item.skipped), (20, 2, 1));
+```
+
 ### EventBuf
 
 A bounded SPSC queue with backpressure. When the buffer is full, `push`
@@ -176,8 +211,13 @@ assert!(producer.push(3).is_ok());     // space freed
 
 ### Common Traits
 
-All producers implement `Sink<T>` and all consumers implement `Source<T>`,
-so you can write generic code that works with any combination:
+The ring-buffer producers implement `Sink<T>` and their consumers
+implement `Source<T>`, so generic code works with any combination of the
+listed handles. `LatestBuf` deliberately stands outside that pair: its
+consumer implements `LatestSource<T>` (and its producer `LatestSink<T>`),
+because `try_pop` cannot report the displacement that is this channel's
+designed overload behaviour — a generic `Source` bound will not compile
+against it, by decision D2:
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
@@ -203,6 +243,8 @@ assert!(err.is_none());
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+| `LatestSink<T>` | Publish latest | `latest_buf::Producer` (reports replacement) |
+| `LatestSource<T>` | Take latest | `latest_buf::Consumer` (reports generation + skipped) |
 
 ### Declarative static bring-up
 
@@ -336,7 +378,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 76 unit + 12 doctests + 4 compile-fail | Behaviour, including threaded stress tests for both SPSC types; zero capacities rejected at compile time |
+| 85 unit + 13 doctests + 7 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2) |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |
