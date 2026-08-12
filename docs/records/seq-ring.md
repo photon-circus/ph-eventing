@@ -19,8 +19,9 @@ newest (`latest`), and losses on the ordered path are counted. A consumer
 that falls more than `N` behind skips ahead and is told exactly how many
 items it lost (`PollStats::dropped`; the saturating `dropped_accum` is the
 origin of the crate's observable-loss convention). The exactness promise
-belongs to the ordered `poll_*` paths only, and is exact for inter-poll
-gaps shorter than one sequence span (`2^32 − 1` publications; §2):
+belongs to the ordered `poll_*` paths only, and is exact while the
+resume cursor stays within one sequence span (`2^32 − 1`) of the newest
+publication (§2):
 `latest()` samples without advancing the cursor or reporting a gap, and
 `skip_to_latest()` discards the backlog *without* adding to the dropped
 counter — both are deliberate sampling/fast-forward semantics, disclosed
@@ -54,7 +55,9 @@ channel (`LatestBuf` is, with a race-free ownership argument).
   limitation.** Sequence arithmetic is modular over the `2^32 − 1`
   nonzero span. A poll gap of exactly one whole span (or any multiple)
   aliases to "nothing new" and reports zero reads *and zero drops* —
-  loss accounting is exact only for gaps shorter than one span, and
+  loss accounting is exact only while the resume cursor stays within
+  one span of the newest publication (residual backlog from a partial
+  drain counts against that distance), and
   silence after an extreme stall is not evidence that nothing was lost.
   The same modularity bounds the seqlock re-check: a consumer preempted
   mid-copy for one whole span of publications passes both sequence
@@ -68,7 +71,8 @@ channel (`LatestBuf` is, with a race-free ownership argument).
   backlog that counts against the span): a nonzero ordered poll leaves
   the cursor at most `N − 1` behind the newest it observed, so
   publications between consecutive nonzero polls must stay below one
-  span minus `N − 1`; `skip_to_latest` zeroes the distance;
+  span minus `N − 1`; `skip_to_latest` leaves the cursor exactly one
+  behind the newest it observed (allowance: one span minus one);
   `poll_up_to(0, …)` and the non-advancing `latest` never move the
   cursor. Bound mid-read preemption separately, or use `EventBuf`,
   which has no sequence wrap.
@@ -94,7 +98,7 @@ channel (`LatestBuf` is, with a race-free ownership argument).
 | No torn value materialises as `T` (racy copies discarded before use) | Volatile access + `MaybeUninit` holding + re-check discipline; Loom models the sequence protocol (slot cells deliberately untracked — see the module's sync note); the dedicated Miri pass runs with the race detector **off** for this ring | Protocol-validated, not formally proven: the slot copy is a Rust data race (UB), so no checker validates the absolute claim — the discipline is argued in the module docs, widely deployed (Linux `seqlock_t`), and has no observed failure; span-bounded (counter-width ABA, §2) |
 | Fence placement is necessary (Release before value write; Acquire before re-check) | Module-doc argument; Loom; ordering discipline enforced by AGENTS' rerun-after-atomic-change rule | Proven |
 | Recovery cost is constant w.r.t. lag | 0.2.0 measurement: a consumer 2,000 sequences behind recovers in the same 115 instructions as one 16 behind | Measured |
-| Loss accounting is exact and saturating (`read + dropped` accounts for every sequence within one span; `dropped_accum` saturates, never wraps) | Unit set incl. `lag_across_wrap_counts_drops_exactly`, `dropped_accum_saturates_instead_of_overflowing`; `seq_distance` wrap tests (0.1.3 fix pinned) | Pinned, for inter-poll gaps shorter than one sequence span (§2) |
+| Loss accounting is exact and saturating (`read + dropped` accounts for every sequence within one span; `dropped_accum` saturates, never wraps) | Unit set incl. `lag_across_wrap_counts_drops_exactly`, `dropped_accum_saturates_instead_of_overflowing`; `seq_distance` wrap tests (0.1.3 fix pinned) | Pinned, while the resume cursor stays within one span of the newest publication (§2; sufficient: publications between consecutive nonzero polls below one span minus `N − 1`) |
 | Const-constructible in a `static`; RAM is `size_of`-computable per shape (payload array + `N` per-slot sequence atomics) | `const fn new` (constructibility is compiler-enforced); the 0.2.0 codesize probe demonstrates the crate's `.bss` discipline on an `EventBuf` static (268 B) — **no dedicated SeqRing static is probed or baseline-gated**, so section placement for SeqRing specifically is expected from the same all-zero layout, not measured | Constructibility by construction; `.bss` placement demonstrated for EventBuf only — a dedicated SeqRing static row is a reasonable promotion-time gate addition |
 
 ## 4. The record

@@ -126,12 +126,15 @@
 //! computes is exact only up to that span. Two consequences follow — both inherent to any
 //! fixed-width seqlock at its counter width:
 //!
-//! - **A whole-span poll gap reports nothing.** If exactly `2^32 - 1` publications (or any whole
-//!   multiple of that) land between two ordered polls, the published sequence returns to the
-//!   consumer's resume point and `poll_one`/`poll_up_to` take their nothing-new early return:
-//!   zero reads and zero drops. Longer gaps report only the remainder modulo the span. The
-//!   `read + dropped` conservation promise is therefore exact for inter-poll gaps *shorter than
-//!   one span*, and silence after an extreme stall is not evidence that nothing was lost.
+//! - **A whole-span gap from the resume cursor reports nothing.** If the distance from the
+//!   consumer's resume cursor to the newest publication reaches exactly `2^32 - 1` (or any whole
+//!   multiple), the published sequence aliases the cursor and `poll_one`/`poll_up_to` take their
+//!   nothing-new early return: zero reads and zero drops. Larger distances report only the
+//!   remainder modulo the span. The `read + dropped` conservation promise is therefore exact
+//!   while the resume cursor stays within one span of the newest publication — residual backlog
+//!   from a partial drain counts against that distance, so this is *not* simply "fewer than one
+//!   span of publications between calls" (the sufficient call-cadence bound is below) — and
+//!   silence after an extreme stall is not evidence that nothing was lost.
 //! - **A whole-span mid-read stall defeats the sequence re-check.** The torn-copy guard compares
 //!   the slot's sequence before and after the copy. A consumer preempted *inside* that copy for
 //!   exactly one whole span of publications sees the same sequence value on both sides of a slot
@@ -150,7 +153,9 @@
 //! cursor at most `N - 1` behind the newest publication it observed — the lag-recovery jump
 //! handles a lag over `N`, and draining even one item brings a lag of at most `N` below that —
 //! so keeping the publications between consecutive nonzero polls below one span *minus*
-//! `N - 1` suffices. [`Consumer::skip_to_latest`] zeroes the distance outright.
+//! `N - 1` suffices. [`Consumer::skip_to_latest`] leaves the cursor exactly **one** behind the
+//! newest it observed (so the next poll yields that newest item); its post-call allowance is
+//! therefore one span minus one, not a full span.
 //! `poll_up_to(0, …)` returns before touching the resume cursor, and the non-advancing
 //! [`Consumer::latest`] never moves it. Separately, bound consumer preemption during a single
 //! read to less than a span of publications. If neither bound can be stated for your system,

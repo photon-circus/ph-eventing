@@ -28,8 +28,8 @@ All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 
 - **Predictability first.** No unbounded loops, no hidden allocation, and no
   panic reachable from a hot path. For the two SPSC types, no data loss that
-  cannot be observed either — every drop is reported (`SeqRing`, exact within
-  one sequence span; see its section) or prevented (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
+  cannot be observed either — every drop is reported (`SeqRing`, exact while the consumer's resume
+  cursor stays within one sequence span of the newest entry; see its section) or prevented (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
   window that overwrites silently, with no drop counter and no backpressure.
   Reach for it when losing the oldest entry is the point, not when delivery
   matters.
