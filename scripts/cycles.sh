@@ -38,6 +38,8 @@
 #
 # Usage:
 #   ./scripts/cycles.sh            # local qemu-system-arm
+#   ./scripts/cycles.sh latest-matrix
+#   ./scripts/cycles.sh latest-block-matrix
 #   ./scripts/verify.sh cycles     # same, inside the reference image
 
 set -u
@@ -46,6 +48,15 @@ cd "$(dirname "$0")/.." || exit 1
 
 CARGO_INCREMENTAL=0
 export CARGO_INCREMENTAL
+
+PROBE_FEATURES=""
+for arg in "$@"; do
+    case "$arg" in
+        latest-matrix) PROBE_FEATURES="latest-matrix" ;;
+        latest-block-matrix) PROBE_FEATURES="latest-block-matrix" ;;
+        *) printf 'unknown argument: %s\n' "$arg" >&2; exit 64 ;;
+    esac
+done
 
 PROBE_DIR="scripts/cycles"
 ELF="$PROBE_DIR/target/thumbv7m-none-eabi/release/ph-eventing-cycles"
@@ -89,9 +100,14 @@ printf '==> building probe\n'
 # from the working directory, not from --manifest-path. Building from the repo
 # root silently picks up the root config instead, targets the host, and fails to
 # link against libc.
-if ! ( cd "$PROBE_DIR" && cargo build --release >/dev/null 2>&1 ); then
+if [ -n "$PROBE_FEATURES" ]; then
+    build_probe() { ( cd "$PROBE_DIR" && cargo build --release --features "$PROBE_FEATURES" ); }
+else
+    build_probe() { ( cd "$PROBE_DIR" && cargo build --release ); }
+fi
+if ! build_probe >/dev/null 2>&1; then
     printf 'error: probe failed to build\n' >&2
-    ( cd "$PROBE_DIR" && cargo build --release 2>&1 | tail -20 >&2 )
+    build_probe 2>&1 | tail -20 >&2
     exit 1
 fi
 
@@ -196,6 +212,8 @@ report="$(awk '
                     if (group == "eb") printf "\nEventBuf  (backpressure SPSC)\n"
                     else if (group == "sr") printf "\nSeqRing   (overwrite SPSC)\n"
                     else if (group == "rb") printf "\nRingBuf   (single owner)\n"
+                    else if (group == "lb") printf "\nLatestBuf (freshness-first SPSC)\n"
+                    else if (group == "lc") printf "\nLatestBuf sample/block composition\n"
                 }
             }
             next
