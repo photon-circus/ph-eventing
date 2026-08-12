@@ -493,6 +493,73 @@ fn event_buf_pop_never_sees_unpublished_data() {
     });
 }
 
+/// The frozen entry-sample poll window (the bounded-poll fix) must neither
+/// lose nor double-count items across the call boundary: in every
+/// interleaving, each published sequence ends up delivered or counted
+/// dropped exactly once, and deliveries arrive in strictly increasing
+/// sequence order.
+///
+/// Payload VALUES are deliberately not asserted, matching the scoping of the
+/// other SeqRing models: doing so directly reproduces the documented formal
+/// seqlock race (verified on both the old and the bounded poll loop — Loom
+/// serialises the non-atomic slot memory to latest-value semantics while
+/// C11 coherence lets both Relaxed sequence checks keep returning the stale
+/// pre-invalidation sequence, because a non-atomic read establishes no
+/// happens-before). The producer's Release fence and the consumer's Acquire
+/// fence are what close that window on real hardware; see the module's
+/// "Known deviation" section, which cites this witness.
+#[test]
+fn seq_ring_frozen_poll_window_conserves_under_concurrent_publish() {
+    loom::model(|| {
+        let ring = Arc::new(SeqRing::<u32, 2>::new());
+        let done = Arc::new(AtomicBool::new(false));
+
+        let producer_ring = Arc::clone(&ring);
+        let producer_done = Arc::clone(&done);
+        let producer = thread::spawn(move || {
+            let producer = producer_ring.try_producer().unwrap();
+            for value in 1..=3u32 {
+                producer.push(value * 10);
+            }
+            // Release pairs with the consumer's Acquire: once `done` is
+            // observed, every publication above is visible, so the final
+            // empty poll below is conclusive rather than racy.
+            producer_done.store(true, Ordering::Release);
+        });
+
+        let consumer_ring = Arc::clone(&ring);
+        let consumer = thread::spawn(move || {
+            let mut consumer = consumer_ring.try_consumer().unwrap();
+            let mut read = 0usize;
+            let mut dropped = 0usize;
+            let mut last_seq = 0u32;
+            loop {
+                // Observe `done` BEFORE polling: only an empty poll that
+                // happens-after the producer's Release store is conclusive
+                // evidence that nothing remains.
+                let producer_was_done = done.load(Ordering::Acquire);
+                let stats = consumer.poll_up_to(2, |seq, _value| {
+                    assert!(seq > last_seq);
+                    last_seq = seq;
+                });
+                read += stats.read;
+                dropped += stats.dropped;
+                if producer_was_done && stats.read == 0 && stats.dropped == 0 {
+                    break;
+                }
+                thread::yield_now();
+            }
+            (read, dropped)
+        });
+
+        producer.join().unwrap();
+        let (read, dropped) = consumer.join().unwrap();
+        // Exact conservation within the span: three publications, each
+        // delivered or dropped exactly once, never both, never neither.
+        assert_eq!(read + dropped, 3);
+    });
+}
+
 /// The `SeqRing` sequence protocol never hands the consumer a sequence the
 /// producer has not published, never goes backwards, and never exceeds the
 /// newest published sequence.

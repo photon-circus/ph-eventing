@@ -674,6 +674,7 @@ mod tests {
             // Next publish assigns generation 17 (skipping reserved 0).
             (*state).next_generation = 16;
         });
+        // SAFETY: no handles exist while the test seeds role state.
         channel.consumer_state.with_mut(|state| unsafe {
             // Resume cursor already at 17: a wrap-aliased publish of 17 looks
             // like "nothing skipped" even though a full span was lost.

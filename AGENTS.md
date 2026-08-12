@@ -768,9 +768,9 @@ Run the default probe as well when changing shared measurement infrastructure.
 | `EventBuf::pop` | — | 20 (full) | 13 (empty) |
 | `EventBuf::peek` / `len` | 13 / 14 | | |
 | `SeqRing::push` | 34 | **33** (overwriting) | |
-| `SeqRing::poll_one_value` | — | 92 | 24 (empty) |
-| `SeqRing` poll, lagged 2×N | | **115** | |
-| `SeqRing` poll, lagged ~2000 | | **115** | |
+| `SeqRing::poll_one_value` | — | 83 | 25 (empty) |
+| `SeqRing` poll, lagged 2×N | | **90** | |
+| `SeqRing` poll, lagged ~2000 | | **90** | |
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
@@ -803,9 +803,11 @@ Four results carry the argument:
 1. **Every `push` is constant.** Empty vs loaded differs by at most one
    instruction on all three types. Cost does not scale with occupancy or `N`.
 2. **`SeqRing` lag recovery is O(1) in the lag.** A consumer 2×N behind and one
-   ~2000 behind both cost **115 instructions**. If recovery walked the backlog
-   the second would be two orders of magnitude larger. It is a jump, and now
-   that is measured rather than asserted.
+   ~2000 behind both cost **90 instructions** (re-measured after the 0.3.0
+   bounded-poll fix froze the drain goal at entry; it was 115 with the
+   per-iteration re-read). If recovery walked the backlog the second would be
+   two orders of magnitude larger. It is a jump, and that is measured rather
+   than asserted.
 3. **CountedSignal's SPSC hot paths are small and bounded.** `increment`
    retires 8 instructions on the below-`MAX` common path and 9 on the
    probe-seeded saturated sentinel arm; `take_count` retires 9 — all in the

@@ -99,6 +99,19 @@ All notable changes to this project will be documented in this file.
   reject, without the take's ordering guarantees.
 
 ### Fixed
+- `SeqRing::poll_up_to` (and everything built on it: `poll_one`,
+  `poll_one_value`, `Source::try_pop`, `forward`) is now bounded per call
+  under continuous overwrite. The previous loop re-read the newest published
+  sequence every iteration and only counted successful reads against its
+  budget, so a producer that stayed ahead could starve the poll indefinitely
+  — contradicting the crate's no-unbounded-loops rule. The drain goal is now
+  sampled once at entry: each call performs at most one lag-recovery jump, a
+  walk of at most `N` slots, and at most `max` reads; items published while
+  the poll runs wait for the next call, with nothing lost or double-counted
+  at the hand-off (unit-pinned and Loom-modelled). Lag recovery remains O(1)
+  in the lag and got cheaper: 90 instructions at both 2×N and ~2,000 behind
+  (was 115), with `poll_one_value` at 83 (was 92), in the reference
+  environment on the assembled tree.
 - `scripts/loom.sh`: a bare name filter is scoped to `loom_tests::<filter>`
   instead of being passed as a second positional Cargo filter (leading `-`
   flags still pass through), and a run is only reported verified when the

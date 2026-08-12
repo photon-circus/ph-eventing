@@ -1,0 +1,1362 @@
+==> building ph-eventing-verify (cached after the first time)
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 7.08kB 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/rust:1.92.0-slim-trixie
+#2 ...
+
+#3 [auth] library/rust:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/rust:1.92.0-slim-trixie
+#2 DONE 0.6s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 432B done
+#4 DONE 0.0s
+
+#5 [ 1/13] FROM docker.io/library/rust:1.92.0-slim-trixie@sha256:bf3368a992915f128293ac76917ab6e561e4dda883273c8f5c9f6f8ea37a378e
+#5 resolve docker.io/library/rust:1.92.0-slim-trixie@sha256:bf3368a992915f128293ac76917ab6e561e4dda883273c8f5c9f6f8ea37a378e 0.0s done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 382B done
+#6 DONE 0.0s
+
+#7 [10/13] COPY scripts/codesize/Cargo.toml scripts/codesize/Cargo.lock /tmp/fetch/scripts/codesize/
+#7 CACHED
+
+#8 [ 6/13] RUN rustup toolchain install "nightly-2026-08-08" --profile minimal       --component miri,rust-src  && rustup target add --toolchain "nightly-2026-08-08"       i686-unknown-linux-gnu armv7-unknown-linux-gnueabihf s390x-unknown-linux-gnu
+#8 CACHED
+
+#9 [12/13] RUN mkdir -p /tmp/fetch/src /tmp/fetch/scripts/codesize/src /tmp/fetch/scripts/cycles/src  && touch /tmp/fetch/src/lib.rs /tmp/fetch/scripts/codesize/src/lib.rs  && printf 'fn main() {}\n' > /tmp/fetch/scripts/cycles/src/main.rs  && cd /tmp/fetch && cargo fetch --locked  && cd /tmp/fetch/scripts/codesize && cargo fetch --locked  && cd /tmp/fetch/scripts/cycles && cargo fetch --locked  && rm -rf /tmp/fetch
+#9 CACHED
+
+#10 [ 9/13] COPY Cargo.toml Cargo.lock /tmp/fetch/
+#10 CACHED
+
+#11 [ 2/13] RUN apt-get update  && apt-get install -y --no-install-recommends qemu-system-arm git ca-certificates  && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [ 5/13] RUN cd /tmp/pin && rustup toolchain install && rm -rf /tmp/pin
+#12 CACHED
+
+#13 [11/13] COPY scripts/cycles/Cargo.toml scripts/cycles/Cargo.lock /tmp/fetch/scripts/cycles/
+#13 CACHED
+
+#14 [ 3/13] RUN qemu-system-arm --version | head -1 | grep -qF "version 10.0." || {       echo "QEMU series drifted from 10.0 -- this rebuild would not" ;        echo "reproduce the release evidence. Use the published image tag, or" ;        echo "re-measure and re-bless the documented counts with the new QEMU" ;        echo "(then update QEMU_SERIES)." ;       qemu-system-arm --version | head -1 ;       exit 1 ; }
+#14 CACHED
+
+#15 [ 4/13] COPY rust-toolchain.toml /tmp/pin/rust-toolchain.toml
+#15 CACHED
+
+#16 [ 7/13] RUN rustup toolchain install stable --profile minimal       --component clippy
+#16 CACHED
+
+#17 [ 8/13] RUN cargo install --locked cargo-deny@0.20.2 cargo-llvm-cov@0.8.7
+#17 CACHED
+
+#18 [13/13] WORKDIR /work
+#18 CACHED
+
+#19 exporting to image
+#19 exporting layers done
+#19 exporting manifest sha256:3a303e22980005cdb07e49d504f213ec1f0b0198afa6f436f98f8e5c5589a122 done
+#19 exporting config sha256:d364bcf3741d81aa47a1ac1a84a020a5d65c9df9f144683a20ba2cdcbb61e1a6 done
+#19 exporting attestation manifest sha256:c352cec73e080e3143c304f3de012f4eeabc41c4fa45b488d50aeaa8c9b8e4cc
+#19 exporting attestation manifest sha256:c352cec73e080e3143c304f3de012f4eeabc41c4fa45b488d50aeaa8c9b8e4cc 0.0s done
+#19 exporting manifest list sha256:f0615b6646e101e86205324ebb5f820a38af915b7cff304afe8135bc04d19620 0.0s done
+#19 naming to docker.io/library/ph-eventing-verify:latest done
+#19 unpacking to docker.io/library/ph-eventing-verify:latest 0.0s done
+#19 DONE 0.1s
+rustc 1.92.0 (ded5c06cf 2025-12-08)
+rustc 1.99.0-nightly (1a98b1e13 2026-08-07)
+QEMU emulator version 10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)
+
+########## ci ##########
+
+==> fmt
+
+==> clippy
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+
+==> test
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/ph_eventing-0738c850a5905c40)
+
+running 101 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test event_buf::tests::default_is_new ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::push_and_get ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test traits::tests::event_consumer_as_source ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test seq_ring::tests::concurrent_overwrite_never_yields_a_mismatched_value ... ok
+test traits::tests::seq_producer_as_sink ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests ph_eventing
+
+running 13 tests
+test src/event_buf.rs - event_buf (line 31) ... ok
+test src/latest_buf.rs - latest_buf (line 59) ... ok
+test src/block.rs - block (line 61) ... ok
+test src/lib.rs - (line 131) ... ok
+test src/macros.rs - macros::static_spsc (line 27) ... ok
+test src/lib.rs - (line 36) ... ok
+test src/lib.rs - (line 88) ... ok
+test src/lib.rs - (line 60) ... ok
+test src/ring.rs - ring (line 16) ... ok
+test src/lib.rs - (line 49) ... ok
+test src/macros.rs - macros::static_spsc (line 48) ... ok
+test src/traits.rs - traits::forward (line 84) ... ok
+test src/lib.rs - (line 75) ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 11 tests
+test src/latest_buf.rs - latest_buf::Consumer (line 427) - compile fail ... ok
+test src/event_flags.rs - event_flags::Producer (line 208) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 409) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Producer (line 337) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Consumer (line 215) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Producer (line 154) - compile fail ... ok
+test src/event_flags.rs - event_flags::Consumer (line 256) - compile fail ... ok
+test src/block.rs - block (line 79) - compile fail ... ok
+test src/ring.rs - ring::RingBuf<T,N>::new (line 76) - compile fail ... ok
+test src/seq_ring.rs - seq_ring::SeqRing<T,N>::new (line 265) - compile fail ... ok
+test src/event_buf.rs - event_buf::EventBuf<T,N>::new (line 113) - compile fail ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+all doctests ran in 0.75s; merged doctests compilation took 0.67s
+
+==> doc
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+   Generated /work/target/doc/ph_eventing/index.html
+
+==> features: default
+
+==> features: portable-atomic
+
+==> features: critical-section
+
+==> stable: test
+
+running 101 tests
+....................................................................................... 87/101
+..............
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 13 tests
+.............
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 11 tests
+...........
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+all doctests ran in 0.75s; merged doctests compilation took 0.67s
+
+==> stable: clippy
+
+==> deny
+advisories ok, bans ok, licenses ok, sources ok
+
+==> coverage (>=90% lines)
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling ph-eventing v0.3.0 (/work)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.40s
+     Running unittests src/lib.rs (target/llvm-cov-target/debug/deps/ph_eventing-0738c850a5905c40)
+
+running 101 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::default_is_new ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test ring::tests::push_and_get ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_consumer_as_source ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test seq_ring::tests::concurrent_overwrite_never_yields_a_mismatched_value ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test traits::tests::seq_producer_as_sink ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+Filename                      Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+block.rs                          261                14    94.64%          23                 1    95.65%         148                 9    93.92%           0                 0         -
+counted_signal.rs                 250                18    92.80%          24                 4    83.33%         136                12    91.18%           0                 0         -
+event_buf.rs                      667                30    95.50%          53                 4    92.45%         342                19    94.44%           0                 0         -
+event_flags.rs                    340                23    93.24%          38                 5    86.84%         197                15    92.39%           0                 0         -
+latest_buf.rs                     405                28    93.09%          46                 6    86.96%         260                19    92.69%           0                 0         -
+lib.rs                              5                 1    80.00%           1                 0   100.00%           3                 0   100.00%           0                 0         -
+macros.rs                         106                10    90.57%          10                 0   100.00%          57                 4    92.98%           0                 0         -
+ring.rs                           330                19    94.24%          30                 2    93.33%         180                11    93.89%           0                 0         -
+seq_ring.rs                       940                48    94.89%          81                 9    88.89%         522                36    93.10%           0                 0         -
+sync.rs                            11                 0   100.00%           3                 0   100.00%           9                 0   100.00%           0                 0         -
+traits.rs                         299                 2    99.33%          13                 0   100.00%         132                 1    99.24%           0                 0         -
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                            3614               193    94.66%         322                31    90.37%        1986               126    93.66%           0                 0         -
+
+==> codesize (baseline gate)
+TARGET                          two_calls  cs_incr  cs_take flags_acq flags_raise flags_take    split      bss  seq_bss   data
+------------------------------  ---------  -------  ------- --------- ----------- ----------    -----      ---  -------   ----
+thumbv6m-none-eabi                    156       46       24       68       24       24        -      268      524      0
+thumbv8m.base-none-eabi               156       44       22       64       22       22        -      268      524      0
+thumbv7m-none-eabi                    172       44       22       72       26       26        -      268      524      0
+thumbv7em-none-eabi                   172       44       22       72       26       26        -      268      524      0
+thumbv8m.main-none-eabi               152       44       22       64       22       22        -      268      524      0
+armv7r-none-eabi                      220       64       28      116       32       32        -      268      524      0
+armv7a-none-eabi                      220       64       28      116       32       32        -      268      524      0
+riscv32imac-unknown-none-elf          152       26        8       66        8        8        -      268      524      0
+
+
+Baseline gate (tolerance +16 bytes, growth only)
+  ok -- no row grew by more than 16 bytes
+split column is "-" unless run as: ./scripts/codesize.sh split
+Xtensa rows need: XTENSA=1 and the esp-rs toolchain.
+
+==> codesize (block matrix gate)
+TARGET                         SHAPE        code_B  block_B accepted_B rejected_B
+------------------------------ ----------   ------  ------- ---------- ----------
+thumbv6m-none-eabi             w2_n8           138       24         48         48
+thumbv6m-none-eabi             w2_n32          168       72        144        144
+thumbv6m-none-eabi             w2_n128         200      264        528        528
+thumbv6m-none-eabi             w8_n8           192       72        144        144
+thumbv6m-none-eabi             w8_n32          224      264        528        528
+thumbv6m-none-eabi             w8_n128         240     1032       2064       2064
+thumbv6m-none-eabi             w16_n8          242      136        272        272
+thumbv6m-none-eabi             w16_n32         254      520       1040       1040
+thumbv6m-none-eabi             w16_n128        268     2056       4112       4112
+thumbv8m.base-none-eabi        w2_n8           136       24         48         48
+thumbv8m.base-none-eabi        w2_n32          168       72        144        144
+thumbv8m.base-none-eabi        w2_n128         190      264        528        528
+thumbv8m.base-none-eabi        w8_n8           192       72        144        144
+thumbv8m.base-none-eabi        w8_n32          228      264        528        528
+thumbv8m.base-none-eabi        w8_n128         244     1032       2064       2064
+thumbv8m.base-none-eabi        w16_n8          242      136        272        272
+thumbv8m.base-none-eabi        w16_n32         250      520       1040       1040
+thumbv8m.base-none-eabi        w16_n128        264     2056       4112       4112
+thumbv7m-none-eabi             w2_n8           136       24         48         48
+thumbv7m-none-eabi             w2_n32          132       72        144        144
+thumbv7m-none-eabi             w2_n128         130      264        528        528
+thumbv7m-none-eabi             w8_n8           120       72        144        144
+thumbv7m-none-eabi             w8_n32          118      264        528        528
+thumbv7m-none-eabi             w8_n128         178     1032       2064       2064
+thumbv7m-none-eabi             w16_n8          200      136        272        272
+thumbv7m-none-eabi             w16_n32         208      520       1040       1040
+thumbv7m-none-eabi             w16_n128        216     2056       4112       4112
+thumbv7em-none-eabi            w2_n8           136       24         48         48
+thumbv7em-none-eabi            w2_n32          132       72        144        144
+thumbv7em-none-eabi            w2_n128         130      264        528        528
+thumbv7em-none-eabi            w8_n8           120       72        144        144
+thumbv7em-none-eabi            w8_n32          118      264        528        528
+thumbv7em-none-eabi            w8_n128         178     1032       2064       2064
+thumbv7em-none-eabi            w16_n8          200      136        272        272
+thumbv7em-none-eabi            w16_n32         208      520       1040       1040
+thumbv7em-none-eabi            w16_n128        216     2056       4112       4112
+thumbv8m.main-none-eabi        w2_n8           138       24         48         48
+thumbv8m.main-none-eabi        w2_n32          126       72        144        144
+thumbv8m.main-none-eabi        w2_n128         122      264        528        528
+thumbv8m.main-none-eabi        w8_n8           114       72        144        144
+thumbv8m.main-none-eabi        w8_n32          110      264        528        528
+thumbv8m.main-none-eabi        w8_n128         182     1032       2064       2064
+thumbv8m.main-none-eabi        w16_n8          204      136        272        272
+thumbv8m.main-none-eabi        w16_n32         212      520       1040       1040
+thumbv8m.main-none-eabi        w16_n128        216     2056       4112       4112
+armv7r-none-eabi               w2_n8           212       24         48         48
+armv7r-none-eabi               w2_n32          248       72        144        144
+armv7r-none-eabi               w2_n128         252      264        528        528
+armv7r-none-eabi               w8_n8           312       72        144        144
+armv7r-none-eabi               w8_n32          312      264        528        528
+armv7r-none-eabi               w8_n128         312     1032       2064       2064
+armv7r-none-eabi               w16_n8          296      136        272        272
+armv7r-none-eabi               w16_n32         288      520       1040       1040
+armv7r-none-eabi               w16_n128        300     2056       4112       4112
+armv7a-none-eabi               w2_n8           212       24         48         48
+armv7a-none-eabi               w2_n32          248       72        144        144
+armv7a-none-eabi               w2_n128         252      264        528        528
+armv7a-none-eabi               w8_n8           312       72        144        144
+armv7a-none-eabi               w8_n32          312      264        528        528
+armv7a-none-eabi               w8_n128         312     1032       2064       2064
+armv7a-none-eabi               w16_n8          296      136        272        272
+armv7a-none-eabi               w16_n32         288      520       1040       1040
+armv7a-none-eabi               w16_n128        300     2056       4112       4112
+riscv32imac-unknown-none-elf   w2_n8           150       24         48         48
+riscv32imac-unknown-none-elf   w2_n32          190       72        144        144
+riscv32imac-unknown-none-elf   w2_n128         210      264        528        528
+riscv32imac-unknown-none-elf   w8_n8           202       72        144        144
+riscv32imac-unknown-none-elf   w8_n32          222      264        528        528
+riscv32imac-unknown-none-elf   w8_n128         252     1032       2064       2064
+riscv32imac-unknown-none-elf   w16_n8          250      136        272        272
+riscv32imac-unknown-none-elf   w16_n32         248      520       1040       1040
+riscv32imac-unknown-none-elf   w16_n128        300     2056       4112       4112
+
+block_B is size_of::<Block<T, N>>(). accepted_B counts builder
+completion plus publication; rejected_B counts completion plus
+returning the complete rejected block to the caller.
+These are logical payload-traffic bounds; code_B is emitted flash.
+Run scripts/cycles.sh for accepted/rejected instruction paths.
+
+
+Baseline gate (tolerance +16 bytes, growth only)
+  ok -- no row grew by more than 16 bytes
+split column is "-" unless run as: ./scripts/codesize.sh split
+Xtensa rows need: XTENSA=1 and the esp-rs toolchain.
+
+==> thumbv6m-none-eabi
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+
+==> thumbv7em-none-eabi
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+
+==> riscv32imac-unknown-none-elf
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+
+Summary
+  PASS  fmt
+  PASS  clippy
+  PASS  test
+  PASS  doc
+  PASS  features: default
+  PASS  features: portable-atomic
+  PASS  features: critical-section
+  PASS  stable: test
+  PASS  stable: clippy
+  PASS  deny
+  PASS  coverage (>=90% lines)
+  PASS  codesize (baseline gate)
+  PASS  codesize (block matrix gate)
+  PASS  thumbv6m-none-eabi
+  PASS  thumbv7em-none-eabi
+  PASS  riscv32imac-unknown-none-elf
+
+All checks passed.
+
+########## miri ##########
+==> miri toolchain: rustc 1.99.0-nightly (1a98b1e13 2026-08-07)
+
+==> host: full checking
+Preparing a sysroot for Miri (target: x86_64-unknown-linux-gnu)... done
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/lib.rs (target/miri/x86_64-unknown-linux-gnu/debug/build/ph-eventing/073c6757111f2f6e/out/ph_eventing-073c6757111f2f6e)
+
+running 100 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::default_is_new ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test ring::tests::push_and_get ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_consumer_as_source ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test traits::tests::seq_producer_as_sink ... ok
+
+test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.15s
+
+   Doc-tests ph_eventing
+
+running 24 tests
+test src/event_buf.rs - event_buf::EventBuf<T,N>::new (line 113) - compile fail ... ok
+test src/seq_ring.rs - seq_ring::SeqRing<T,N>::new (line 265) - compile fail ... ok
+test src/ring.rs - ring::RingBuf<T,N>::new (line 76) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Consumer (line 215) - compile fail ... ok
+test src/block.rs - block (line 79) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 409) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Producer (line 154) - compile fail ... ok
+test src/event_flags.rs - event_flags::Producer (line 208) - compile fail ... ok
+test src/event_flags.rs - event_flags::Consumer (line 256) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Producer (line 337) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 427) - compile fail ... ok
+test src/lib.rs - (line 49) ... ok
+test src/ring.rs - ring (line 16) ... ok
+test src/lib.rs - (line 131) ... ok
+test src/lib.rs - (line 60) ... ok
+test src/event_buf.rs - event_buf (line 31) ... ok
+test src/traits.rs - traits::forward (line 84) ... ok
+test src/lib.rs - (line 75) ... ok
+test src/macros.rs - macros::static_spsc (line 27) ... ok
+test src/block.rs - block (line 61) ... ok
+test src/lib.rs - (line 36) ... ok
+test src/macros.rs - macros::static_spsc (line 48) ... ok
+test src/latest_buf.rs - latest_buf (line 59) ... ok
+test src/lib.rs - (line 88) ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+all doctests ran in 0.22s; merged doctests compilation took 0.01s
+
+==> host: seqlock logic (race detector off)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (target/miri/x86_64-unknown-linux-gnu/debug/build/ph-eventing/073c6757111f2f6e/out/ph_eventing-073c6757111f2f6e)
+
+running 1 test
+test seq_ring::tests::concurrent_overwrite_never_yields_a_mismatched_value ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 0.51s
+
+
+==> host: 16 scheduler seeds
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/lib.rs (target/miri/x86_64-unknown-linux-gnu/debug/build/ph-eventing/073c6757111f2f6e/out/ph_eventing-073c6757111f2f6e)
+Trying seed: 12
+Trying seed: 13
+Trying seed: 14
+Trying seed: 11
+Trying seed: 15
+Trying seed: 10
+Trying seed: 8
+Trying seed: 6
+Trying seed: 0
+Trying seed: 2
+Trying seed: 7
+Trying seed: 9
+Trying seed: 1
+Trying seed: 5
+Trying seed: 4
+Trying seed: 3
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+
+running 2 tests
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... okokokokokokok
+
+
+
+ok
+
+
+ok
+ok
+okokok
+
+
+
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... okok
+
+ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... okok
+
+okokok
+
+
+okok
+okok
+ok
+
+
+
+ok
+
+
+test result: test result: test result: 
+test result: 
+oktest result: ok
+okok
+okok
+test result: 
+test result: 
+test result: okok
+test result: 
+oktest result: test result: 
+ok
+oktest result: okok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered outok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered outok
+. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out
+. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered outok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered outok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out
+
+; finished in 2.60s; finished in 2.60s; finished in 2.61s; finished in 2.61stest result: 
+test result: ; finished in 2.61s; finished in 2.60s; finished in 2.62s
+
+
+
+
+
+
+
+; finished in 2.62s
+
+ok
+
+ok
+
+; finished in 2.62s; finished in 2.62s; finished in 2.62s
+
+. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out
+
+
+
+
+
+
+; finished in 2.63stest result: 
+
+ok. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 2.64s. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out
+
+. 2 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 2.67s; finished in 2.67s
+
+
+
+; finished in 2.68s
+
+   Doc-tests ph_eventing
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+all doctests ran in 0.02s; merged doctests compilation took 0.01s
+
+==> i686-unknown-linux-gnu
+Preparing a sysroot for Miri (target: i686-unknown-linux-gnu)... done
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/lib.rs (target/miri/i686-unknown-linux-gnu/debug/build/ph-eventing/d6bee4c6ee73bcea/out/ph_eventing-d6bee4c6ee73bcea)
+
+running 100 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::default_is_new ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test ring::tests::push_and_get ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_consumer_as_source ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test traits::tests::seq_producer_as_sink ... ok
+
+test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.48s
+
+   Doc-tests ph_eventing
+
+running 24 tests
+test src/counted_signal.rs - counted_signal::Producer (line 154) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 409) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Producer (line 337) - compile fail ... ok
+test src/event_buf.rs - event_buf::EventBuf<T,N>::new (line 113) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Consumer (line 215) - compile fail ... ok
+test src/event_flags.rs - event_flags::Producer (line 208) - compile fail ... ok
+test src/seq_ring.rs - seq_ring::SeqRing<T,N>::new (line 265) - compile fail ... ok
+test src/ring.rs - ring::RingBuf<T,N>::new (line 76) - compile fail ... ok
+test src/block.rs - block (line 79) - compile fail ... ok
+test src/event_flags.rs - event_flags::Consumer (line 256) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 427) - compile fail ... ok
+test src/event_buf.rs - event_buf (line 31) ... ok
+test src/block.rs - block (line 61) ... ok
+test src/lib.rs - (line 131) ... ok
+test src/lib.rs - (line 75) ... ok
+test src/lib.rs - (line 49) ... ok
+test src/traits.rs - traits::forward (line 84) ... ok
+test src/lib.rs - (line 88) ... ok
+test src/ring.rs - ring (line 16) ... ok
+test src/latest_buf.rs - latest_buf (line 59) ... ok
+test src/lib.rs - (line 60) ... ok
+test src/lib.rs - (line 36) ... ok
+test src/macros.rs - macros::static_spsc (line 48) ... ok
+test src/macros.rs - macros::static_spsc (line 27) ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+all doctests ran in 0.24s; merged doctests compilation took 0.01s
+
+==> armv7-unknown-linux-gnueabihf
+Preparing a sysroot for Miri (target: armv7-unknown-linux-gnueabihf)... done
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/lib.rs (target/miri/armv7-unknown-linux-gnueabihf/debug/build/ph-eventing/d6573e025e5953bc/out/ph_eventing-d6573e025e5953bc)
+
+running 100 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::default_is_new ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test ring::tests::push_and_get ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_consumer_as_source ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test traits::tests::seq_producer_as_sink ... ok
+
+test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.97s
+
+   Doc-tests ph_eventing
+
+running 24 tests
+test src/latest_buf.rs - latest_buf::Consumer (line 409) - compile fail ... ok
+test src/event_buf.rs - event_buf::EventBuf<T,N>::new (line 113) - compile fail ... ok
+test src/seq_ring.rs - seq_ring::SeqRing<T,N>::new (line 265) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Producer (line 154) - compile fail ... ok
+test src/ring.rs - ring::RingBuf<T,N>::new (line 76) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Consumer (line 215) - compile fail ... ok
+test src/event_flags.rs - event_flags::Producer (line 208) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Producer (line 337) - compile fail ... ok
+test src/event_flags.rs - event_flags::Consumer (line 256) - compile fail ... ok
+test src/block.rs - block (line 79) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 427) - compile fail ... ok
+test src/ring.rs - ring (line 16) ... ok
+test src/lib.rs - (line 75) ... ok
+test src/block.rs - block (line 61) ... ok
+test src/lib.rs - (line 131) ... ok
+test src/lib.rs - (line 60) ... ok
+test src/lib.rs - (line 88) ... ok
+test src/event_buf.rs - event_buf (line 31) ... ok
+test src/lib.rs - (line 49) ... ok
+test src/macros.rs - macros::static_spsc (line 27) ... ok
+test src/traits.rs - traits::forward (line 84) ... ok
+test src/latest_buf.rs - latest_buf (line 59) ... ok
+test src/lib.rs - (line 36) ... ok
+test src/macros.rs - macros::static_spsc (line 48) ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+all doctests ran in 0.23s; merged doctests compilation took 0.01s
+
+==> s390x-unknown-linux-gnu
+Preparing a sysroot for Miri (target: s390x-unknown-linux-gnu)... done
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (target/miri/s390x-unknown-linux-gnu/debug/build/ph-eventing/dc7f9b689ed67400/out/ph_eventing-dc7f9b689ed67400)
+
+running 100 tests
+test block::tests::clear_discards_a_partial_block ... ok
+test block::tests::completes_only_after_n_contiguous_samples ... ok
+test block::tests::completion_resets_for_the_next_block ... ok
+test block::tests::default_and_capacity_match_new ... ok
+test block::tests::event_buf_composition_queues_and_returns_a_rejected_block ... ok
+test block::tests::rejects_gap_without_hiding_loss_policy ... ok
+test block::tests::rejects_reserved_zero_without_changing_partial_block ... ok
+test block::tests::sequence_wrap_skips_zero ... ok
+test block::tests::works_without_default_bound ... ok
+test counted_signal::tests::concurrent_takes_do_not_lose_increments ... ok
+test counted_signal::tests::const_new_works_in_static_context ... ok
+test counted_signal::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test counted_signal::tests::handles_are_send ... ok
+test counted_signal::tests::increments_accumulate_and_take_clears ... ok
+test counted_signal::tests::saturates_instead_of_wrapping ... ok
+test event_buf::tests::concurrent_spsc_preserves_fifo_and_loses_nothing ... ok
+test event_buf::tests::const_new_works_in_const_context ... ok
+test event_buf::tests::default_is_new ... ok
+test event_buf::tests::drain_on_empty_returns_zero ... ok
+test event_buf::tests::drain_returns_count ... ok
+test event_buf::tests::handles_are_send ... ok
+test event_buf::tests::len_and_full_track_state ... ok
+test event_buf::tests::len_stays_within_capacity_while_consumer_drains ... ok
+test event_buf::tests::new_buf_is_empty ... ok
+test event_buf::tests::peek_copies_without_advancing ... ok
+test event_buf::tests::producer_consumer_can_be_recreated ... ok
+test event_buf::tests::push_and_pop_fifo ... ok
+test event_buf::tests::push_rejects_when_full ... ok
+test event_buf::tests::static_buf_yields_static_sendable_handles ... ok
+test event_buf::tests::try_producer_and_try_consumer ... ok
+test event_buf::tests::wraps_around_correctly ... ok
+test event_flags::tests::concurrent_raise_and_take_never_loses_the_condition ... ok
+test event_flags::tests::const_new_works_in_static_context ... ok
+test event_flags::tests::duplicate_raises_coalesce_and_take_clears ... ok
+test event_flags::tests::empty_raise_and_empty_take_are_no_ops ... ok
+test event_flags::tests::event_flags_object_is_eight_bytes ... ok
+test event_flags::tests::event_mask_is_an_explicit_panic_free_32_bit_set ... ok
+test event_flags::tests::handles_are_exclusive_and_reusable_after_drop ... ok
+test event_flags::tests::handles_are_send_and_container_is_sync ... ok
+test event_flags::tests::multi_bit_and_all_bit_masks_round_trip ... ok
+test event_flags::tests::observed_raise_publishes_preceding_memory ... ok
+test latest_buf::tests::concurrent_publication_never_returns_torn_value ... ok
+test latest_buf::tests::full_generation_cycle_uses_documented_approximation ... ok
+test latest_buf::tests::generation_wrap_skips_zero_and_counts_gap_exactly ... ok
+test latest_buf::tests::generic_payload_can_be_a_complete_block ... ok
+test latest_buf::tests::handle_reacquisition_continues_role_state ... ok
+test latest_buf::tests::replacement_is_reported_on_both_endpoints ... ok
+test latest_buf::tests::role_acquisition_is_unique_and_handles_are_send ... ok
+test latest_buf::tests::starts_empty_and_takes_each_publication_at_most_once ... ok
+test latest_buf::tests::static_channel_yields_static_sendable_handles ... ok
+test macros::tests::event_buf_module_round_trips ... ok
+test macros::tests::event_buf_take_is_once_only ... ok
+test macros::tests::failed_take_strands_nothing ... ok
+test macros::tests::handles_are_send ... ok
+test macros::tests::seq_ring_module_round_trips ... ok
+test ring::tests::capacity_returns_n ... ok
+test ring::tests::clear_resets_state ... ok
+test ring::tests::const_new_works_in_const_context ... ok
+test ring::tests::default_is_new ... ok
+test ring::tests::huge_capacity_does_not_overflow_the_index ... ok
+test ring::tests::into_iter_for_ref ... ok
+test ring::tests::iter_exact_size ... ok
+test ring::tests::iter_oldest_to_newest ... ok
+test ring::tests::new_ring_is_empty ... ok
+test ring::tests::overwrite_oldest_when_full ... ok
+test ring::tests::push_and_get ... ok
+test ring::tests::works_without_default_bound ... ok
+test seq_ring::tests::capacity_returns_n ... ok
+test seq_ring::tests::const_new_works_in_const_context ... ok
+test seq_ring::tests::consumer_skips_reserved_seq_zero_on_wrap ... ok
+test seq_ring::tests::dropped_accum_saturates_instead_of_overflowing ... ok
+test seq_ring::tests::dropped_counter_can_reset ... ok
+test seq_ring::tests::drops_when_consumer_lags ... ok
+test seq_ring::tests::lag_across_wrap_counts_drops_exactly ... ok
+test seq_ring::tests::latest_empty_returns_false ... ok
+test seq_ring::tests::latest_reads_newest ... ok
+test seq_ring::tests::latest_returns_false_when_slot_missing ... ok
+test seq_ring::tests::poll_one_empty_returns_false ... ok
+test seq_ring::tests::poll_one_value_and_latest_value ... ok
+test seq_ring::tests::poll_up_to_counts_dropped_when_slot_missing ... ok
+test seq_ring::tests::poll_up_to_zero_returns_newest_only ... ok
+test seq_ring::tests::polls_in_order ... ok
+test seq_ring::tests::push_wraps_seq_from_zero_to_one ... ok
+test seq_ring::tests::read_seq_inner_detects_overwrite_during_read ... ok
+test seq_ring::tests::read_seq_inner_rejects_invalidated_slot ... ok
+test seq_ring::tests::seq_distance_skips_the_reserved_zero ... ok
+test seq_ring::tests::skip_to_latest_makes_next_poll_latest ... ok
+test seq_ring::tests::static_ring_yields_static_sendable_handles ... ok
+test seq_ring::tests::try_producer_and_try_consumer ... ok
+test traits::tests::event_consumer_as_source ... ok
+test traits::tests::event_producer_as_sink ... ok
+test traits::tests::forward_empty_source_transfers_nothing ... ok
+test traits::tests::forward_event_to_ringbuf ... ok
+test traits::tests::forward_seq_to_event ... ok
+test traits::tests::forward_stops_when_sink_full ... ok
+test traits::tests::generic_drain_event ... ok
+test traits::tests::generic_drain_seq ... ok
+test traits::tests::ringbuf_as_sink ... ok
+test traits::tests::seq_consumer_as_source ... ok
+test traits::tests::seq_producer_as_sink ... ok
+
+test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.88s
+
+   Doc-tests ph_eventing
+
+running 24 tests
+test src/event_buf.rs - event_buf::EventBuf<T,N>::new (line 113) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Producer (line 154) - compile fail ... ok
+test src/seq_ring.rs - seq_ring::SeqRing<T,N>::new (line 265) - compile fail ... ok
+test src/ring.rs - ring::RingBuf<T,N>::new (line 76) - compile fail ... ok
+test src/counted_signal.rs - counted_signal::Consumer (line 215) - compile fail ... ok
+test src/event_flags.rs - event_flags::Producer (line 208) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 409) - compile fail ... ok
+test src/event_flags.rs - event_flags::Consumer (line 256) - compile fail ... ok
+test src/block.rs - block (line 79) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Producer (line 337) - compile fail ... ok
+test src/latest_buf.rs - latest_buf::Consumer (line 427) - compile fail ... ok
+test src/lib.rs - (line 49) ... ok
+test src/ring.rs - ring (line 16) ... ok
+test src/lib.rs - (line 131) ... ok
+test src/lib.rs - (line 60) ... ok
+test src/block.rs - block (line 61) ... ok
+test src/traits.rs - traits::forward (line 84) ... ok
+test src/event_buf.rs - event_buf (line 31) ... ok
+test src/lib.rs - (line 88) ... ok
+test src/lib.rs - (line 75) ... ok
+test src/macros.rs - macros::static_spsc (line 48) ... ok
+test src/macros.rs - macros::static_spsc (line 27) ... ok
+test src/latest_buf.rs - latest_buf (line 59) ... ok
+test src/lib.rs - (line 36) ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+all doctests ran in 0.24s; merged doctests compilation took 0.01s
+
+Summary
+  PASS  host: full checking
+  PASS  host: seqlock logic (race detector off)
+  PASS  host: 16 scheduler seeds
+  PASS  i686-unknown-linux-gnu
+  PASS  armv7-unknown-linux-gnueabihf
+  PASS  s390x-unknown-linux-gnu
+
+All Miri passes clean.
+
+########## loom ##########
+==> loom (max_preemptions=2)
+   Compiling generator v0.8.9
+   Compiling loom v0.7.2
+   Compiling ph-eventing v0.3.0 (/work)
+warning: variable does not need to be mutable
+   --> src/loom_tests.rs:215:17
+    |
+215 |             let mut take_spinning = |expected: u32| loop {
+    |                 ----^^^^^^^^^^^^^
+    |                 |
+    |                 help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ph-eventing` (lib test) generated 1 warning (run `cargo fix --lib -p ph-eventing --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.72s
+     Running unittests src/lib.rs (target/debug/deps/ph_eventing-8ebf478bfdbabaa8)
+
+running 16 tests
+test loom_tests::event_flags_raise_racing_take_is_partitioned_exactly ... ok
+test loom_tests::latest_buf_empty_fast_path_preserves_concurrent_publication ... ok
+test loom_tests::event_flags_distinct_raises_partition_across_takes ... ok
+test loom_tests::event_flags_observed_raise_publishes_payload ... ok
+test loom_tests::counted_signal_saturation_boundary_is_linearizable ... ok
+test loom_tests::event_buf_pop_never_sees_unpublished_data ... ok
+test loom_tests::latest_buf_producer_reacquisition_continues_across_threads ... ok
+test loom_tests::seq_ring_latest_is_never_ahead_of_published ... ok
+test loom_tests::event_buf_len_never_exceeds_capacity ... ok
+test loom_tests::counted_signal_take_partitions_increments ... ok
+test loom_tests::counted_signal_post_take_increment_observes_reset_epoch ... ok
+test loom_tests::latest_buf_returns_only_complete_publications ... ok
+test loom_tests::latest_buf_reused_slot_keeps_exclusive_ownership ... ok
+test loom_tests::seq_ring_consumer_never_outruns_the_producer ... ok
+test loom_tests::event_buf_spsc_is_lossless_and_ordered ... ok
+test loom_tests::latest_buf_consumer_reacquisition_continues_across_threads ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.39s
+
+
+All 16 Loom models that matched were verified.
+
+########## cycles ##########
+==> QEMU emulator version 10.0.11 (Debian 1:10.0.11+ds-0+deb13u1)
+==> building probe
+==> tracing under qemu
+
+
+EventBuf  (backpressure SPSC)
+  eb push empty                 25
+  eb push nearly full           25
+  eb push full rejected         19
+  eb peek                       13
+  eb len                        14
+  eb pop full                   20
+  eb pop empty                  13
+
+SeqRing   (overwrite SPSC)
+  sr push empty                 34
+  sr poll value                 92
+  sr poll empty                 24
+  sr push overwriting           33
+  sr latest                     30
+  sr poll lagged               115
+  sr poll lagged far           115
+
+RingBuf   (single owner)
+  rb push empty                 20
+  rb push overwriting           20
+  rb get                        22
+  rb latest                     16
+
+CountedSignal (payload-free SPSC)
+  cs increment                   8
+  cs take count                  9
+  cs increment saturated         9
+
+EventFlags (coalesced SPSC conditions)
+  ef raise clear                12
+  ef raise already set          12
+  ef take nonempty              10
+  ef take empty                 10
+
+Instructions retired on the guest, marker overhead subtracted.
+Deterministic per environment: -icount shift=0 pins one instruction to
+one tick, so the same ELF under the same QEMU build yields the same
+counts on any host. Different QEMU builds can shift region boundaries
+by an instruction -- compare inside the reference image (verify.sh).
+
+########## atomic-window ##########
+==> rustc 1.92.0
+==> building thumbv6m probe (ESP rows opt-in: ESP=1)
+    Finished `release` profile [optimized] target(s) in 0.27s
+
+TARGET                raise     take  implementation
+------------------    -----     ----  --------------
+thumbv6m                  4        4  PRIMASK critical section
+esp32-s2                  -        -  opt-in: ESP=1 (needs esp-rs)
+esp32-s3                  -        -  opt-in: ESP=1 (needs esp-rs)
+
+Counts are instructions after interrupt disable through restore/sync.
+thumbv6m is always gated; ESP rows require ESP=1 and the esp-rs toolchain.
+Portable paths are straight-line and contain exactly one read,
+one update/store sequence, and no branch or compare-exchange loop.
+
+Full matrix passed in the reference environment.
+Note: EventFlags ESP32-S2/S3 interrupt windows are opt-in
+(ESP=1 ./scripts/event-flags-atomic-window.sh); they are not
+part of this Docker matrix (no esp-rs in the image).
