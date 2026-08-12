@@ -8,11 +8,13 @@
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+//! | [`CountedSignal`] | Saturating SPSC count for identical, payload-free events. |
 //! | [`EventFlags`] | Coalesced SPSC condition set — one bit per condition, one atomic operation per hot path. |
 //! | [`LatestBuf`] | Freshness-first SPSC snapshot — retains one newest unread value. |
 //!
 //! All are fixed-size and zero-allocation. The buffer types are generic
-//! over `T: Copy`; [`EventFlags`] provides exactly 32 payload-free conditions.
+//! over `T: Copy`; [`CountedSignal`] carries no payload and [`EventFlags`]
+//! provides exactly 32 payload-free conditions.
 //!
 //! # Common traits
 //!
@@ -213,6 +215,7 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 mod macros;
 
 pub mod block;
+pub mod counted_signal;
 pub mod event_buf;
 pub mod event_flags;
 pub mod latest_buf;
@@ -222,6 +225,7 @@ pub(crate) mod sync;
 pub mod traits;
 
 pub use block::{Block, BlockBuilder, FillError};
+pub use counted_signal::{CountSnapshot, CountedSignal};
 pub use event_buf::EventBuf;
 pub use event_flags::{EventFlags, EventMask};
 pub use latest_buf::{LatestBuf, LatestItem, PublishReport};

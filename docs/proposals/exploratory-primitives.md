@@ -122,8 +122,9 @@ destructively taken, unordered condition set rather than an event item.
 
 ## 5. CountedSignal: multiplicity without payloads
 
-**Design document: [`counted-signal.md`](counted-signal.md)** (the
-substantive design text has moved there; this entry is the summary).
+**Design document: [`counted-signal.md`](counted-signal.md); semantic contract:
+[`counted-signal-contract.md`](counted-signal-contract.md).** The substantive
+design text has moved there; this entry is the summary.
 
 For events whose duplicates matter but whose individual payloads do not —
 encoder pulses, timer expirations, drop counts. A saturating atomic

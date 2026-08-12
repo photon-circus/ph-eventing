@@ -228,6 +228,7 @@ report="$(awk '
                     if (group == "eb") printf "\nEventBuf  (backpressure SPSC)\n"
                     else if (group == "sr") printf "\nSeqRing   (overwrite SPSC)\n"
                     else if (group == "rb") printf "\nRingBuf   (single owner)\n"
+                    else if (group == "cs") printf "\nCountedSignal (payload-free SPSC)\n"
                     else if (group == "ef") printf "\nEventFlags (coalesced SPSC conditions)\n"
                     else if (group == "bp") {
                         printf "\nBlock completion + EventBuf publication\n"

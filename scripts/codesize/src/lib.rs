@@ -8,6 +8,7 @@
 #[cfg(feature = "latest-block-matrix")]
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
+use ph_eventing::counted_signal::{Consumer as CountConsumer, Producer as CountProducer};
 use ph_eventing::event_flags::{Consumer as FlagsConsumer, Producer as FlagsProducer};
 #[cfg(feature = "block-matrix")]
 use ph_eventing::{Block, BlockBuilder, event_buf::Producer};
@@ -101,6 +102,18 @@ pub unsafe extern "C" fn event_flags_raise(producer: *const FlagsProducer<'stati
 pub unsafe extern "C" fn event_flags_take(consumer: *const FlagsConsumer<'static>) -> u32 {
     // SAFETY: required by this function's contract.
     unsafe { &*consumer }.take_all().bits()
+}
+
+/// ISR-side CountedSignal operation, isolated from bring-up and take costs.
+#[unsafe(no_mangle)]
+pub fn counted_increment(producer: &CountProducer<'_>) {
+    producer.increment();
+}
+
+/// Consumer-side CountedSignal take, isolated from bring-up costs.
+#[unsafe(no_mangle)]
+pub fn counted_take(consumer: &CountConsumer<'_>) -> u32 {
+    consumer.take_count().count()
 }
 
 /// Bring-up via a single `try_split`. Only present on branches that have it.
