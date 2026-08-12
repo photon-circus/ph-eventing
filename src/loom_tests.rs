@@ -15,10 +15,101 @@
 //!
 //! [Loom]: https://github.com/tokio-rs/loom
 
-use crate::{EventBuf, LatestBuf, SeqRing};
+use crate::{CountedSignal, EventBuf, EventFlags, EventMask, LatestBuf, SeqRing};
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use loom::thread;
+
+/// Concurrent takes partition increments between snapshots without losing or
+/// duplicating them (CountedSignal contract T1-T3 and A1).
+#[test]
+fn counted_signal_take_partitions_increments() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::new());
+
+        let producer_signal = Arc::clone(&signal);
+        let producer = thread::spawn(move || {
+            let producer = producer_signal.try_producer().unwrap();
+            producer.increment();
+            producer.increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer = thread::spawn(move || {
+            let consumer = consumer_signal.try_consumer().unwrap();
+            u64::from(consumer.take_count().count()) + u64::from(consumer.take_count().count())
+        });
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(early + u64::from(final_count), 2);
+    });
+}
+
+/// At the saturation boundary, a take between the producer's observe and
+/// commit moves the increment into the new epoch; it cannot make the RMW wrap
+/// or lose the increment (contract I2-I3, T2-T3, and A2-A3).
+#[test]
+fn counted_signal_saturation_boundary_is_linearizable() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::with_count_for_model(u32::MAX - 1));
+
+        let producer_signal = Arc::clone(&signal);
+        let producer = thread::spawn(move || {
+            producer_signal.try_producer().unwrap().increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer =
+            thread::spawn(move || consumer_signal.try_consumer().unwrap().take_count().count());
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(
+            u64::from(early) + u64::from(final_count),
+            u64::from(u32::MAX)
+        );
+    });
+}
+
+/// Seeded at `MAX`, a take that has already returned must not let a later
+/// `increment` disappear: wall-clock order is established only by a Relaxed
+/// gate (no Acquire/Release on the count). A stale MAX short-circuit would
+/// lose the occurrence from both intervals (contract T3 and A1).
+#[test]
+fn counted_signal_post_take_increment_observes_reset_epoch() {
+    loom::model(|| {
+        let signal = Arc::new(CountedSignal::with_count_for_model(u32::MAX));
+        let gate = Arc::new(AtomicU32::new(0));
+
+        let producer_signal = Arc::clone(&signal);
+        let producer_gate = Arc::clone(&gate);
+        let producer = thread::spawn(move || {
+            let producer = producer_signal.try_producer().unwrap();
+            while producer_gate.load(Ordering::Relaxed) == 0 {
+                thread::yield_now();
+            }
+            producer.increment();
+        });
+
+        let consumer_signal = Arc::clone(&signal);
+        let consumer_gate = Arc::clone(&gate);
+        let consumer = thread::spawn(move || {
+            let consumer = consumer_signal.try_consumer().unwrap();
+            let early = consumer.take_count().count();
+            consumer_gate.store(1, Ordering::Relaxed);
+            early
+        });
+
+        producer.join().unwrap();
+        let early = consumer.join().unwrap();
+        let final_count = signal.try_consumer().unwrap().take_count().count();
+        assert_eq!(early, u32::MAX);
+        assert_eq!(final_count, 1);
+    });
+}
 
 /// The three-slot exchange transfers complete payload ownership in both
 /// directions. Loom's tracked cells make either a missing Release (offered
@@ -477,6 +568,125 @@ fn seq_ring_latest_is_never_ahead_of_published() {
                 let expected = if seq == 1 { 10 } else { 20 };
                 assert_eq!(val, expected, "latest returned a stale payload");
             }
+        });
+
+        producer.join().unwrap();
+        consumer.join().unwrap();
+    });
+}
+
+/// One raise racing one take is returned in exactly one take window: never
+/// lost, duplicated, or fabricated (EventFlags contract C1-C3).
+#[test]
+fn event_flags_raise_racing_take_is_partitioned_exactly() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let condition = EventMask::from_bits(1 << 3);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer = thread::spawn(move || {
+            producer_flags
+                .try_producer()
+                .expect("sole producer")
+                .raise(condition);
+        });
+
+        let consumer_flags = Arc::clone(&flags);
+        let first_take = thread::spawn(move || {
+            consumer_flags
+                .try_consumer()
+                .expect("sole consumer")
+                .take_all()
+        });
+
+        producer.join().unwrap();
+        let first = first_take.join().unwrap();
+        let second = flags
+            .try_consumer()
+            .expect("consumer role released")
+            .take_all();
+
+        assert_eq!(
+            first | second,
+            condition,
+            "the raise was lost or fabricated"
+        );
+        assert!(
+            (first & second).is_empty(),
+            "one raise appeared in two take windows"
+        );
+    });
+}
+
+/// Distinct raises are distributed exactly across a racing take and the final
+/// pending set (EventFlags contract R1, T1, and C1-C3).
+#[test]
+fn event_flags_distinct_raises_partition_across_takes() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let first_condition = EventMask::from_bits(1 << 0);
+        let second_condition = EventMask::from_bits(1 << 31);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer = thread::spawn(move || {
+            let producer = producer_flags.try_producer().expect("sole producer");
+            producer.raise(first_condition);
+            producer.raise(second_condition);
+        });
+
+        let consumer_flags = Arc::clone(&flags);
+        let first_take = thread::spawn(move || {
+            consumer_flags
+                .try_consumer()
+                .expect("sole consumer")
+                .take_all()
+        });
+
+        producer.join().unwrap();
+        let first = first_take.join().unwrap();
+        let second = flags
+            .try_consumer()
+            .expect("consumer role released")
+            .take_all();
+        let expected = first_condition | second_condition;
+
+        assert_eq!(first | second, expected, "a distinct raise was lost");
+        assert!(
+            (first & second).is_empty(),
+            "a condition was returned twice without being re-raised"
+        );
+        assert_eq!((first | second).bits() & !expected.bits(), 0);
+    });
+}
+
+/// Observing a condition also observes memory written before its raise
+/// (EventFlags contract S1). Changing either the Release `fetch_or` or Acquire
+/// `swap` to Relaxed makes Loom find the stale-payload execution.
+#[test]
+fn event_flags_observed_raise_publishes_payload() {
+    loom::model(|| {
+        let flags = Arc::new(EventFlags::new());
+        let payload = Arc::new(AtomicU32::new(0));
+        let ready = EventMask::from_bits(1);
+
+        let producer_flags = Arc::clone(&flags);
+        let producer_payload = Arc::clone(&payload);
+        let producer = thread::spawn(move || {
+            let producer = producer_flags.try_producer().expect("sole producer");
+            producer_payload.store(0xA5A5_5A5A, Ordering::Relaxed);
+            producer.raise(ready);
+        });
+
+        let consumer = thread::spawn(move || {
+            let consumer = flags.try_consumer().expect("sole consumer");
+            while !consumer.take_all().contains(ready) {
+                thread::yield_now();
+            }
+            assert_eq!(
+                payload.load(Ordering::Relaxed),
+                0xA5A5_5A5A,
+                "the observed raise did not publish its payload"
+            );
         });
 
         producer.join().unwrap();

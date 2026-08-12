@@ -11,7 +11,38 @@ All notable changes to this project will be documented in this file.
   race-free backpressure arm, now also the queued transport of the D3 block composition.
   `RingBuf` (doc-touched only this cycle) receives its record at its next material touch.
 
+### Fixed
+- `CountedSignal::increment`: replace the load-and-skip-on-`MAX` short-circuit
+  with a no-op RMW (`fetch_or(0)`) re-read that treats observed `MAX` as
+  maybe-stale — an RMW observes the latest value in modification order, so a
+  `MAX` re-read confirms saturation and anything else proceeds into the
+  post-take epoch, with no compare-exchange and no LR/SC retry loop on
+  RISC-V. A completed `take_count` followed by a later `increment` can no
+  longer lose the occurrence under Relaxed observation (contract T3/A1). Loom
+  litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
+### Documentation
+- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 after the sentinel-RMW fix), and the H closure record.
+- CountedSignal saturated sentinel arm is now its own measured QEMU region
+  (`cs increment saturated`, 9 retired instructions on Cortex-M3), seeded via a
+  hidden `_cycles-probe` feature and a `#[doc(hidden)]` constructor — the arm is
+  unreachable through the public API in bounded time, and was previously a
+  source-review claim only. Hot-path rows are byte-identical with the region
+  isolated in its own frame.
+- CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-RMW
+  fix (`./scripts/verify.sh cycles`, QEMU 10.0.11); pending-remeasure markers cleared.
+- CountedSignal contract B1: fixed instruction sequence with a no-op RMW
+  sentinel re-read — no compare-exchange, no retry; proposal §3.1
+  linearization claim corrected; README Sink/Source claim qualified to
+  payload-buffer handles.
 ### Added
+- `CountedSignal`: a payload-free SPSC counter with a bounded
+  `increment`, atomic `take_count`, exact `u32` saturation, and observable
+  saturation. Loom models pin take partitioning, the saturation-boundary
+  interleaving, and the post-take stale-`MAX` litmus; its frozen contract maps
+  citable clauses to unit, threaded, Loom, Miri, code-size, and QEMU evidence.
+  Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
+  handle. Cortex-M3 instruction counts remain 8 / 7 after the sentinel-RMW
+  path (`./scripts/verify.sh cycles`).
 - Evaluable `LatestBuf<T>` prototype: a three-slot, freshness-first SPSC
   snapshot channel with bounded single-swap publication and at-most-one-swap
   take operations,
@@ -44,6 +75,31 @@ All notable changes to this project will be documented in this file.
   shipped orderings.
 
 ### Documentation
+- EventFlags engineering record (`docs/records/event-flags.md`) — Track 1 acceptance package: value statement, integrator risks (coalescing, sole-role H, no peek/traits, measured portable-atomic windows), claims×evidence, and the closed decision set (H/D2–D5).
+### Added
+- `EventFlags` — a coalescing SPSC condition set for ISR-to-task notification. Exactly 32
+  payload-free conditions are represented by a transparent `EventMask(u32)`; the producer raises
+  with one Release `fetch_or`, and the consumer atomically returns and clears the set with one
+  Acquire `swap(0)`. Duplicate raises may coalesce, but a raise racing a take is never lost between
+  windows. Handles follow the accepted signal-lane doctrine: sole-role `Send + !Sync` values with
+  `&self` hot-path operations and fallible, non-panicking acquisition.
+- EventFlags admission evidence: three Loom models (including a publication litmus whose Release
+  and Acquire mutation checks both fail as intended), detector-on Miri coverage, eight gated and
+  three opt-in Xtensa code-size rows, four Cortex-M3 instruction regions, and a reproducible
+  portable-atomic disassembly check. The thumbv6m masked window (4 instructions) is gated by
+  `./scripts/verify.sh atomic-window`; ESP32-S2 (5) and ESP32-S3 (0 under native `s32c1i`) stay
+  opt-in via `ESP=1` because the reference Docker image does not ship esp-rs.
+
+### Fixed
+- `scripts/loom.sh <filter>` now scopes a bare name filter to `loom_tests::<filter>` instead of
+  passing a second positional test filter to Cargo. Leading Cargo/test flags (arguments that
+  start with `-`) pass through unchanged, so forms like `./scripts/loom.sh -- --nocapture` are
+  not rewritten into a no-op `loom_tests::--` filter.
+- `EventFlags` object-size claim corrected from 12 B to the measured 8 B (`size_of` unit assert);
+  AGENTS.md role-claim wording aligned with the AcqRel `swap` implementation.
+- ESP32-S3 opt-in atomic-window gate now requires native `s32c1i` inside
+  `event_flags_raise` and `event_flags_take` specifically; a whole-object count
+  could pass on `bringup_two_calls` / `event_flags_acquire_roles` alone.
 - BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows. Its status header initially recorded promotion as waiting on decision P; P has since closed as Copy composition and the record reads DECISION-COMPLETE.
 ### Added
 - `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample

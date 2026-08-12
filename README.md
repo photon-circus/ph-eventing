@@ -7,7 +7,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.92.0-blue)](rust-toolchain.toml)
 [![no_std](https://img.shields.io/badge/no__std-yes-green)](src/lib.rs)
 
-Stack-allocated ring buffers for no-std embedded targets.
+Deterministic zero-allocation handoff primitives for no-std embedded targets.
 
 ## What's in the box
 
@@ -17,9 +17,13 @@ Stack-allocated ring buffers for no-std embedded targets.
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+| [`CountedSignal`](#countedsignal) | Saturating SPSC count for identical, payload-free events. |
+| [`EventFlags`](#eventflags) | Coalesced SPSC condition set — 32 payload-free conditions, one atomic hot-path operation. |
 | [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
-All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All types are fixed-size, `#![no_std]`, and zero-allocation. The buffers are
+generic over `T: Copy`; `CountedSignal` carries no payload and `EventFlags`
+carries an `EventMask(u32)`.
 
 ## What this optimises for
 
@@ -27,9 +31,11 @@ All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 **behaviour you can predict and cost you can measure**:
 
 - **Predictability first.** No unbounded loops, no hidden allocation, and no
-  panic reachable from a hot path. For the two SPSC types, no data loss that
-  cannot be observed either — every drop is reported (`SeqRing`, exact while the consumer's resume
-  cursor stays within one sequence span of the newest entry; see its section) or prevented (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
+  panic reachable from a hot path. For the concurrent types, no data loss that
+  cannot be observed either — every drop is reported (`SeqRing`, exact while
+  the consumer's resume cursor stays within one sequence span of the newest
+  entry; see its section) or prevented (`EventBuf`), or explicitly coalesced
+  by contract (`EventFlags`). `RingBuf` is the deliberate exception: it is a single-owner
   window that overwrites silently, with no drop counter and no backpressure.
   Reach for it when losing the oldest entry is the point, not when delivery
   matters.
@@ -51,6 +57,7 @@ panics, or hides a cost.
 ## Features
 - Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
 - Complete contiguous sample blocks with an explicit fill-side builder.
+- `EventFlags` for coalesced ISR-to-task condition notification.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
 - No heap, no dynamic dispatch, no required dependencies.
@@ -60,7 +67,7 @@ panics, or hides a cost.
 ## Compatibility
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` and `EventBuf::new()` assert `N > 0`.
-- `SeqRing` and `EventBuf` require 32-bit atomics by default.
+- `SeqRing`, `EventBuf`, and `EventFlags` require 32-bit atomics by default.
 - `LatestBuf` also requires 32-bit atomics and stores exactly three payload slots.
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
@@ -209,15 +216,69 @@ assert_eq!(consumer.pop(), Some(1));
 assert!(producer.push(3).is_ok());     // space freed
 ```
 
+### CountedSignal
+
+A saturating count for repeated events whose payload and ordering do not
+matter. The sole producer is load-bearing: it permits exact saturation with a
+fixed source-level sequence that treats observed `u32::MAX` as maybe-stale and
+confirms it through a no-op RMW re-read — an RMW observes the latest value in
+modification order, so there is no compare-exchange and no algorithmic retry;
+the contract discloses how each single RMW is realised per ISA.
+
+```rust
+use ph_eventing::CountedSignal;
+
+let signal = CountedSignal::new();
+let producer = signal.try_producer().expect("no producer taken yet");
+let consumer = signal.try_consumer().expect("no consumer taken yet");
+
+producer.increment();
+producer.increment();
+let snapshot = consumer.take_count();
+assert_eq!(snapshot.count(), 2);
+assert!(!snapshot.is_saturated());
+```
+
+### EventFlags
+
+A coalesced condition set for ISR-to-task notification. Repeated raises of one
+condition may merge; a take returns and clears every condition that occurred at
+least once since the preceding take.
+
+```rust
+use ph_eventing::{EventFlags, EventMask};
+
+const DATA_READY: EventMask = EventMask::from_bits(1 << 0);
+const OVERFLOW: EventMask = EventMask::from_bits(1 << 1);
+
+let flags = EventFlags::new();
+let producer = flags.try_producer().expect("no producer taken yet");
+let consumer = flags.try_consumer().expect("no consumer taken yet");
+
+producer.raise(DATA_READY);
+producer.raise(DATA_READY); // coalesces
+producer.raise(OVERFLOW);
+
+assert_eq!(consumer.take_all(), DATA_READY | OVERFLOW);
+assert!(consumer.take_all().is_empty());
+```
+
+`EventFlags` deliberately does not implement the stream traits below: a
+coalesced condition set is not a sequence of items, and destructive take plus
+a rejecting downstream sink could silently lose the mask.
+
 ### Common Traits
 
 The ring-buffer producers implement `Sink<T>` and their consumers
 implement `Source<T>`, so generic code works with any combination of the
-listed handles. `LatestBuf` deliberately stands outside that pair: its
-consumer implements `LatestSource<T>` (and its producer `LatestSink<T>`),
-because `try_pop` cannot report the displacement that is this channel's
-designed overload behaviour — a generic `Source` bound will not compile
-against it, by decision D2:
+listed handles. Signal types such as `CountedSignal` are outside that
+stream vocabulary (no `T` payload), and `EventFlags` is condition
+signalling, not a payload stream — its handles deliberately implement
+neither (see its section above). `LatestBuf` deliberately stands
+outside it as well: its consumer implements `LatestSource<T>` (and its
+producer `LatestSink<T>`), because `try_pop` cannot report the
+displacement that is this channel's designed overload behaviour — a
+generic `Source` bound will not compile against it, by decision D2:
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
@@ -301,15 +362,39 @@ them is a runtime step and always will be.
 - `drain(max, hook)` consumes up to `max` items through a callback and returns the count.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
 
+### CountedSignal
+- Counts below `u32::MAX` are exact; the counter saturates rather than wrapping.
+- `take_count` atomically clears the counter and reports whether it saturated.
+- A concurrent increment belongs wholly to the current take or the next one.
+- The sole `Send + !Sync` producer handle is part of the correctness contract.
+- Count operations do not publish unrelated application memory; payload data
+  needs a separate synchronization mechanism.
+- The reference Cortex-M3 probe measures `increment` at 8 retired
+  instructions on the below-`MAX` hot path and 9 on the saturated sentinel
+  arm, and `take_count` at 7 (rustc 1.92.0, QEMU 10.0.11). The third arm — a
+  stale `MAX` re-read below `MAX` after a take — is the saturated arm plus
+  one `fetch_add` by construction; all rows are uncontended single-pass
+  counts (the contract discloses the per-ISA RMW realisation).
+
+### EventFlags
+- `raise(mask)` unions conditions into the pending set; duplicate bits may coalesce.
+- `take_all()` atomically returns and clears every pending condition.
+- Conditions are unordered and carry no payload or multiplicity.
+- `EventMask` is exactly 32 bits; `from_index` rejects out-of-range indices without panicking.
+- A take that observes a raise also observes memory writes sequenced before it.
+- There is no non-clearing peek and no stream/signal trait implementation in the initial surface.
+
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
-- `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
-  active. Handle acquisition is `try_producer()`/`try_consumer()`, which return `None` rather
-  than panicking — on a microcontroller a panic is a reset, and the panic machinery costs flash
-  you may not have. (The panicking `producer()`/`consumer()`, deprecated since 0.2.0, were
-  **removed in 0.3.0**.) Using unsafe to bypass the SPSC constraint (or sharing handles
-  concurrently) is undefined behavior.
-- `T: Copy` is required by all types to avoid allocation and return values by copy.
+- `SeqRing`, `EventBuf`, `EventFlags`, and `CountedSignal` are SPSC by design: exactly one producer and one consumer may be
+  active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
+  on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
+  The panicking `producer()`/`consumer()`, deprecated since 0.2.0, **were removed in
+  0.3.0**. Using unsafe to bypass `SeqRing`/`EventBuf` ownership can be undefined
+  behavior. Forging or concurrently sharing a `CountedSignal` producer breaks
+  its bounded no-wrap contract; the handle is `!Sync` to prevent that in safe Rust.
+- `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
+- `EventFlags` has no unsafe slot access and passes Miri with the race detector enabled.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.
 - `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
@@ -332,8 +417,9 @@ them is a runtime step and always will be.
 The typical embedded shape is a producer in an interrupt handler and a consumer
 in a task loop. That works, with three things to know:
 
-- **The buffer is shared; the handles are owned.** `SeqRing<T, N>` and
-  `EventBuf<T, N>` are `Sync` when `T: Send`, so `&buf` can be handed to both
+- **The primitive is shared; the handles are owned.** `SeqRing<T, N>` and
+  `EventBuf<T, N>` are `Sync` when `T: Send`, and `EventFlags` and
+  `CountedSignal` are `Sync`, so the primitive can be handed to both
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
   There is no way to get a second `Producer` while one is live:
@@ -376,7 +462,7 @@ in a task loop. That works, with three things to know:
 
 ## Quality and verification
 
-`SeqRing` and `EventBuf` are lock-free, so a green test run on x86 is weak
+The concurrent primitives are atomic, so a green test run on x86 is weak
 evidence — a strongly-ordered host cannot exhibit the ordering bugs that appear
 on ARM and RISC-V. What backs this crate, in descending order of strength:
 
@@ -384,7 +470,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 85 unit + 13 doctests + 7 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2) |
+| 101 unit + 13 doctests + 11 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2); CountedSignal and EventFlags handle `!Sync` pinned |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |
