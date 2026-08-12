@@ -71,10 +71,13 @@
 //! let mut consumer = ring.try_consumer().expect("consumer");
 //!
 //! producer.push(42);
-//! consumer.poll_one(|seq, v| {
+//! // Assert the delivery flag, not just the hook body: an empty ring would
+//! // skip the hook and the assertions inside it would pass vacuously.
+//! let delivered = consumer.poll_one(|seq, v| {
 //!     assert_eq!(seq, 1);
 //!     assert_eq!(*v, 42);
 //! });
+//! assert!(delivered);
 //! ```
 //!
 //! # Quick start — `EventBuf`

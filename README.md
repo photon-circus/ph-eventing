@@ -110,15 +110,17 @@ use ph_eventing::{BlockBuilder, EventBuf};
 
 let mut fill = BlockBuilder::<i16, 4>::new();
 for (sequence, sample) in [(10, 1), (11, 2), (12, 3)] {
-    assert!(fill.push(sequence, sample).unwrap().is_none());
+    assert!(fill.push(sequence, sample).expect("contiguous").is_none());
 }
-let block = fill.push(13, 4).unwrap().unwrap();
+let block = fill.push(13, 4).expect("contiguous").expect("complete");
 
 let queue = EventBuf::<_, 2>::new();
-let producer = queue.try_producer().unwrap();
-let consumer = queue.try_consumer().unwrap();
-producer.push(block).unwrap();
-assert_eq!(consumer.pop().unwrap().samples(), &[1, 2, 3, 4]);
+let producer = queue.try_producer().expect("no producer taken yet");
+let consumer = queue.try_consumer().expect("no consumer taken yet");
+// Backpressure is returned, never unwrapped: a full queue hands the
+// complete block back through `Err` for the caller's policy.
+assert!(producer.push(block).is_ok());
+assert_eq!(consumer.pop().expect("one block queued").samples(), &[1, 2, 3, 4]);
 ```
 
 ### RingBuf
