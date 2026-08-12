@@ -94,7 +94,7 @@ IDs in parentheses; the clauses are the normative statements.
 | No silent `Source`/`Sink` or peek surface (D4, D5, X5) | Absent from the public API; contract non-promises X5; stream/signal traits deferred on the record | Pinned |
 | Cost claims per target | Eight gated code-size rows + three opt-in Xtensa (raise/take 24/24 B thumbv6m, 23/22 B ESP32-S2, 37/36 B ESP32-S3); object is 8 B (`size_of` unit assert); `EventBuf` static remains in `.bss` (codesize `bss` row) | Measured |
 
-Full CI for the lane (`./scripts/verify.sh`, zero skips): 77 unit tests,
+Full CI at lane acceptance (per-lane tree; the assembled 0.3.0 release matrix supersedes these totals) (`./scripts/verify.sh`, zero skips): 77 unit tests,
 11 doctests, 5 compile-fail contracts, 93.60% line coverage, all 8 Loom
 models plus ordering-mutation checks, detector-on Miri host and
 i686/armv7/s390x proxies, feature/embedded builds, supply-chain checks,

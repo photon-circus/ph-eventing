@@ -7,8 +7,10 @@
 - **Normative sources:** [contract](../proposals/counted-signal-contract.md)
   (clause IDs cited below) · [proposal](../proposals/counted-signal.md) ·
   measurements inline in proposal §3.1 (eight-target code size; pinned
-  Cortex-M3 cycles via `./scripts/verify.sh cycles`, confirmed 8 / 7
-  post-fix; saturated sentinel arm measured at 9).
+  Cortex-M3 cycles via `./scripts/verify.sh cycles`: 8 hot path, 9
+  saturated sentinel arm, 9 take on the assembled 0.3.0 tree — the
+  merged probe binary carries the take two instructions higher than the
+  per-lane tree's 7; the increment arms are unchanged).
 
 ## 1. Value statement
 
@@ -78,18 +80,18 @@ IDs in parentheses; the clauses are the normative statements.
 | Saturates at `u32::MAX`, never wraps; sticky until take (I2–I3, T2, A2–A3) | `saturates_instead_of_wrapping`; Loom `counted_signal_saturation_boundary_is_linearizable` | Proven |
 | Concurrent increment belongs to exactly one take interval (T1–T3, A1) | Loom `counted_signal_take_partitions_increments`; threaded take stress | Proven |
 | Post-take increment after saturated take is not dropped by a stale MAX observe (T3, A1) | Loom `counted_signal_post_take_increment_observes_reset_epoch` (Relaxed gate only) | Proven |
-| Bounded source-level hot paths, no algorithmic retry: load + `fetch_add`; sentinel no-op RMW re-read + ≤1 follow-up `fetch_add`; `swap(0)` take — per-ISA realisation per B1 (LDREX/STREX pairs on exclusive-monitor Arm may repeat under contention, so this is not a wait-free or consumer-independent-latency claim) (B1–B2) | Source review; riscv32imac disassembly shows lw/amoor.w/amoadd.w with **no lr.w/sc.w**; eight-target code size re-blessed post-RMW; Cortex-M3 cycles 8 (hot) / 9 (saturated arm, probe-seeded region) / 7 (take); the stale-MAX third arm is the saturated arm + one `fetch_add` by construction | Measured |
+| Bounded source-level hot paths, no algorithmic retry: load + `fetch_add`; sentinel no-op RMW re-read + ≤1 follow-up `fetch_add`; `swap(0)` take — per-ISA realisation per B1 (LDREX/STREX pairs on exclusive-monitor Arm may repeat under contention, so this is not a wait-free or consumer-independent-latency claim) (B1–B2) | Source review; riscv32imac disassembly shows lw/amoor.w/amoadd.w with **no lr.w/sc.w**; eight-target code size re-blessed post-RMW; Cortex-M3 cycles 8 (hot) / 9 (saturated arm, probe-seeded region) / 9 (take, assembled 0.3.0 tree; 7 on the per-lane tree — merged-binary codegen, not an algorithm change); the stale-MAX third arm is the saturated arm + one `fetch_add` by construction | Measured |
 | No panic reachable from hot paths (B3) | Source review; normal, Miri, Loom, and embedded-target executions | Proven |
 | Sole-role exclusive handles; reacquisition continues state (H1, H3) | `handles_are_exclusive_and_reusable_after_drop` | Proven |
 | Handles are `Send + !Sync` (H2) | `handles_are_send`; compile-fail doctests pin `!Sync` on both roles | Pinned |
 | Constructible in static storage (H4) | `const_new_works_in_static_context` | Proven |
 | Cost claims per target | Eight-target gated code-size rows (proposal §3.1), re-blessed after the sentinel-RMW change | Measured |
 
-Full CI for the lane (`0a22ada` admission package; `f26d4c3` H
+Full CI at lane acceptance (per-lane tree; the assembled 0.3.0 release matrix supersedes these totals) (`0a22ada` admission package; `f26d4c3` H
 finalization): complete pinned `./scripts/verify.sh` matrix with zero
 skips — unit tests, 11 doctests, 5 compile-fail, coverage, Miri host
 and proxy targets, Loom models, eight-target code size, embedded
-checks, QEMU cycles. Cycles re-confirmed post-fix at 8 / 7, with the
+checks, QEMU cycles. Cycles on the assembled 0.3.0 tree: 8 / 9, with the
 saturated sentinel arm added as its own probe-seeded region at 9;
 full matrix not re-run for this cycles-doc follow-up.
 
@@ -146,7 +148,7 @@ Contract clause IDs (I/T/A/B/H/X) are load-bearing for tests and models
 
 **Where the numbers live:** proposal §3.1 (eight-target `increment` /
 `take_count` code-size table; pinned Cortex-M3 instruction regions under
-rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — confirmed 8 / 9 / 7
+rustc 1.92.0 `ded5c06cf`, LLVM 21.1.3, QEMU 10.0.11 — 8 / 9 / 9 on the assembled 0.3.0 tree
 after the sentinel-RMW fix); contract §9 evidence map; tracking: issue #30,
 PR #33; completion
 commits `0a22ada` (clause-numbered contract + pinned costs) and

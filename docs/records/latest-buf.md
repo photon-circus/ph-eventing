@@ -92,7 +92,7 @@ IDs in parentheses; the clauses are the normative statements.
 | Handles stay `Send + !Sync` (H2) | `compile_fail` doctests on `Producer` and `Consumer` | Pinned |
 | Cost claims per target | 11-target code-size matrix incl. ESP32-S2/S3; pinned QEMU 10.0.11 cycle regions; 66-region joint block matrix reproduced across two QEMU versions | Measured |
 
-Full CI for the lane: 76 unit tests, 12 doctests, 6 compile-fail, 94.12%
+Full CI at lane acceptance (per-lane tree; the assembled 0.3.0 release matrix supersedes these totals): 76 unit tests, 12 doctests, 6 compile-fail, 94.12%
 line coverage, zero skips.
 
 ## 4. The record

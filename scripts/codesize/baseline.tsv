@@ -14,6 +14,7 @@ armv7a-none-eabi	data	0
 armv7a-none-eabi	event_flags_acquire	116
 armv7a-none-eabi	event_flags_raise	32
 armv7a-none-eabi	event_flags_take	32
+armv7a-none-eabi	seq_bss	524
 armv7a-none-eabi	two_calls	220
 armv7r-none-eabi	bss	268
 armv7r-none-eabi	counted_increment	64
@@ -22,6 +23,7 @@ armv7r-none-eabi	data	0
 armv7r-none-eabi	event_flags_acquire	116
 armv7r-none-eabi	event_flags_raise	32
 armv7r-none-eabi	event_flags_take	32
+armv7r-none-eabi	seq_bss	524
 armv7r-none-eabi	two_calls	220
 riscv32imac-unknown-none-elf	bss	268
 riscv32imac-unknown-none-elf	counted_increment	26
@@ -30,6 +32,7 @@ riscv32imac-unknown-none-elf	data	0
 riscv32imac-unknown-none-elf	event_flags_acquire	66
 riscv32imac-unknown-none-elf	event_flags_raise	8
 riscv32imac-unknown-none-elf	event_flags_take	8
+riscv32imac-unknown-none-elf	seq_bss	524
 riscv32imac-unknown-none-elf	two_calls	152
 thumbv6m-none-eabi	bss	268
 thumbv6m-none-eabi	counted_increment	46
@@ -38,6 +41,7 @@ thumbv6m-none-eabi	data	0
 thumbv6m-none-eabi	event_flags_acquire	68
 thumbv6m-none-eabi	event_flags_raise	24
 thumbv6m-none-eabi	event_flags_take	24
+thumbv6m-none-eabi	seq_bss	524
 thumbv6m-none-eabi	two_calls	156
 thumbv7em-none-eabi	bss	268
 thumbv7em-none-eabi	counted_increment	44
@@ -46,6 +50,7 @@ thumbv7em-none-eabi	data	0
 thumbv7em-none-eabi	event_flags_acquire	72
 thumbv7em-none-eabi	event_flags_raise	26
 thumbv7em-none-eabi	event_flags_take	26
+thumbv7em-none-eabi	seq_bss	524
 thumbv7em-none-eabi	two_calls	172
 thumbv7m-none-eabi	bss	268
 thumbv7m-none-eabi	counted_increment	44
@@ -54,6 +59,7 @@ thumbv7m-none-eabi	data	0
 thumbv7m-none-eabi	event_flags_acquire	72
 thumbv7m-none-eabi	event_flags_raise	26
 thumbv7m-none-eabi	event_flags_take	26
+thumbv7m-none-eabi	seq_bss	524
 thumbv7m-none-eabi	two_calls	172
 thumbv8m.base-none-eabi	bss	268
 thumbv8m.base-none-eabi	counted_increment	44
@@ -62,6 +68,7 @@ thumbv8m.base-none-eabi	data	0
 thumbv8m.base-none-eabi	event_flags_acquire	64
 thumbv8m.base-none-eabi	event_flags_raise	22
 thumbv8m.base-none-eabi	event_flags_take	22
+thumbv8m.base-none-eabi	seq_bss	524
 thumbv8m.base-none-eabi	two_calls	156
 thumbv8m.main-none-eabi	bss	268
 thumbv8m.main-none-eabi	counted_increment	44
@@ -70,4 +77,5 @@ thumbv8m.main-none-eabi	data	0
 thumbv8m.main-none-eabi	event_flags_acquire	64
 thumbv8m.main-none-eabi	event_flags_raise	22
 thumbv8m.main-none-eabi	event_flags_take	22
+thumbv8m.main-none-eabi	seq_bss	524
 thumbv8m.main-none-eabi	two_calls	152

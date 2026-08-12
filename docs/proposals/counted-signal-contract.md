@@ -146,7 +146,7 @@ a separate maintainer decision on issue #26.
 | I2–I3, T2, A2–A3 | `saturates_instead_of_wrapping`; Loom's `counted_signal_saturation_boundary_is_linearizable` model |
 | T1–T3, A1 | Loom's `counted_signal_take_partitions_increments` model; threaded take stress |
 | T3, A1 (post-take / stale MAX) | Loom's `counted_signal_post_take_increment_observes_reset_epoch` model (seeded at `MAX`; Relaxed gate only) |
-| B1–B2 | Source review (fixed sequence under H1 — no compare-exchange, no retry); eight-target gated code-size rows blessed post-fix (26–64 B `increment`); Cortex-M3 cycles measured at 8 (hot path) / 9 (saturated sentinel arm, seeded via the hidden `_cycles-probe` feature) / 7 (take) — `./scripts/verify.sh cycles`, QEMU 10.0.11 |
+| B1–B2 | Source review (fixed sequence under H1 — no compare-exchange, no retry); eight-target gated code-size rows blessed post-fix (26–64 B `increment`); Cortex-M3 cycles measured at 8 (hot path) / 9 (saturated sentinel arm, seeded via the hidden `_cycles-probe` feature) / 9 (take; assembled-0.3.0-tree measurement, 7 on the per-lane tree) — `./scripts/verify.sh cycles`, QEMU 10.0.11 |
 | B3 | Source review plus normal, Miri, Loom, and embedded-target executions of both hot paths |
 | H1, H3 | `handles_are_exclusive_and_reusable_after_drop`, including state continuation after reacquisition |
 | H2 | `handles_are_send`; producer and consumer compile-fail doctests pin `!Sync` |

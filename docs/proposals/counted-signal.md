@@ -171,9 +171,12 @@ no-op `fetch_or(0)` confirm, return):
 |---|---:|
 | `increment` (below `MAX`, the hot path) | 8 |
 | `increment` (saturated sentinel arm) | 9 |
-| `take_count` | 7 |
+| `take_count` | 9 |
 
-The third arm — a stale `MAX` re-read below `MAX` after a completed take —
+Rows re-measured on the assembled 0.3.0 release branch; the merged probe
+binary carries `take_count` two instructions higher than the per-lane tree's
+7 (codegen context, not an algorithm change), while both `increment` arms
+are unchanged. The third arm — a stale `MAX` re-read below `MAX` after a completed take —
 needs a racing consumer a single-hart deterministic trace cannot express; it
 is the saturated arm plus one `fetch_add` by construction and is bounded by
 the gated whole-function code size. All three measured rows are uncontended

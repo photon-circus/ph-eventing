@@ -166,10 +166,10 @@ elif [ "$LATEST_MATRIX" = "1" ]; then
     printf '%-30s %-16s %10s %10s %10s %6s\n' \
         '------------------------------' '----------------' '---------' '------' '---------' '----'
 else
-    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
-        TARGET two_calls cs_incr cs_take flags_acq flags_raise flags_take split bss data
-    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
-        '------------------------------' '---------' '-------' '-------' '---------' '-----------' '----------' '-----' '---' '----'
+    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
+        TARGET two_calls cs_incr cs_take flags_acq flags_raise flags_take split bss seq_bss data
+    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
+        '------------------------------' '---------' '-------' '-------' '---------' '-----------' '----------' '-----' '---' '-------' '----'
 fi
 
 skipped=0
@@ -346,11 +346,12 @@ for entry in $TARGETS; do
     flags_raise="$(fn_size "$ar" event_flags_raise)"
     flags_take="$(fn_size "$ar" event_flags_take)"
     bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.bss\..*3BUF/ { print $2; exit }')"
+    seq_bss="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 == ".bss.SEQ_BUF" { print $2; exit }')"
     dat="$("$SIZE" -A "$ar" 2>/dev/null | awk '$1 ~ /^\.data\./ { s += $2 } END { print s + 0 }')"
 
-    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
+    printf '%-30s %10s %8s %8s %8s %8s %8s %8s %8s %8s %6s\n' \
         "$target" "${two:--}" "${cs_inc:--}" "${cs_take:--}" "${flags_acq:--}" \
-        "${flags_raise:--}" "${flags_take:--}" "${spl:--}" "${bss:--}" "${dat:-0}"
+        "${flags_raise:--}" "${flags_take:--}" "${spl:--}" "${bss:--}" "${seq_bss:--}" "${dat:-0}"
 
     # Xtensa is never gated: it needs a toolchain fork, so making it a hard gate
     # would make that fork mandatory for every contributor.
@@ -362,6 +363,7 @@ for entry in $TARGETS; do
     [ -n "$cs_inc" ] && printf '%s\tcounted_increment\t%s\n' "$target" "$cs_inc" >> "$RESULTS"
     [ -n "$cs_take" ] && printf '%s\tcounted_take\t%s\n' "$target" "$cs_take" >> "$RESULTS"
     [ -n "$bss" ] && printf '%s\tbss\t%s\n' "$target" "$bss" >> "$RESULTS"
+    [ -n "$seq_bss" ] && printf '%s\tseq_bss\t%s\n' "$target" "$seq_bss" >> "$RESULTS"
     printf '%s\tdata\t%s\n' "$target" "${dat:-0}" >> "$RESULTS"
 done
 

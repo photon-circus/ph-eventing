@@ -774,9 +774,9 @@ Run the default probe as well when changing shared measurement infrastructure.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
-| `CountedSignal::increment` (below `MAX` / saturated arm) / `take_count` | 8, 9 / 7 | | |
+| `CountedSignal::increment` (below `MAX` / saturated arm) / `take_count` | 8, 9 / 9 | | |
 | `EventFlags::raise` | 12 (clear) | **12** (already set) | |
-| `EventFlags::take_all` | — | 8 (non-empty) | 8 (empty) |
+| `EventFlags::take_all` | — | 10 (non-empty) | 10 (empty) |
 
 LatestBuf uses a separate payload matrix (`./scripts/verify.sh cycles
 latest-matrix`) so the larger stack shapes do not disturb the standing probe:
@@ -808,7 +808,7 @@ Four results carry the argument:
    that is measured rather than asserted.
 3. **CountedSignal's SPSC hot paths are small and bounded.** `increment`
    retires 8 instructions on the below-`MAX` common path and 9 on the
-   probe-seeded saturated sentinel arm; `take_count` retires 7 — all in the
+   probe-seeded saturated sentinel arm; `take_count` retires 9 — all in the
    reference Cortex-M3 environment, all uncontended single-pass counts (the
    contract discloses the per-ISA RMW realisation and its hardware retry
    bound). The producer region contains no CAS retry loop; the fixed
@@ -816,7 +816,7 @@ Four results carry the argument:
    no-wrap proof. The stale-`MAX` third arm is the saturated arm plus one
    `fetch_add` by construction.
 4. **EventFlags is constant across condition state.** Raise is 12 instructions
-   whether the bit is clear or already set; take is 8 whether non-empty or
+   whether the bit is clear or already set; take is 10 whether non-empty or
    empty. `./scripts/verify.sh atomic-window` (and the default verify matrix)
    additionally pins the thumbv6m straight-line masked window at 4
    instructions. ESP32-S2 (5) and ESP32-S3 (0 under native `S32C1I`) remain

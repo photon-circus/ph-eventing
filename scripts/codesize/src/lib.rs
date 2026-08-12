@@ -12,7 +12,7 @@ use ph_eventing::counted_signal::{Consumer as CountConsumer, Producer as CountPr
 use ph_eventing::event_flags::{Consumer as FlagsConsumer, Producer as FlagsProducer};
 #[cfg(feature = "block-matrix")]
 use ph_eventing::{Block, BlockBuilder, event_buf::Producer};
-use ph_eventing::{EventBuf, EventFlags, EventMask};
+use ph_eventing::{EventBuf, EventFlags, EventMask, SeqRing};
 #[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
 use ph_eventing::{
     LatestBuf, LatestItem, PublishReport,
@@ -39,6 +39,13 @@ static BUF: EventBuf<u32, 64> = EventBuf::new();
 
 /// EventFlags is one AtomicU32 plus two packed AtomicBool role claims (8 B).
 static FLAGS: EventFlags = EventFlags::new();
+
+/// SeqRing's `.bss` placement, measured directly instead of inferred from the
+/// EventBuf static (the 0.3.0 review flagged that inference): its layout adds
+/// `N` per-slot sequence atomics over the payload array. `no_mangle` gives the
+/// section the stable name `.bss.SEQ_BUF` the runner extracts.
+#[unsafe(no_mangle)]
+pub static SEQ_BUF: SeqRing<u32, 64> = SeqRing::new();
 
 #[cfg(feature = "split")]
 static SPLIT_BUF: EventBuf<u32, 64> = EventBuf::new();

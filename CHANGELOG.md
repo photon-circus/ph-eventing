@@ -3,65 +3,113 @@
 All notable changes to this project will be documented in this file.
 
 ## Unreleased
-### Documentation (engineering records)
-- Engineering records for the 0.2.0 types touched by the constructor removal:
-  [`records/seq-ring.md`](docs/records/seq-ring.md) — with the seqlock deviation, the wrap
-  extra-drop limitation, and the 115-instruction constant-recovery claim stated in the
-  briefing layer — and [`records/event-buf.md`](docs/records/event-buf.md) — the fully
-  race-free backpressure arm, now also the queued transport of the D3 block composition.
-  `RingBuf` (doc-touched only this cycle) receives its record at its next material touch.
+
+### Added
+- `LatestBuf<T>` — a three-slot, freshness-first SPSC snapshot channel for
+  state where the newest value beats FIFO delivery. Publication is one bounded
+  slot swap and never rejects; it returns a `PublishReport` whose
+  `replaced_unread` flag is the producer-side loss evidence. Taking is at most
+  one swap behind an Acquire-load empty-poll fast path (measured decision
+  A.1), and returns the newest complete value with its generation and an exact
+  `skipped` count while the consumer's resume generation stays within one
+  non-zero `u32` span of the newest publication — the span boundary and its
+  silent-zero case are contract non-promise X6. Endpoint state is
+  channel-resident, so dropping a handle in one context and reacquiring in
+  another *continues* the generation and accounting sequence rather than
+  restarting it (decision A.3; the role-recovery boundary is non-promise X8).
+  The consumer deliberately does not implement `Source<T>`: `try_pop` cannot
+  report displacement, and displacement is this channel's designed overload
+  behaviour, so `LatestSink`/`LatestSource` are the contract surface (decision
+  D2, non-promise X7) and a compile-fail doctest keeps a convenience impl from
+  arriving silently. Payloads are generic, including complete blocks
+  (`LatestBuf<Block<T, N>>` — decision D3 confirmed composition over a
+  dedicated `LatestBlockBuf`). Evidence: five Loom models (ownership transfer,
+  slot reuse, empty-poll preservation, both cross-context role handoffs, with
+  at-most-once, `skipped`, and `replaced_unread` conservation asserted
+  in-model and mutation-verified), race-detector-**on** Miri as the headline
+  soundness claim, an 11-target code-size matrix, and pinned QEMU instruction
+  regions.
+- `Block<T, N>` and `BlockBuilder<T, N>` — complete, contiguous sample
+  windows without another queue policy. The builder accumulates sequenced
+  samples privately, rejects gaps explicitly (`FillError` returns the sample
+  to the caller without disturbing the partial block), skips reserved
+  sequence zero at wrap, and yields a `Block` only when all `N` samples are
+  present; clearing or dropping a partial builder publishes nothing. Compose
+  with the overload policy you need: `EventBuf<Block<T, N>, Q>` queues and
+  rejects when full, `LatestBuf<Block<T, N>>` retains the newest. Publication
+  copies the complete block (decision P: Copy composition) — the measured
+  per-shape rows are the budget statement (159–8,658 reference instructions
+  across the 2/8/16-byte × N = 8/32/128 grid; rejection within 5–31
+  instructions of acceptance; per-shape RAM disclosed), the small-`N` cost
+  inversion is documented, and the double-copy DMA hazard is stated in the
+  module docs: the builder's storage is deliberately private, so budget both
+  copies or publish from task context. Both `Block` and the fill error are
+  `#[must_use]`.
+- `EventFlags` — a coalescing SPSC condition set for ISR-to-task
+  notification. Exactly 32 payload-free conditions in a transparent
+  `EventMask(u32)`; the producer raises with one Release `fetch_or`, the
+  consumer returns-and-clears with one Acquire `swap(0)`. Duplicate raises
+  may coalesce; a raise racing a take is never lost between windows; a take
+  that observes a raise also observes memory writes sequenced before it.
+  There is deliberately no non-clearing peek (`Debug` is opaque for the same
+  reason) and no stream-trait implementation. Evidence: three Loom models
+  including a publication litmus whose Release and Acquire mutation checks
+  both fail as intended, detector-on Miri, eight gated plus three opt-in
+  Xtensa code-size rows, four QEMU regions with the state pairs enforced as
+  a gate, and interrupt-window gates: the thumbv6m masked window (4
+  instructions) is checked by `./scripts/verify.sh atomic-window`, with
+  ESP32-S2 (5) and ESP32-S3 (0 under native `s32c1i`) opt-in via `ESP=1`.
+- `CountedSignal` — a saturating, payload-free SPSC counter for events whose
+  multiplicity matters but whose payload and ordering do not. `increment` is
+  a Relaxed load plus one `fetch_add` below `u32::MAX`; an observed `MAX` is
+  maybe-stale and is confirmed through a no-op `fetch_or(0)` re-read — an
+  RMW observes the latest value in modification order — so saturation is
+  exact, the counter never wraps, and no path contains a compare-exchange or
+  algorithmic retry (contract B1 discloses the per-ISA realisation of each
+  single RMW, including the contention-bounded LDREX/STREX pairs on
+  exclusive-monitor Arm). `take_count` is one Relaxed `swap(0)` returning a
+  `CountSnapshot` with an observable saturation flag. Exactness rests on the
+  sole `Send + !Sync` producer handle — the exclusivity is the no-wrap
+  proof, not API style — and `Debug` is opaque (a printed count would be a
+  non-clearing peek). Evidence: three Loom models including the post-take
+  stale-`MAX` litmus, detector-on Miri, gated code-size rows, and measured
+  QEMU regions for all reachable arms (8 below-`MAX`, 9 saturated via a
+  probe-only seeding hook, 9 take, on the assembled 0.3.0 tree).
+- Engineering records (`docs/records/`, one per shipped type): a value
+  statement, integrator-facing risks, technical claims mapped to their
+  validating evidence, then the working record — the enduring briefing layer
+  over the contracts and proposals. Records ship for `LatestBuf`, `Block`/
+  `BlockBuilder`, `EventFlags`, `CountedSignal`, `SeqRing`, and `EventBuf`
+  (`RingBuf`, doc-touched only, receives its record at its next material
+  touch). A candidate lane owes its record as part of its acceptance package.
+- Measurement and verification infrastructure for the above: `latest-matrix`,
+  `latest-block-matrix`, and `block-matrix` modes in `codesize.sh` and
+  `cycles.sh` (each isolated behind its own probe feature); the block-payload
+  code-size baseline (`baseline-block.tsv`) blessed at promotion and gated
+  from `ci.sh`; a probe-seeded region for CountedSignal's saturated arm
+  (hidden `_cycles-probe` feature — the arm is unreachable through the public
+  API in bounded time); a cycles gate that fails when the EventFlags state
+  pairs diverge; and the EventFlags interrupt-window gate wired into
+  `verify.sh`.
+
+### Changed
+- `Debug` for the two destructive-take signal types (`EventFlags`,
+  `CountedSignal`) prints the type opaquely: exposing the pending mask or
+  live count through formatting would be the advisory peek both frozen APIs
+  reject, without the take's ordering guarantees.
 
 ### Fixed
-- `CountedSignal::increment`: replace the load-and-skip-on-`MAX` short-circuit
-  with a no-op RMW (`fetch_or(0)`) re-read that treats observed `MAX` as
-  maybe-stale — an RMW observes the latest value in modification order, so a
-  `MAX` re-read confirms saturation and anything else proceeds into the
-  post-take epoch, with no compare-exchange and no LR/SC retry loop on
-  RISC-V. A completed `take_count` followed by a later `increment` can no
-  longer lose the occurrence under Relaxed observation (contract T3/A1). Loom
-  litmus: `counted_signal_post_take_increment_observes_reset_epoch`.
-### Documentation
-- CountedSignal engineering record (`docs/records/counted-signal.md`) — Track 1 acceptance package: value statement, integrator risks (saturation, sole-producer exclusivity as load-bearing for no-wrap), claims×evidence including the pinned Cortex-M3 rows (confirmed 8 / 7 after the sentinel-RMW fix), and the H closure record.
-- CountedSignal saturated sentinel arm is now its own measured QEMU region
-  (`cs increment saturated`, 9 retired instructions on Cortex-M3), seeded via a
-  hidden `_cycles-probe` feature and a `#[doc(hidden)]` constructor — the arm is
-  unreachable through the public API in bounded time, and was previously a
-  source-review claim only. Hot-path rows are byte-identical with the region
-  isolated in its own frame.
-- CountedSignal Cortex-M3 cycle rows re-confirmed at 8 / 7 after the sentinel-RMW
-  fix (`./scripts/verify.sh cycles`, QEMU 10.0.11); pending-remeasure markers cleared.
-- CountedSignal contract B1: fixed instruction sequence with a no-op RMW
-  sentinel re-read — no compare-exchange, no retry; proposal §3.1
-  linearization claim corrected; README Sink/Source claim qualified to
-  payload-buffer handles.
-### Added
-- `CountedSignal`: a payload-free SPSC counter with a bounded
-  `increment`, atomic `take_count`, exact `u32` saturation, and observable
-  saturation. Loom models pin take partitioning, the saturation-boundary
-  interleaving, and the post-take stale-`MAX` litmus; its frozen contract maps
-  citable clauses to unit, threaded, Loom, Miri, code-size, and QEMU evidence.
-  Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
-  handle. Cortex-M3 instruction counts remain 8 / 7 after the sentinel-RMW
-  path (`./scripts/verify.sh cycles`).
-- Evaluable `LatestBuf<T>` prototype: a three-slot, freshness-first SPSC
-  snapshot channel with bounded single-swap publication and at-most-one-swap
-  take operations,
-  replacement and skipped-generation evidence, and channel-resident endpoint
-  state so handle reacquisition continues rather than restarting. Deferred
-  assumptions are exact accounting within one non-zero `u32` wrap (approximate
-  beyond it), no `Source<T>` implementation, and generic payloads supporting
-  samples or complete blocks.
-- LatestBuf target/payload measurement mode for all 11 embedded targets plus
-  pinned QEMU instruction regions. The measured A.1 Acquire-load fast path
-  removes the atomic RMW from empty polls for +6-16 bytes of `take_latest`
-  flash, including +8 bytes on ESP32-S2. Private role indices now have an
-  all-zero encoding, moving const-initialized channels from `.data` to `.bss`
-  and removing 48-420 bytes of flash/startup copy in the measured payloads.
-- Joint LatestBuf/BlockBuf D3 measurement mode over 2/8/16-byte samples and
-  `N = 8/32/128`, covering all 11 targets plus pinned QEMU regions. It records
-  sample scheduling, final block completion/publication, consumer cost, and
-  136-8,280 bytes of combined channel/builder RAM without stacking candidate
-  branches.
+- `scripts/loom.sh`: a bare name filter is scoped to `loom_tests::<filter>`
+  instead of being passed as a second positional Cargo filter (leading `-`
+  flags still pass through), and a run is only reported verified when the
+  harness's own summary shows at least one model actually ran — a misspelled
+  filter or a selector like `-- --ignored` that matches nothing now fails
+  instead of printing the success banner.
+- `RingBuf::new`'s docs no longer mention a `pop` method the type does not
+  have — `pop` was deliberately rejected (its data loss would be unreportable
+  under overwrite; see the worked rejection in AGENTS.md). Found just after
+  `0.2.0` published, so the docs.rs 0.2.0 pages carry the sentence.
+
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.
@@ -75,106 +123,41 @@ All notable changes to this project will be documented in this file.
   shipped orderings.
 
 ### Documentation
-- EventFlags engineering record (`docs/records/event-flags.md`) — Track 1 acceptance package: value statement, integrator risks (coalescing, sole-role H, no peek/traits, measured portable-atomic windows), claims×evidence, and the closed decision set (H/D2–D5).
-### Added
-- `EventFlags` — a coalescing SPSC condition set for ISR-to-task notification. Exactly 32
-  payload-free conditions are represented by a transparent `EventMask(u32)`; the producer raises
-  with one Release `fetch_or`, and the consumer atomically returns and clears the set with one
-  Acquire `swap(0)`. Duplicate raises may coalesce, but a raise racing a take is never lost between
-  windows. Handles follow the accepted signal-lane doctrine: sole-role `Send + !Sync` values with
-  `&self` hot-path operations and fallible, non-panicking acquisition.
-- EventFlags admission evidence: three Loom models (including a publication litmus whose Release
-  and Acquire mutation checks both fail as intended), detector-on Miri coverage, eight gated and
-  three opt-in Xtensa code-size rows, four Cortex-M3 instruction regions, and a reproducible
-  portable-atomic disassembly check. The thumbv6m masked window (4 instructions) is gated by
-  `./scripts/verify.sh atomic-window`; ESP32-S2 (5) and ESP32-S3 (0 under native `s32c1i`) stay
-  opt-in via `ESP=1` because the reference Docker image does not ship esp-rs.
-
-### Fixed
-- `scripts/loom.sh <filter>` now scopes a bare name filter to `loom_tests::<filter>` instead of
-  passing a second positional test filter to Cargo. Leading Cargo/test flags (arguments that
-  start with `-`) pass through unchanged, so forms like `./scripts/loom.sh -- --nocapture` are
-  not rewritten into a no-op `loom_tests::--` filter.
-- `EventFlags` object-size claim corrected from 12 B to the measured 8 B (`size_of` unit assert);
-  AGENTS.md role-claim wording aligned with the AcqRel `swap` implementation.
-- ESP32-S3 opt-in atomic-window gate now requires native `s32c1i` inside
-  `event_flags_raise` and `event_flags_take` specifically; a whole-object count
-  could pass on `bringup_two_calls` / `event_flags_acquire_roles` alone.
-- BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows. Its status header initially recorded promotion as waiting on decision P; P has since closed as Copy composition and the record reads DECISION-COMPLETE.
-### Added
-- `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample
-  windows without introducing another queue policy. The builder rejects gaps
-  explicitly, skips reserved sequence zero at wrap, and yields a public block
-  only after all `N` samples are initialized. Compose blocks with
-  `EventBuf<Block<...>, Q>` today or the proposed `LatestBuf<Block<...>>` for
-  freshness-first handoff.
-
-### Documentation
-- Cycle decisions **P** and **S** are closed (2026-08-11). **P**: BlockBuf's publication
-  foundation is **Copy composition** for the supported shapes — no library-wide threshold is
-  claimed; the per-shape measured rows are the budget statement, the nine-shape matrix rides
-  into the release baselines at promotion, and the docs owe integrators the double-copy
-  hazard guidance (the builder's storage is deliberately private — budget both copies, or
-  publish from task context; direct-to-granted-slot filling is decision S's registered
-  reopening condition). **S**:
-  SlotPool is **deferred**, not rejected — full evaluation evidence banked on its branch,
-  draft PR closed, and an adopter-gated reopening trigger registered (a measured budget
-  breach, a direct-to-granted-slot requirement, or a standalone zero-copy adopter). Every
-  decision in the 0.3.0 cycle is now settled.
-- **Engineering records established** (`docs/records/`, maintainer decision 2026-08-11): one
-  enduring document per shipped type — a short value statement, risks and integration
-  concerns in integrator terms, technical claims mapped to their validating evidence, then
-  the working record (decisions, measurements, rejected alternatives). Not rustdoc
-  duplication: rustdoc says how to use a type; the record says why it is trustworthy and
-  what it cost. A candidate lane owes its record as part of its acceptance package;
-  [`records/latest-buf.md`](docs/records/latest-buf.md) is the exemplar. The 0.2.0 types
-  receive theirs when next materially touched.
-- `LatestBuf` contract: decision **D1** (wrap-ambiguity policy) is closed as options
-  (a) + (c) — `skipped` is one formula (wrap-aware distance minus one, saturated at zero):
-  exact within one wrap span, a documented under-count beyond it, and callers whose
-  requirement is the count itself are pointed at a wider producer-assigned payload sequence
-  or a saturating counter. The wrap family (C3, C5, O2) now carries its beyond-span text,
-  and a new non-promise **X6** states the limitation for adopters: the boundary is a
-  rate × take-interval property crossed exactly when a full span of publications separates
-  two takes, the channel deliberately does not detect the crossing, and a full-cycle gap
-  reports zero. Option (b) — an explicit
-  "wrapped/unknown" state — is rejected on the record: it prices wrap detection into every
-  hot-path operation and still cannot recover the lost count.
-- `LatestBuf` contract: decision **D2** (`Source<T>` policy) is closed as the proposal's
-  option 1 — the consumer does not implement `Source<T>`; `LatestSink`/`LatestSource` were
-  designed as the type's contract surface, solving what the existing traits structurally
-  could not (`try_pop` cannot report displacement, and displacement is the type's *designed*
-  overload behaviour, making the `RingBuf::pop` rejection apply with more force). New
-  non-promise **X7** states the substitution limitation honestly: no generic pipeline
-  composition without a caller-written adapter — discarding loss evidence is an application
-  decision, never the transport's. A convenience `Source` impl remains an additive,
-  adopter-evidence-gated future decision, and a compile-fail pin keeps it from arriving
-  silently.
-- `LatestBuf` contract: decision **D3** (first deliverable form) is closed as the convergent
-  answer from both coupled lanes — payload-agnostic `LatestBuf<T>`, with a complete block as
-  a payload (`LatestBuf<Block<T, N>>` latest / `EventBuf<Block<T, N>, Q>` queued / caller
-  policy for drop-new) and no separate `LatestBlockBuf`. The joint composition matrix is the
-  acceptance measurement set for both shapes; the closure binds a documentation obligation
-  on the block-payload surfaces (per-shape RAM, the small-`N` cost inversion, and the
-  no-partial-block limitation) and registers the only reopening condition: a separate block
-  transport must enforce a guarantee composition cannot, behind cycle decisions P/S. All
-  three contract decision points are now closed.
-- `LatestBuf` proposal: review caveat **A.3** (handle-state continuation) is closed as
-  channel-resident role state with stateless handles — the crate's stateless-handle
-  precedent and the sole-role doctrine of decision H, validated by drop-and-reacquire
-  continuation tests, both cross-context role-handoff Loom models, detector-on Miri, and
-  all four role-handoff ordering-mutation detections. Persist-on-drop is considered and
-  not selected (Drop-time state copy is a permanent failure surface; its L3 model does not
-  isolate the taken-flag handoff; register residency unmeasured), and narrowing H2's
-  registered condition was not met. New contract non-promise **X8** states the
-  role-recovery boundary for integrators: reacquisition requires the previous handle's
-  drop, handle lifetime is an application property, and there is deliberately no
-  out-of-band role reset because a forced release would break the exclusivity soundness
-  rests on — the facts of the exchange, informing downstream design without prescribing it.
-- `RingBuf::new`'s docs no longer mention a `pop` method the type does not have — `pop` was
-  deliberately rejected (its data loss would be unreportable under overwrite; see the worked
-  rejection in AGENTS.md). Found by review on the release PR just after `0.2.0` published, so
-  the `0.2.0` docs on docs.rs carry the sentence; the fix rides out with the next publish.
+- `SeqRing`'s two headline guarantees now carry their whole-span bound in the
+  rustdoc, README, and record: sequence arithmetic is modular over the
+  `2^32 − 1` non-zero span, so loss accounting is exact while the consumer's
+  resume cursor stays within one span of the newest publication (a nonzero
+  ordered poll leaves the cursor at most `N − 1` behind the newest it
+  observed; `skip_to_latest` leaves exactly one), and the seqlock torn-copy
+  discard argument shares the same counter-width ABA bound for a consumer
+  stalled mid-read. The module docs state the reachability arithmetic and
+  structural escape hatches; the record's torn-value claim is stated as
+  protocol-validated rather than proven, since the deliberate formal race is
+  exactly what Loom's untracked cells and the detector-off Miri pass cannot
+  check.
+- The 0.3.0 cycle decisions are closed on the record with their canonical
+  text in the contracts and planning documents: **D1** (wrap policy:
+  one formula, exact within a span, X6 beyond), **D2** (no `Source<T>`;
+  `LatestSink`/`LatestSource` are the designed surface, X7), **D3**
+  (composition, no `LatestBlockBuf`), **A.1** (Acquire-load empty poll,
+  measured), **A.3** (channel-resident role state, X8), **H** (sole-role
+  `Send + !Sync` handle doctrine, crate-uniform), **P** (Copy composition;
+  the per-shape measured rows are the budget statement), and **S** (SlotPool
+  deferred, not rejected — evidence banked, adopter-gated reopening trigger
+  registered: a measured budget breach, a direct-to-granted-slot requirement,
+  or a standalone zero-copy adopter).
+- Boundedness claims are stated at source level crate-wide with the per-ISA
+  realisation disclosed: one source-level atomic RMW has no algorithmic
+  retry, and on exclusive-monitor Arm it is an LDREX/STREX pair that repeats
+  only when an intervening event claims the word — contention-bounded, not a
+  static instruction count; the measured rows are the uncontended
+  realisations.
+- `EventBuf`'s record corrects its block-RAM budgeting formula to
+  `size_of::<EventBuf<Block<T, N>, Q>>()` (the naive `Q × block` product
+  omits cursors, flags, and padding — the probe static itself shows 268
+  measured against 256 payload bytes) and scopes `len`'s consistency claim to
+  a successful bracketed sample, with the bounded clamped-estimate fallback
+  named.
 
 ## 0.2.0 - 2026-08-10
 

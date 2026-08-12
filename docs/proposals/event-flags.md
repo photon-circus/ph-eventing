@@ -148,11 +148,14 @@ Measured by `./scripts/verify.sh cycles` in the pinned reference image: rustc
 |---|---|---:|
 | `raise` | condition clear | 12 |
 | `raise` | condition already set | 12 |
-| `take_all` | non-empty | 8 |
-| `take_all` | empty | 8 |
+| `take_all` | non-empty | 10 |
+| `take_all` | empty | 10 |
 
 The equal state pairs pin the intended constant hot path: neither occupancy
-nor number of set bits changes the executed work.
+nor number of set bits changes the executed work. Rows re-measured on the
+assembled 0.3.0 release branch; the merged probe binary carries `take_all`
+two instructions higher than the per-lane tree's 8 (codegen context, not an
+algorithm change), while both `raise` rows are unchanged.
 
 ### 4.4 Portable-atomic interrupt window
 

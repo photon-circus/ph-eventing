@@ -371,7 +371,8 @@ them is a runtime step and always will be.
   needs a separate synchronization mechanism.
 - The reference Cortex-M3 probe measures `increment` at 8 retired
   instructions on the below-`MAX` hot path and 9 on the saturated sentinel
-  arm, and `take_count` at 7 (rustc 1.92.0, QEMU 10.0.11). The third arm — a
+  arm, and `take_count` at 9 (rustc 1.92.0, QEMU 10.0.11, measured on the
+  assembled 0.3.0 tree). The third arm — a
   stale `MAX` re-read below `MAX` after a take — is the saturated arm plus
   one `fetch_add` by construction; all rows are uncontended single-pass
   counts (the contract discloses the per-ISA RMW realisation).
