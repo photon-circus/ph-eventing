@@ -1,6 +1,9 @@
 # EventFlags semantic contract
 
-- **Status:** Frozen for evaluation on the `candidate/event-flags` lane.
+- **Status:** **Normative for the shipped 0.3.0 type** — frozen on the
+  `candidate/event-flags` lane and carried unchanged through acceptance
+  (PR #36, merged 2026-08-12); clause IDs are load-bearing for tests,
+  models, and the [engineering record](../records/event-flags.md).
 - **Rule of this document:** these clauses describe an abstract coalescing
   condition set independently of atomics, memory orderings, or the candidate
   algorithm. The design and evidence must satisfy the clauses; they do not

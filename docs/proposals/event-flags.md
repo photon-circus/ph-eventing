@@ -1,7 +1,10 @@
 # EventFlags: coalesced condition notification
 
-- **Status:** PROPOSED — decisions, frozen contract, implementation, and
-  admission evidence complete; ready for evaluation.
+- **Status:** **SHIPPED in 0.3.0** — decisions, frozen contract,
+  implementation, and admission evidence complete; accepted 2026-08-12 and
+  merged via PR #36. This document remains the design-decision record — what was decided,
+  why, and what was rejected; the enduring engineering briefing lives in
+  [`records/event-flags.md`](../records/event-flags.md).
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §4; triaged Tier 1 in
   [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.

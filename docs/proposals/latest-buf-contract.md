@@ -1,7 +1,10 @@
-# LatestBuf semantic contract (draft)
+# LatestBuf semantic contract
 
-- **Status:** Draft for review — step 1 of the adoption sequence in
-  [`latest-buf.md`](latest-buf.md) §21.
+- **Status:** **Normative for the shipped 0.3.0 type** — clauses frozen,
+  every decision point closed (§9), evidence map complete. Drafted as step 1
+  of the adoption sequence in [`latest-buf.md`](latest-buf.md) §21; the
+  clause IDs below are load-bearing for tests, models, and the
+  [engineering record](../records/latest-buf.md).
 - **Rule of this document:** the contract is written against an **abstract
   channel**, independently of any implementation. Nothing here may mention
   slots, atomics, orderings, or ownership transfer — those belong to the

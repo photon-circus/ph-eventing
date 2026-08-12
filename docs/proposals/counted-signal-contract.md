@@ -1,6 +1,9 @@
 # CountedSignal semantic contract
 
-- **Status:** Frozen for evaluation on the `candidate/counted-signal` lane.
+- **Status:** **Normative for the shipped 0.3.0 type** — frozen on the
+  `candidate/counted-signal` lane and carried unchanged through acceptance
+  (PR #33, merged 2026-08-12); clause IDs are load-bearing for tests,
+  models, and the [engineering record](../records/counted-signal.md).
   Promotion-bar item 3 in [`counted-signal.md`](counted-signal.md) §4 is
   complete.
 - **Rule of this document:** the clauses describe an **abstract counted

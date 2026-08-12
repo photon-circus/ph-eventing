@@ -1,7 +1,10 @@
 # CountedSignal: multiplicity without payloads
 
-- **Status:** PROPOSED — shared handle decision, contract, and admission
-  evidence complete; ready for evaluation.
+- **Status:** **SHIPPED in 0.3.0** — shared handle decision, frozen
+  contract, and admission evidence complete; accepted 2026-08-12 and merged
+  via PR #33. This document remains the design-decision record — what was decided,
+  why, and what was rejected; the enduring engineering briefing lives in
+  [`records/counted-signal.md`](../records/counted-signal.md).
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §5 (received
   2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
@@ -214,4 +217,4 @@ type's proof.
    no-lost-increment accounting, saturation without wrapping, and the
    post-take stale-`MAX` litmus.
 
-The promotion bar is complete; the candidate is ready for evaluation.
+The promotion bar was completed, the candidate passed evaluation and nine review rounds, and the type shipped in 0.3.0 (PR #33, accepted 2026-08-12).

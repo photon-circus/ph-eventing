@@ -1,8 +1,12 @@
 # Exploratory Primitives: A Bounded-Handoff Taxonomy for ph-eventing
 
-- **Status:** Exploratory design foundation — deliberately less detailed than
-  the [`LatestBuf` proposal](latest-buf.md); these are candidates for
-  triage and exploration, not designs ready for a contract.
+- **Status:** Taxonomy, outcome recorded — this document seeded the 0.3.0
+  candidate lanes and remains the admission framework (the four questions,
+  the tiering, the standing filters). Cycle outcome: `EventFlags`,
+  `CountedSignal`, and the Block/BlockBuilder composition **shipped in
+  0.3.0**; `SlotPool` was evaluated in full and **deferred** by decision S
+  with an adopter-gated reopening trigger ([slot-pool.md](slot-pool.md));
+  `LatestBuf` shipped from its own proposal.
 - **Received:** 2026-08-11 (0.3.0 cycle; triage in
   [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4)
 - **Structure note (2026-08-11):** the substantive design text for the

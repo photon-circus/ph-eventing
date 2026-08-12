@@ -1,6 +1,9 @@
 # LatestBuf implementation evaluation
 
-- **Purpose:** implementation-independent comparison record for issue #27.
+- **Purpose:** implementation-independent comparison record for issue #27
+  (outcome: the channel-resident/stateless-handle design below shipped in
+  0.3.0; persist-on-drop was considered and not selected — §7 is its
+  surviving artifact).
 - **Inputs:** [`latest-buf.md`](latest-buf.md),
   [`latest-buf-contract.md`](latest-buf-contract.md), and the BlockBuf candidate.
 - **Status:** decision ready. Soundness, target/payload cost, A.1,

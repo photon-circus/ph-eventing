@@ -1,9 +1,15 @@
 # Proposal: Freshness-First SPSC Transfer Primitives for ph-eventing
 
-- **Status:** Exploratory design proposal
+- **Status:** **SHIPPED in 0.3.0** — every design decision closed (D1–D3,
+  A.1–A.3; closure text in the [contract](latest-buf-contract.md) §9 and
+  Appendix A.3 here), accepted 2026-08-12 and merged via PR #35.
+  This document remains the design-decision record — what was decided,
+  why, and what was rejected; the enduring engineering briefing lives in
+  [`records/latest-buf.md`](../records/latest-buf.md).
 - **Scope:** Additive primitives and traits only
 - **Compatibility:** No changes to existing `Sink`, `Source`, or `Link` traits
-- **Implementation status:** Implemented on `candidate/latest-buf` (PR #35)
+- **Implementation status:** shipped (implemented on `candidate/latest-buf`,
+  merged into `release/0.3.0` via PR #35)
 - **Received:** 2026-08-11 (0.3.0 cycle; see `docs/0.3.0-candidates.md` §3)
 
 ## 1. Summary

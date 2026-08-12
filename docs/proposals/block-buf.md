@@ -1,9 +1,12 @@
 # BlockBuf: complete window handoff (exploratory design document)
 
-- **Status:** DECISION-COMPLETE (2026-08-11) — D3 confirmed (composition)
-  and cycle decision **P** closed as **Copy composition**; every input to
-  promotion is settled, and promotion to PROPOSED awaits the #34
-  acceptance review. Prior status: EXPLORATORY.
+- **Status:** **SHIPPED in 0.3.0** — D3 confirmed (composition, no
+  `LatestBlockBuf`), cycle decision **P** closed as **Copy composition**,
+  accepted 2026-08-12 and merged via PR #34 with the block code-size
+  baseline blessed at promotion. Prior statuses: EXPLORATORY, then
+  DECISION-COMPLETE (2026-08-11). This document remains the design-decision record — what was decided,
+  why, and what was rejected; the enduring engineering briefing lives in
+  [`records/block-buf.md`](../records/block-buf.md).
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §2 (received
   2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
