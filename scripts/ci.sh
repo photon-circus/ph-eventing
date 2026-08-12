@@ -138,6 +138,14 @@ if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     # embedded toolchains.
     run_check 'codesize (baseline gate)' ./scripts/codesize.sh
 
+    # The block-payload matrix gates against its own mode-specific baseline
+    # (baseline-block.tsv), which the default run above never reads — without
+    # this line a post-promotion block-row regression would pass CI while the
+    # normal matrix stayed green. Before that baseline is blessed (a directed,
+    # reviewed step at promotion) codesize.sh exits 2 and run_check records a
+    # loud SKIP — visible, and not a pass.
+    run_check 'codesize (block matrix gate)' ./scripts/codesize.sh block-matrix
+
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
         --features portable-atomic-unsafe-assume-single-core

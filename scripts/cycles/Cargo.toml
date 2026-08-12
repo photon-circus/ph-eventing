@@ -15,6 +15,16 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 cortex-m-semihosting = "0.5"
 
+[features]
+# Isolate the large-payload completion/publication matrix from the standard
+# hot-path probe so adding matrix rows cannot perturb its LTO decisions.
+block-matrix = []
+# Keep the larger LatestBuf payload matrix out of the standing probe so its
+# stack use and marker set remain independent.
+latest-matrix = []
+# Keep the larger cross-lane sample/block matrix isolated as well.
+latest-block-matrix = []
+
 [profile.release]
 opt-level = "z"
 lto = true
