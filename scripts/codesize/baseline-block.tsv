@@ -1,0 +1,81 @@
+# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh block-matrix --bless
+# rustc-commit: ded5c06cf21d2b93bffd5d884aa6e96934ee4234
+#
+# Host-independent: byte-identical on x86_64-pc-windows-msvc and
+# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all
+# eight gated targets. That is what makes committing it sound.
+#
+# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it
+# would make that fork mandatory for every contributor.
+armv7a-none-eabi	block_w16_n128	300
+armv7a-none-eabi	block_w16_n32	288
+armv7a-none-eabi	block_w16_n8	296
+armv7a-none-eabi	block_w2_n128	252
+armv7a-none-eabi	block_w2_n32	248
+armv7a-none-eabi	block_w2_n8	212
+armv7a-none-eabi	block_w8_n128	312
+armv7a-none-eabi	block_w8_n32	312
+armv7a-none-eabi	block_w8_n8	312
+armv7r-none-eabi	block_w16_n128	300
+armv7r-none-eabi	block_w16_n32	288
+armv7r-none-eabi	block_w16_n8	296
+armv7r-none-eabi	block_w2_n128	252
+armv7r-none-eabi	block_w2_n32	248
+armv7r-none-eabi	block_w2_n8	212
+armv7r-none-eabi	block_w8_n128	312
+armv7r-none-eabi	block_w8_n32	312
+armv7r-none-eabi	block_w8_n8	312
+riscv32imac-unknown-none-elf	block_w16_n128	300
+riscv32imac-unknown-none-elf	block_w16_n32	248
+riscv32imac-unknown-none-elf	block_w16_n8	250
+riscv32imac-unknown-none-elf	block_w2_n128	210
+riscv32imac-unknown-none-elf	block_w2_n32	190
+riscv32imac-unknown-none-elf	block_w2_n8	150
+riscv32imac-unknown-none-elf	block_w8_n128	252
+riscv32imac-unknown-none-elf	block_w8_n32	222
+riscv32imac-unknown-none-elf	block_w8_n8	202
+thumbv6m-none-eabi	block_w16_n128	268
+thumbv6m-none-eabi	block_w16_n32	254
+thumbv6m-none-eabi	block_w16_n8	242
+thumbv6m-none-eabi	block_w2_n128	200
+thumbv6m-none-eabi	block_w2_n32	168
+thumbv6m-none-eabi	block_w2_n8	138
+thumbv6m-none-eabi	block_w8_n128	240
+thumbv6m-none-eabi	block_w8_n32	224
+thumbv6m-none-eabi	block_w8_n8	192
+thumbv7em-none-eabi	block_w16_n128	216
+thumbv7em-none-eabi	block_w16_n32	208
+thumbv7em-none-eabi	block_w16_n8	200
+thumbv7em-none-eabi	block_w2_n128	130
+thumbv7em-none-eabi	block_w2_n32	132
+thumbv7em-none-eabi	block_w2_n8	136
+thumbv7em-none-eabi	block_w8_n128	178
+thumbv7em-none-eabi	block_w8_n32	118
+thumbv7em-none-eabi	block_w8_n8	120
+thumbv7m-none-eabi	block_w16_n128	216
+thumbv7m-none-eabi	block_w16_n32	208
+thumbv7m-none-eabi	block_w16_n8	200
+thumbv7m-none-eabi	block_w2_n128	130
+thumbv7m-none-eabi	block_w2_n32	132
+thumbv7m-none-eabi	block_w2_n8	136
+thumbv7m-none-eabi	block_w8_n128	178
+thumbv7m-none-eabi	block_w8_n32	118
+thumbv7m-none-eabi	block_w8_n8	120
+thumbv8m.base-none-eabi	block_w16_n128	264
+thumbv8m.base-none-eabi	block_w16_n32	250
+thumbv8m.base-none-eabi	block_w16_n8	242
+thumbv8m.base-none-eabi	block_w2_n128	190
+thumbv8m.base-none-eabi	block_w2_n32	168
+thumbv8m.base-none-eabi	block_w2_n8	136
+thumbv8m.base-none-eabi	block_w8_n128	244
+thumbv8m.base-none-eabi	block_w8_n32	228
+thumbv8m.base-none-eabi	block_w8_n8	192
+thumbv8m.main-none-eabi	block_w16_n128	216
+thumbv8m.main-none-eabi	block_w16_n32	212
+thumbv8m.main-none-eabi	block_w16_n8	204
+thumbv8m.main-none-eabi	block_w2_n128	122
+thumbv8m.main-none-eabi	block_w2_n32	126
+thumbv8m.main-none-eabi	block_w2_n8	138
+thumbv8m.main-none-eabi	block_w8_n128	182
+thumbv8m.main-none-eabi	block_w8_n32	110
+thumbv8m.main-none-eabi	block_w8_n8	114
