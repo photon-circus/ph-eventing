@@ -90,7 +90,7 @@ use a timestamped type for `T` when required.
 
 `Block` is deliberately not another queue. Compose it with the overload policy
 you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
-newest when full; the proposed `LatestBuf<Block<T, N>>` will retain only the
+newest when full; `LatestBuf<Block<T, N>>` retains only the
 latest complete block.
 
 **Budget the composition before choosing it.** Publication copies the
@@ -387,13 +387,15 @@ them is a runtime step and always will be.
 
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
-- `SeqRing`, `EventBuf`, `EventFlags`, and `CountedSignal` are SPSC by design: exactly one producer and one consumer may be
+- `SeqRing`, `EventBuf`, `EventFlags`, `CountedSignal`, and `LatestBuf` are SPSC by design: exactly one producer and one consumer may be
   active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
   on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
   The panicking `producer()`/`consumer()`, deprecated since 0.2.0, **were removed in
-  0.3.0**. Using unsafe to bypass `SeqRing`/`EventBuf` ownership can be undefined
+  0.3.0**. Using unsafe to bypass `SeqRing`/`EventBuf`/`LatestBuf` ownership can be undefined
   behavior. Forging or concurrently sharing a `CountedSignal` producer breaks
   its bounded no-wrap contract; the handle is `!Sync` to prevent that in safe Rust.
+  Forging a second `LatestBuf` producer or consumer similarly breaks the three-slot
+  exclusive-ownership exchange.
 - `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
 - `EventFlags` has no unsafe slot access and passes Miri with the race detector enabled.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
@@ -418,8 +420,8 @@ them is a runtime step and always will be.
 The typical embedded shape is a producer in an interrupt handler and a consumer
 in a task loop. That works, with three things to know:
 
-- **The primitive is shared; the handles are owned.** `SeqRing<T, N>` and
-  `EventBuf<T, N>` are `Sync` when `T: Send`, and `EventFlags` and
+- **The primitive is shared; the handles are owned.** `SeqRing<T, N>`,
+  `EventBuf<T, N>`, and `LatestBuf<T>` are `Sync` when `T: Send`, and `EventFlags` and
   `CountedSignal` are `Sync`, so the primitive can be handed to both
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.

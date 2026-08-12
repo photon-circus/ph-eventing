@@ -664,8 +664,32 @@ mod tests {
         // Equal endpoints are indistinguishable from no progress after a full
         // generation cycle. D1 is closed as documented approximation plus
         // payload escape hatch (contract C3/X6); this test is the closure's
-        // named pin for the full-cycle modular result.
+        // named pin for the full-cycle modular result — including the take
+        // path, not only the pure distance helper.
         assert_eq!(LatestBuf::<u32>::generation_distance(17, 17), 0);
+
+        let channel = LatestBuf::<u32>::new();
+        // SAFETY: no handles exist while the test seeds role state.
+        channel.producer_state.with_mut(|state| unsafe {
+            // Next publish assigns generation 17 (skipping reserved 0).
+            (*state).next_generation = 16;
+        });
+        channel.consumer_state.with_mut(|state| unsafe {
+            // Resume cursor already at 17: a wrap-aliased publish of 17 looks
+            // like "nothing skipped" even though a full span was lost.
+            (*state).last_generation = 17;
+        });
+        let producer = channel.try_producer().unwrap();
+        let consumer = channel.try_consumer().unwrap();
+        assert_eq!(producer.publish(99).generation, 17);
+        assert_eq!(
+            consumer.take_latest(),
+            Some(LatestItem {
+                value: 99,
+                generation: 17,
+                skipped: 0,
+            })
+        );
     }
 
     #[test]

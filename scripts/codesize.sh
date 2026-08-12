@@ -85,6 +85,14 @@ REGEN="./scripts/codesize.sh --bless"
 if [ "$BLOCK_MATRIX" = "1" ]; then
     BASELINE="scripts/codesize/baseline-block.tsv"
     REGEN="./scripts/codesize.sh block-matrix --bless"
+elif [ "$LATEST_MATRIX" = "1" ]; then
+    # Same isolation as block-matrix: a latest bless must not rewrite the
+    # default or block baselines (partial-bless would silently drop their rows).
+    BASELINE="scripts/codesize/baseline-latest.tsv"
+    REGEN="./scripts/codesize.sh latest-matrix --bless"
+elif [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+    BASELINE="scripts/codesize/baseline-latest-block.tsv"
+    REGEN="./scripts/codesize.sh latest-block-matrix --bless"
 fi
 # Growth beyond this many bytes on any row fails the gate. Absolute, not a
 # percentage: at 100-200 bytes a percentage is noise, and the regression this
@@ -284,6 +292,17 @@ for entry in $TARGETS; do
             printf '%-30s %-10s %10s %10s %10s %6s\n' \
                 "$target" "$shape" "${publish:--}" "${take:--}" \
                 "${channel:--}" "${init:--}"
+            # Persist flash rows for the baseline gate (channel RAM / .bss is
+            # already enforced by matrix_not_bss above; Xtensa stays ungated).
+            case "$target" in
+                xtensa-*) ;;
+                *)
+                    [ -n "$publish" ] && printf '%s\tlatest_%s_publish\t%s\n' \
+                        "$target" "$shape" "$publish" >> "$RESULTS"
+                    [ -n "$take" ] && printf '%s\tlatest_%s_take\t%s\n' \
+                        "$target" "$shape" "$take" >> "$RESULTS"
+                    ;;
+            esac
         done
 
         producer_role="$(fn_size "$ar" latest_producer_reacquire)"
@@ -292,6 +311,15 @@ for entry in $TARGETS; do
         [ -z "$consumer_role" ] && matrix_missing=$((matrix_missing + 1))
         printf '%-30s %-10s %10s %10s %10s %6s\n' \
             "$target" roles "${producer_role:--}" "${consumer_role:--}" '-' '-'
+        case "$target" in
+            xtensa-*) ;;
+            *)
+                [ -n "$producer_role" ] && printf '%s\tlatest_roles_producer\t%s\n' \
+                    "$target" "$producer_role" >> "$RESULTS"
+                [ -n "$consumer_role" ] && printf '%s\tlatest_roles_consumer\t%s\n' \
+                    "$target" "$consumer_role" >> "$RESULTS"
+                ;;
+        esac
         continue
     fi
 
@@ -334,6 +362,23 @@ for entry in $TARGETS; do
             printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
                 "$target" "$shape" "${publish:--}" "${take:--}" \
                 "${complete:--}" "${channel:--}" "${builder:--}" "${init:--}"
+            case "$target" in
+                xtensa-*) ;;
+                *)
+                    case "$shape" in
+                        block_*)
+                            [ -n "$complete" ] && printf '%s\tlatest_%s_complete\t%s\n' \
+                                "$target" "$shape" "$complete" >> "$RESULTS"
+                            ;;
+                        *)
+                            [ -n "$publish" ] && printf '%s\tlatest_%s_publish\t%s\n' \
+                                "$target" "$shape" "$publish" >> "$RESULTS"
+                            ;;
+                    esac
+                    [ -n "$take" ] && printf '%s\tlatest_%s_take\t%s\n' \
+                        "$target" "$shape" "$take" >> "$RESULTS"
+                    ;;
+            esac
         done
         continue
     fi
@@ -422,7 +467,10 @@ if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
     else
         printf 'Run scripts/cycles.sh latest-block-matrix for state-dependent paths.\n'
     fi
-    exit 0
+    printf '\n'
+    # Fall through to the baseline gate against baseline-latest.tsv /
+    # baseline-latest-block.tsv — without this, admission flash rows are
+    # measured then thrown away and post-promotion regressions cannot fail CI.
 fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------

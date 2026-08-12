@@ -5,8 +5,8 @@
 //!
 //! - `EventBuf<Block<T, N>, Q>` queues up to `Q` complete blocks and rejects
 //!   the newest block when full;
-//! - the proposed `LatestBuf<Block<T, N>>` retains only the latest complete
-//!   block.
+//! - `LatestBuf<Block<T, N>>` retains only the latest complete
+//!   block (decision D3 composition).
 //!
 //! Publication cannot expose a partial block because [`BlockBuilder`] only
 //! yields a [`Block`] after all `N` samples have been written. Dropping or

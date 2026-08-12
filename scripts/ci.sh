@@ -146,6 +146,14 @@ if [ "${SKIP_EMBEDDED:-0}" = "0" ]; then
     # loud SKIP — visible, and not a pass.
     run_check 'codesize (block matrix gate)' ./scripts/codesize.sh block-matrix
 
+    # LatestBuf admission matrices were measured at promotion but historically
+    # exited before the baseline compare — a post-promotion flash regression on
+    # those shapes would pass CI while default/block gates stayed green. Gate
+    # them the same way as block-matrix (loud SKIP until baseline-*.tsv exists).
+    run_check 'codesize (latest matrix gate)' ./scripts/codesize.sh latest-matrix
+    run_check 'codesize (latest-block matrix gate)' \
+        ./scripts/codesize.sh latest-block-matrix
+
     run_check 'thumbv6m-none-eabi' \
         cargo check --target thumbv6m-none-eabi \
         --features portable-atomic-unsafe-assume-single-core

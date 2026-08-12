@@ -1,6 +1,6 @@
 //! A saturating count for payload-free events.
 //!
-//! [`CountedSignal`] is an exploratory SPSC primitive for events whose
+//! [`CountedSignal`] is an SPSC primitive for events whose
 //! multiplicity matters but whose payload and ordering do not. Its producer
 //! commits each increment with a sole-producer–bounded path; its consumer
 //! atomically takes the accumulated count.
