@@ -54,6 +54,12 @@ compile_error!("latest-matrix and latest-block-matrix are mutually exclusive pro
     feature = "latest-block-matrix"
 )))]
 use ph_eventing::CountedSignal;
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+use ph_eventing::{EventFlags, EventMask};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -121,6 +127,11 @@ markers! {
     20 => m_cs_increment,
     21 => m_cs_take_count,
     22 => m_cs_increment_saturated,
+    // EventFlags -- coalesced SPSC conditions
+    23 => m_ef_raise_clear,
+    24 => m_ef_raise_already_set,
+    25 => m_ef_take_nonempty,
+    26 => m_ef_take_empty,
 }
 
 #[cfg(not(any(
@@ -416,6 +427,34 @@ fn ring_buf_costs() {
 
     m_rb_latest();
     black_box(ring.latest());
+    m_end();
+}
+
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+fn event_flags_costs() {
+    let flags = EventFlags::new();
+    let tx = flags.try_producer().expect("producer");
+    let rx = flags.try_consumer().expect("consumer");
+    let condition = EventMask::from_bits(1 << 7);
+
+    m_ef_raise_clear();
+    tx.raise(black_box(condition));
+    m_end();
+
+    m_ef_raise_already_set();
+    tx.raise(black_box(condition));
+    m_end();
+
+    m_ef_take_nonempty();
+    black_box(rx.take_all());
+    m_end();
+
+    m_ef_take_empty();
+    black_box(rx.take_all());
     m_end();
 }
 
@@ -817,6 +856,7 @@ fn main() -> ! {
         ring_buf_costs();
         counted_signal_costs();
         counted_signal_saturated_costs();
+        event_flags_costs();
     }
     #[cfg(feature = "block-matrix")]
     block_publication_costs();

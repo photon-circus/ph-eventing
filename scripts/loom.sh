@@ -35,9 +35,39 @@ export LOOM_MAX_PREEMPTIONS
 
 printf '==> loom (max_preemptions=%s)\n' "$LOOM_MAX_PREEMPTIONS"
 
-if RUSTFLAGS='--cfg loom' cargo test --lib loom_tests "$@"; then
-    printf '\nAll Loom models verified.\n'
+# A bare name becomes loom_tests::<name>. Leading Cargo/test flags (anything
+# starting with '-') must pass through unchanged — rewriting them produced
+# filters like loom_tests::--quiet that match nothing and look like a pass.
+filter="loom_tests"
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        -*) ;;
+        *)
+            filter="loom_tests::$1"
+            shift
+            ;;
+    esac
+fi
+
+# Capture the run and decide from the harness's own summary. Cargo exits 0
+# when a filter matches nothing, and test-binary selectors passed after `--`
+# (--ignored, --skip, --exact) shrink the selection further -- an earlier
+# guard that re-listed without "$@" vouched for models the actual run never
+# executed. Parsing the run's own "test result:" line counts exactly what
+# ran. Not a pipe: a pipeline would report tee's exit status, not cargo's.
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
+if RUSTFLAGS='--cfg loom' cargo test --lib "$filter" "$@" >"$log" 2>&1; then
+    cat "$log"
+    ran="$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' "$log" | tail -n 1)"
+    if [ "${ran:-0}" -eq 0 ]; then
+        printf '\nerror: the invocation ran no Loom models -- nothing was verified.\n' >&2
+        printf 'Check the filter and any selectors after "--" (--ignored, --skip, --exact).\n' >&2
+        exit 1
+    fi
+    printf '\nAll %s Loom models that matched were verified.\n' "$ran"
 else
+    cat "$log"
     printf '\nLoom found a failing execution. The output above replays the\n'
     printf 'exact interleaving -- it is deterministic, so re-running reproduces it.\n'
     exit 1

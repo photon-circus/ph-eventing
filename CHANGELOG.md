@@ -67,6 +67,31 @@ All notable changes to this project will be documented in this file.
   shipped orderings.
 
 ### Documentation
+- EventFlags engineering record (`docs/records/event-flags.md`) — Track 1 acceptance package: value statement, integrator risks (coalescing, sole-role H, no peek/traits, measured portable-atomic windows), claims×evidence, and the closed decision set (H/D2–D5).
+### Added
+- `EventFlags` — a coalescing SPSC condition set for ISR-to-task notification. Exactly 32
+  payload-free conditions are represented by a transparent `EventMask(u32)`; the producer raises
+  with one Release `fetch_or`, and the consumer atomically returns and clears the set with one
+  Acquire `swap(0)`. Duplicate raises may coalesce, but a raise racing a take is never lost between
+  windows. Handles follow the accepted signal-lane doctrine: sole-role `Send + !Sync` values with
+  `&self` hot-path operations and fallible, non-panicking acquisition.
+- EventFlags admission evidence: three Loom models (including a publication litmus whose Release
+  and Acquire mutation checks both fail as intended), detector-on Miri coverage, eight gated and
+  three opt-in Xtensa code-size rows, four Cortex-M3 instruction regions, and a reproducible
+  portable-atomic disassembly check. The thumbv6m masked window (4 instructions) is gated by
+  `./scripts/verify.sh atomic-window`; ESP32-S2 (5) and ESP32-S3 (0 under native `s32c1i`) stay
+  opt-in via `ESP=1` because the reference Docker image does not ship esp-rs.
+
+### Fixed
+- `scripts/loom.sh <filter>` now scopes a bare name filter to `loom_tests::<filter>` instead of
+  passing a second positional test filter to Cargo. Leading Cargo/test flags (arguments that
+  start with `-`) pass through unchanged, so forms like `./scripts/loom.sh -- --nocapture` are
+  not rewritten into a no-op `loom_tests::--` filter.
+- `EventFlags` object-size claim corrected from 12 B to the measured 8 B (`size_of` unit assert);
+  AGENTS.md role-claim wording aligned with the AcqRel `swap` implementation.
+- ESP32-S3 opt-in atomic-window gate now requires native `s32c1i` inside
+  `event_flags_raise` and `event_flags_take` specifically; a whole-object count
+  could pass on `bringup_two_calls` / `event_flags_acquire_roles` alone.
 - BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows. Its status header initially recorded promotion as waiting on decision P; P has since closed as Copy composition and the record reads DECISION-COMPLETE.
 ### Added
 - `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample

@@ -101,8 +101,9 @@ the design document; DMA cache maintenance stays outside the crate.
 
 ## 4. EventFlags: coalesced condition notification
 
-**Design document: [`event-flags.md`](event-flags.md)** (the substantive
-design text has moved there; this entry is the summary).
+**Status: PROPOSED.** The frozen semantic clauses are in
+[`event-flags-contract.md`](event-flags-contract.md), and the implementation
+and admission evidence are in [`event-flags.md`](event-flags.md).
 
 Some producer-consumer communication is not a stream at all: an ISR
 signalling conditions (watermark reached, DMA complete, error, shutdown)
@@ -113,6 +114,11 @@ conditions unordered, duplicates coalesce, each bit means "occurred at
 least once since the last take," and clearing must never lose a concurrent
 raise. Much narrower and more predictable than a general semaphore
 abstraction.
+
+The implemented candidate uses fallible SPSC role acquisition with
+`Send + !Sync` handles. `raise` is one Release `fetch_or`; `take_all` is one
+Acquire `swap(0)`. It remains outside the stream traits because its value is a
+destructively taken, unordered condition set rather than an event item.
 
 ## 5. CountedSignal: multiplicity without payloads
 
@@ -318,7 +324,7 @@ sketches live in the owning documents; this table is the index:
 |-------|-----------------|------|
 | `LatestSink`, `LatestSource` | [`latest-buf.md`](latest-buf.md) §12 | Producers that always publish but may replace an unread value; freshness sources that report skips |
 | `ObservedSource` | [`latest-buf.md`](latest-buf.md) §12.3 | Cross-primitive vocabulary, gated on two honest implementations. **Known divergence:** this taxonomy originally sketched a wider `DeliveryObservation` (`ordinal`, `skipped_before`, `filtered_before`) than the proposal's (`sequence`, `skipped_before`); the `filtered_before` field earns its place only if the filtering adapters (§8) ship. Reconcile at the two-implementations gate, not before |
-| `SignalSink`, `SignalSource` | [`event-flags.md`](event-flags.md) §2 | Coalesced conditions, not streams; to be proven against both `EventFlags` and `CountedSignal` before the vocabulary freezes |
+| `SignalSink`, `SignalSource` | [`event-flags.md`](event-flags.md) §2 | Rejected for EventFlags: the mask is a destructive unordered take, not an event item. Revisit only if a second primitive demonstrates honest shared semantics. |
 | `ReservableSink`, `ClaimSource` | [`slot-pool.md`](slot-pool.md) §2 | Grant/claim lifecycles for zero-copy transfer |
 | `Sequenced`, `Timestamped` | [`latest-buf.md`](latest-buf.md) §12.4 | Optional payload-metadata conveniences: generic consumers inspect producer-owned identity without the crate prescribing sequence width, time units, or a clock |
 
