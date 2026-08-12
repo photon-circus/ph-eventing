@@ -7,7 +7,7 @@ rust-version = "1.92.0"
 # crates clear that bar. Lead with what is actually on offer: predictable
 # behaviour and a cost you can measure. See AGENTS.md § What this crate
 # optimises for.
-description = "Deterministic zero-allocation ring buffers for no-std embedded targets: bounded behaviour, no hidden cost, Loom-verified orderings"
+description = "Deterministic zero-allocation SPSC primitives for no-std embedded targets — ring buffers, a latest-value snapshot channel, condition flags, saturating counters, and complete sample blocks: bounded behaviour, measured cost, Loom-verified orderings"
 authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
 license = "MIT"
 repository = "https://github.com/photon-circus/ph-eventing"
