@@ -743,7 +743,7 @@ Run the default probe as well when changing shared measurement infrastructure.
 | `SeqRing::latest_value` | — | 30 | |
 | `RingBuf::push` | 20 | **20** (overwriting) | |
 | `RingBuf::get` / `latest` | 22 / 16 | | |
-| `CountedSignal::increment` / `take_count` | 8 / 7 | | |
+| `CountedSignal::increment` (below `MAX` / saturated arm) / `take_count` | 8, 9 / 7 | | |
 
 LatestBuf uses a separate payload matrix (`./scripts/verify.sh cycles
 latest-matrix`) so the larger stack shapes do not disturb the standing probe:
@@ -774,9 +774,14 @@ Three results carry the argument:
    the second would be two orders of magnitude larger. It is a jump, and now
    that is measured rather than asserted.
 3. **CountedSignal's SPSC hot paths are small and bounded.** `increment`
-   retires 8 instructions and `take_count` retires 7 in the reference
-   Cortex-M3 environment. The producer region contains no CAS retry loop; its
-   fixed count is the measured counterpart to the sole-producer no-wrap proof.
+   retires 8 instructions on the below-`MAX` common path and 9 on the
+   probe-seeded saturated sentinel arm; `take_count` retires 7 — all in the
+   reference Cortex-M3 environment, all uncontended single-pass counts (the
+   contract discloses the per-ISA RMW realisation and its hardware retry
+   bound). The producer region contains no CAS retry loop; the fixed
+   source-level sequence is the measured counterpart to the sole-producer
+   no-wrap proof. The stale-`MAX` third arm is the saturated arm plus one
+   `fetch_add` by construction.
 
 The rejected push is *cheaper* than an accepted one — backpressure is an early
 return, not extra work.
@@ -985,7 +990,8 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-`src/latest_buf.rs`, `src/block.rs`, `src/counted_signal.rs`, and `src/traits.rs`.
+`src/latest_buf.rs`, `src/block.rs`, and `src/traits.rs` (`src/counted_signal.rs`
+carries only its two `compile_fail` pins, no ordinary example).
 Total: 91 unit tests + 13 doctests, plus 9 `compile_fail` doctests: the
 `N == 0` rejection (`E0080`) on the three ring types and `BlockBuilder`, the
 deliberately absent `Source<T>` impl on `LatestBuf`'s consumer (`E0277`,
