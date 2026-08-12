@@ -13,12 +13,13 @@ Stack-allocated ring buffers for no-std embedded targets.
 
 | Type | Use case |
 |------|----------|
+| [`Block<T, N>` / `BlockBuilder<T, N>`](#complete-blocks) | Build complete contiguous sample windows, then compose them with a transport. |
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
 | [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
-All four are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All types are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
 
 ## What this optimises for
 
@@ -49,6 +50,7 @@ panics, or hides a cost.
 
 ## Features
 - Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
+- Complete contiguous sample blocks with an explicit fill-side builder.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
 - No heap, no dynamic dispatch, no required dependencies.
@@ -70,6 +72,47 @@ panics, or hides a cost.
   combinations individually; `scripts/ci.sh` enumerates the supported set.
 
 ## Usage
+
+### Complete blocks
+
+`BlockBuilder<T, N>` privately accumulates sequenced samples and yields a
+`Block<T, N>` only when all `N` contiguous samples are present. A gap is
+returned to the caller without changing the partial block, and clearing or
+dropping a partial builder publishes nothing. Timestamping is payload policy:
+use a timestamped type for `T` when required.
+
+`Block` is deliberately not another queue. Compose it with the overload policy
+you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
+newest when full; the proposed `LatestBuf<Block<T, N>>` will retain only the
+latest complete block.
+
+**Budget the composition before choosing it.** Publication copies the
+complete block, so cost scales with block bytes (159–8,658 reference
+instructions across the measured 2/8/16-byte × N = 8/32/128 grid), a
+rejected push costs nearly as much as an accepted one (the complete block
+is preserved and returned, within 5–31 instructions), and RAM is multiple
+complete blocks — `Q` slots plus the private builder. Small windows can
+invert the economics (per-sample publication beats blocks at the
+8/16-byte `N = 8` corners), and DMA integrations currently cannot avoid
+the double copy in ISR context — the builder's storage is deliberately
+private, so either budget both copies or publish from task context. The
+`block` module docs carry the full measured disclosure.
+
+```rust
+use ph_eventing::{BlockBuilder, EventBuf};
+
+let mut fill = BlockBuilder::<i16, 4>::new();
+for (sequence, sample) in [(10, 1), (11, 2), (12, 3)] {
+    assert!(fill.push(sequence, sample).unwrap().is_none());
+}
+let block = fill.push(13, 4).unwrap().unwrap();
+
+let queue = EventBuf::<_, 2>::new();
+let producer = queue.try_producer().unwrap();
+let consumer = queue.try_consumer().unwrap();
+producer.push(block).unwrap();
+assert_eq!(consumer.pop().unwrap().samples(), &[1, 2, 3, 4]);
+```
 
 ### RingBuf
 
@@ -335,7 +378,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 76 unit + 12 doctests + 6 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2) |
+| 85 unit + 13 doctests + 7 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2) |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

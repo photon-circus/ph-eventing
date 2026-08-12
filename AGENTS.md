@@ -32,6 +32,10 @@ It ships four primitives:
 - **`EventBuf<T, N>`** — a lock-free SPSC ring with **backpressure**. `push` returns `Err(val)` when full, so the producer always knows when delivery fails.
 - **`LatestBuf<T>`** — a freshness-first SPSC snapshot channel that retains one newest unread publication and reports replacement/skipped evidence.
 
+`Block<T, N>` + `BlockBuilder<T, N>` is the non-concurrent complete-window
+payload/fill abstraction. It composes with those transports rather than adding
+a fourth queue policy.
+
 **Key characteristics:**
 - Zero runtime dependencies (`portable-atomic` is optional; `loom` is a dev-dependency gated on `--cfg loom`). Verify with `cargo tree` — it must print the crate alone.
 - `#![no_std]` by default (std only for testing)
@@ -154,6 +158,7 @@ ph-eventing/
 
 | Type | Purpose |
 |------|---------|
+| `Block<T: Copy, N>` / `BlockBuilder<T, N>` | Complete contiguous sample payload and private fill state; no atomics |
 | `RingBuf<T: Copy, N>` | Single-owner, stack-allocated ring buffer (no atomics) |
 | `SeqRing<T: Copy, N>` | Lock-free SPSC ring buffer with atomic sequence tracking |
 | `seq_ring::Producer<'a, T, N>` | SeqRing write handle; `push(T) -> u32` returns sequence number |
@@ -652,6 +657,7 @@ Re-bless deliberately, never reflexively — the diff is the review:
 ```bash
 ./scripts/codesize.sh              # baseline, 8 upstream targets
 ./scripts/codesize.sh split        # include try_split, on branches that have it
+./scripts/codesize.sh block-matrix # BlockBuilder completion + EventBuf publication
 ./scripts/codesize.sh latest-matrix # LatestBuf operations and payload layouts
 ./scripts/codesize.sh latest-block-matrix # LatestBuf/BlockBuf D3 composition
 XTENSA=1 ./scripts/codesize.sh     # add the 3 ESP32 rows
@@ -686,6 +692,16 @@ reproduce with `./scripts/verify.sh cycles`. The counts are deterministic *per
 environment*, not universal: a 10.2 QEMU build shifted two of the eighteen
 regions by exactly one instruction (trace boundary attribution, not codegen).
 Cross-environment diffs of ±1 are noise; compare inside the image.
+
+The BlockBuf candidate's large-payload mode is isolated from the standard
+probe so its monomorphisations cannot perturb the standard LTO decisions:
+
+```bash
+./scripts/cycles.sh block-matrix
+./scripts/verify.sh cycles block-matrix  # pinned reference environment
+```
+
+Run the default probe as well when changing shared measurement infrastructure.
 
 | | empty | loaded | rejected/empty |
 |---|---:|---:|---:|
@@ -836,6 +852,17 @@ Tests are in `src/ring.rs`, `src/seq_ring.rs`, `src/event_buf.rs`, and `src/trai
 cargo test
 ```
 
+**`block::tests`:**
+- `completes_only_after_n_contiguous_samples` -- complete-only publication and metadata
+- `completion_resets_for_the_next_block` -- builder reuse, including `N = 1`
+- `rejects_reserved_zero_without_changing_partial_block` -- reserved sequence handling
+- `rejects_gap_without_hiding_loss_policy` -- explicit discontinuity and preserved partial state
+- `clear_discards_a_partial_block` -- explicit teardown policy
+- `sequence_wrap_skips_zero` -- contiguous wrap from `u32::MAX` to `1`
+- `works_without_default_bound` -- `T: Copy` only, no `Default`
+- `default_and_capacity_match_new` -- constructor/default introspection
+- `event_buf_composition_queues_and_returns_a_rejected_block` -- composed FIFO/rejection policy
+
 **`ring::tests`:**
 - `new_ring_is_empty` — Fresh ring state
 - `push_and_get` — Basic push/get/latest
@@ -915,11 +942,12 @@ cargo test
 **Doctests:** Six in `src/lib.rs` (the buffer types, `forward`, and the
 `try_*` bring-up), two in `src/macros.rs` (`static_spsc!` for `EventBuf` and
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
-`src/latest_buf.rs`, and `src/traits.rs`. Total: 76 unit tests + 12 doctests, plus 6 `compile_fail`
-doctests: the `N == 0` rejection (`E0080`) on all three ring types, the
-deliberately absent `Source<T>` impl on `LatestBuf`'s consumer (`E0277`,
-decision D2 — the pin keeps a convenience impl from arriving silently), and
-two pins that `LatestBuf` producer/consumer handles are `!Sync` (contract H2).
+`src/latest_buf.rs`, `src/block.rs`, and `src/traits.rs`. Total: 85 unit tests + 13 doctests,
+plus 7 `compile_fail` doctests: the `N == 0` rejection (`E0080`) on the three
+ring types and `BlockBuilder`, the deliberately absent `Source<T>` impl on
+`LatestBuf`'s consumer (`E0277`, decision D2 — the pin keeps a convenience impl
+from arriving silently), and two pins that `LatestBuf` producer/consumer handles
+are `!Sync` (contract H2).
 
 ## Code Conventions
 

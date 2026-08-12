@@ -36,11 +36,23 @@ All notable changes to this project will be documented in this file.
   shipped orderings.
 
 ### Documentation
+- BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows. Its status header initially recorded promotion as waiting on decision P; P has since closed as Copy composition and the record reads DECISION-COMPLETE.
+### Added
+- `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample
+  windows without introducing another queue policy. The builder rejects gaps
+  explicitly, skips reserved sequence zero at wrap, and yields a public block
+  only after all `N` samples are initialized. Compose blocks with
+  `EventBuf<Block<...>, Q>` today or the proposed `LatestBuf<Block<...>>` for
+  freshness-first handoff.
+
+### Documentation
 - Cycle decisions **P** and **S** are closed (2026-08-11). **P**: BlockBuf's publication
   foundation is **Copy composition** for the supported shapes — no library-wide threshold is
   claimed; the per-shape measured rows are the budget statement, the nine-shape matrix rides
   into the release baselines at promotion, and the docs owe integrators the double-copy
-  hazard guidance (make the builder the DMA target, or publish from task context). **S**:
+  hazard guidance (the builder's storage is deliberately private — budget both copies, or
+  publish from task context; direct-to-granted-slot filling is decision S's registered
+  reopening condition). **S**:
   SlotPool is **deferred**, not rejected — full evaluation evidence banked on its branch,
   draft PR closed, and an adopter-gated reopening trigger registered (a measured budget
   breach, a direct-to-granted-slot requirement, or a standalone zero-copy adopter). Every

@@ -9,6 +9,8 @@
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use ph_eventing::EventBuf;
+#[cfg(feature = "block-matrix")]
+use ph_eventing::{Block, BlockBuilder, event_buf::Producer};
 #[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
 use ph_eventing::{
     LatestBuf, LatestItem, PublishReport,
@@ -71,6 +73,29 @@ pub extern "C" fn bringup_split() -> i32 {
         Some(_) => 0,
         None => -4,
     }
+}
+
+// Each function below starts from a builder that the caller has already
+// filled with N - 1 samples. Its section therefore attributes only the final
+// completion and EventBuf publication shape, not the O(N) acquisition loop.
+// Accepted and rejected publication share this code; the cycle probe measures
+// both runtime paths separately.
+#[cfg(feature = "block-matrix")]
+macro_rules! block_publish_probe {
+    ($name:ident, $sample:ty, $n:literal) => {
+        #[unsafe(no_mangle)]
+        pub fn $name(
+            fill: &mut BlockBuilder<$sample, $n>,
+            tx: &Producer<'_, Block<$sample, $n>, 1>,
+            sequence: u32,
+            sample: $sample,
+        ) -> bool {
+            match fill.push(sequence, sample) {
+                Ok(Some(block)) => tx.push(block).is_ok(),
+                Ok(None) | Err(_) => false,
+            }
+        }
+    };
 }
 
 // These exported statics make the exact channel layouts visible as individual
@@ -226,6 +251,24 @@ macro_rules! latest_complete_probe {
     };
 }
 
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w2_n8_publish, u16, 8);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w2_n32_publish, u16, 32);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w2_n128_publish, u16, 128);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w8_n8_publish, u64, 8);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w8_n32_publish, u64, 32);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w8_n128_publish, u64, 128);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w16_n8_publish, [u64; 2], 8);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w16_n32_publish, [u64; 2], 32);
+#[cfg(feature = "block-matrix")]
+block_publish_probe!(block_w16_n128_publish, [u64; 2], 128);
 #[cfg(feature = "latest-block-matrix")]
 latest_complete_probe!(latest_complete_w2_n8_publish, u16, 8);
 #[cfg(feature = "latest-block-matrix")]

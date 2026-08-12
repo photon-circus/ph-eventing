@@ -26,10 +26,18 @@
 use core::hint::black_box;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::debug;
+#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+use ph_eventing::EventBuf;
 #[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
 use ph_eventing::LatestBuf;
-#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
-use ph_eventing::{EventBuf, RingBuf, SeqRing};
+#[cfg(feature = "block-matrix")]
+use ph_eventing::{Block, BlockBuilder};
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
+use ph_eventing::{RingBuf, SeqRing};
 
 #[cfg(feature = "latest-block-matrix")]
 #[path = "../../probes/block_shape.rs"]
@@ -73,7 +81,11 @@ macro_rules! markers {
     };
 }
 
-#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
 markers! {
     0 => m_end,
     1 => m_overhead,
@@ -98,6 +110,31 @@ markers! {
     17 => m_rb_get,
     18 => m_rb_latest,
     19 => m_sr_poll_lagged_far,
+}
+
+#[cfg(feature = "block-matrix")]
+markers! {
+    0 => m_end,
+    1 => m_overhead,
+    // BlockBuilder completion + EventBuf publication. Width is bytes/sample.
+    20 => m_bp_w2_n8_accepted,
+    21 => m_bp_w2_n8_rejected,
+    22 => m_bp_w2_n32_accepted,
+    23 => m_bp_w2_n32_rejected,
+    24 => m_bp_w2_n128_accepted,
+    25 => m_bp_w2_n128_rejected,
+    26 => m_bp_w8_n8_accepted,
+    27 => m_bp_w8_n8_rejected,
+    28 => m_bp_w8_n32_accepted,
+    29 => m_bp_w8_n32_rejected,
+    30 => m_bp_w8_n128_accepted,
+    31 => m_bp_w8_n128_rejected,
+    32 => m_bp_w16_n8_accepted,
+    33 => m_bp_w16_n8_rejected,
+    34 => m_bp_w16_n32_accepted,
+    35 => m_bp_w16_n32_rejected,
+    36 => m_bp_w16_n128_accepted,
+    37 => m_bp_w16_n128_rejected,
 }
 
 #[cfg(feature = "latest-block-matrix")]
@@ -198,7 +235,11 @@ markers! {
     35 => m_lb_consumer_reacquire,
 }
 
-#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
 fn event_buf_costs() {
     let buf = EventBuf::<u32, 8>::new();
     let tx = buf.try_producer().expect("producer");
@@ -239,7 +280,11 @@ fn event_buf_costs() {
     m_end();
 }
 
-#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
 fn seq_ring_costs() {
     let ring = SeqRing::<u32, 8>::new();
     let tx = ring.try_producer().expect("producer");
@@ -288,7 +333,11 @@ fn seq_ring_costs() {
     m_end();
 }
 
-#[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+#[cfg(not(any(
+    feature = "block-matrix",
+    feature = "latest-matrix",
+    feature = "latest-block-matrix"
+)))]
 fn ring_buf_costs() {
     let mut ring = RingBuf::<u32, 8>::new();
 
@@ -311,6 +360,40 @@ fn ring_buf_costs() {
     m_rb_latest();
     black_box(ring.latest());
     m_end();
+}
+
+#[cfg(feature = "block-matrix")]
+macro_rules! measure_block_shape {
+    ($sample:ty, $n:literal, $value:expr, $accepted:ident, $rejected:ident) => {{
+        let mut accepted_fill = BlockBuilder::<$sample, $n>::new();
+        for sequence in 1..$n {
+            let _ = accepted_fill.push(sequence as u32, black_box($value));
+        }
+
+        let queue = EventBuf::<Block<$sample, $n>, 1>::new();
+        let tx = queue.try_producer().expect("producer");
+
+        $accepted();
+        let block = accepted_fill
+            .push($n as u32, black_box($value))
+            .expect("contiguous")
+            .expect("complete");
+        let _ = black_box(tx.push(block));
+        m_end();
+
+        let mut rejected_fill = BlockBuilder::<$sample, $n>::new();
+        for sequence in 1..$n {
+            let _ = rejected_fill.push(sequence as u32, black_box($value));
+        }
+
+        $rejected();
+        let block = rejected_fill
+            .push($n as u32, black_box($value))
+            .expect("contiguous")
+            .expect("complete");
+        let _ = black_box(tx.push(block));
+        m_end();
+    }};
 }
 
 #[cfg(any(feature = "latest-matrix", feature = "latest-block-matrix"))]
@@ -344,6 +427,49 @@ macro_rules! measure_latest_payload {
         let _ = black_box(consumer.take_latest());
         m_end();
     }};
+}
+
+#[cfg(feature = "block-matrix")]
+fn block_publication_costs() {
+    measure_block_shape!(u16, 8, 1_u16, m_bp_w2_n8_accepted, m_bp_w2_n8_rejected);
+    measure_block_shape!(u16, 32, 1_u16, m_bp_w2_n32_accepted, m_bp_w2_n32_rejected);
+    measure_block_shape!(
+        u16,
+        128,
+        1_u16,
+        m_bp_w2_n128_accepted,
+        m_bp_w2_n128_rejected
+    );
+    measure_block_shape!(u64, 8, 1_u64, m_bp_w8_n8_accepted, m_bp_w8_n8_rejected);
+    measure_block_shape!(u64, 32, 1_u64, m_bp_w8_n32_accepted, m_bp_w8_n32_rejected);
+    measure_block_shape!(
+        u64,
+        128,
+        1_u64,
+        m_bp_w8_n128_accepted,
+        m_bp_w8_n128_rejected
+    );
+    measure_block_shape!(
+        [u64; 2],
+        8,
+        [1_u64; 2],
+        m_bp_w16_n8_accepted,
+        m_bp_w16_n8_rejected
+    );
+    measure_block_shape!(
+        [u64; 2],
+        32,
+        [1_u64; 2],
+        m_bp_w16_n32_accepted,
+        m_bp_w16_n32_rejected
+    );
+    measure_block_shape!(
+        [u64; 2],
+        128,
+        [1_u64; 2],
+        m_bp_w16_n128_accepted,
+        m_bp_w16_n128_rejected
+    );
 }
 
 #[cfg(feature = "latest-block-matrix")]
@@ -613,6 +739,9 @@ fn latest_buf_costs() {
     drop(consumer.expect("reacquired consumer"));
 }
 
+// Semihosting exit terminates QEMU, but its signature is not `!`; the fallback
+// must remain side-effect-free so it cannot contaminate any measured region.
+#[allow(clippy::empty_loop)]
 #[entry]
 fn main() -> ! {
     // Two adjacent markers: the cost of the markers themselves, subtracted
@@ -620,12 +749,18 @@ fn main() -> ! {
     m_overhead();
     m_end();
 
-    #[cfg(not(any(feature = "latest-matrix", feature = "latest-block-matrix")))]
+    #[cfg(not(any(
+        feature = "block-matrix",
+        feature = "latest-matrix",
+        feature = "latest-block-matrix"
+    )))]
     {
         event_buf_costs();
         seq_ring_costs();
         ring_buf_costs();
     }
+    #[cfg(feature = "block-matrix")]
+    block_publication_costs();
     #[cfg(feature = "latest-matrix")]
     latest_buf_costs();
     #[cfg(feature = "latest-block-matrix")]

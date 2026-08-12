@@ -28,6 +28,7 @@
 # Usage:
 #   ./scripts/codesize.sh                  # baseline API, upstream targets
 #   ./scripts/codesize.sh split            # also measure try_split, where present
+#   ./scripts/codesize.sh block-matrix     # Block completion + publication shapes
 #   ./scripts/codesize.sh latest-matrix    # LatestBuf target/payload matrix
 #   ./scripts/codesize.sh latest-block-matrix # LatestBuf sample/block D3 matrix
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
@@ -48,11 +49,16 @@ export CARGO_INCREMENTAL
 
 PROBE_FEATURES=""
 BLESS=0
+BLOCK_MATRIX=0
 LATEST_MATRIX=0
 LATEST_BLOCK_MATRIX=0
 for arg in "$@"; do
     case "$arg" in
         split)   PROBE_FEATURES="split" ;;
+        block-matrix)
+            PROBE_FEATURES="block-matrix"
+            BLOCK_MATRIX=1
+            ;;
         latest-matrix)
             PROBE_FEATURES="latest-matrix"
             LATEST_MATRIX=1
@@ -69,6 +75,15 @@ for arg in "$@"; do
 done
 
 BASELINE="scripts/codesize/baseline.tsv"
+REGEN="./scripts/codesize.sh --bless"
+# Block-matrix rows gate against their own baseline file: a bless from a
+# block-matrix run writes only block rows, and letting that touch the
+# default baseline would silently drop every default row -- the exact
+# partial-bless hazard the refusal below exists to prevent.
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    BASELINE="scripts/codesize/baseline-block.tsv"
+    REGEN="./scripts/codesize.sh block-matrix --bless"
+fi
 # Growth beyond this many bytes on any row fails the gate. Absolute, not a
 # percentage: at 100-200 bytes a percentage is noise, and the regression this
 # exists to catch was +60 on Cortex-M0+ and +78 on ESP32-S2. Shrinkage never
@@ -132,7 +147,12 @@ section_size() {
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
-if [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        TARGET SHAPE code_B block_B accepted_B rejected_B
+    printf '%-30s %-10s %8s %8s %10s %10s\n' \
+        '------------------------------' '----------' '------' '-------' '----------' '----------'
+elif [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
     printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
         TARGET PAYLOAD publish_B take_B complete_B channel_B builder_B init
     printf '%-30s %-16s %10s %10s %10s %10s %10s %6s\n' \
@@ -193,6 +213,33 @@ for entry in $TARGETS; do
     fi
 
     ar="scripts/codesize/target/$target/release/libph_eventing_codesize.a"
+
+    if [ "$BLOCK_MATRIX" = "1" ]; then
+        for shape in w2_n8 w2_n32 w2_n128 w8_n8 w8_n32 w8_n128 w16_n8 w16_n32 w16_n128; do
+            width="$(printf '%s' "$shape" | sed 's/^w\([0-9]*\)_.*/\1/')"
+            count="$(printf '%s' "$shape" | sed 's/.*_n//')"
+            code="$(fn_size "$ar" "block_${shape}_publish")"
+            block_bytes=$((width * count + 8))
+            accepted_bytes=$((block_bytes * 2))
+            # A rejected push preserves and returns the complete block, so it
+            # crosses a caller-visible result boundary instead of a slot-write
+            # boundary. Both paths therefore carry two block-sized moves after
+            # the final sample: builder completion plus publish-or-return.
+            rejected_bytes=$((block_bytes * 2))
+            [ -z "$code" ] && matrix_missing=$((matrix_missing + 1))
+            printf '%-30s %-10s %8s %8s %10s %10s\n' \
+                "$target" "$shape" "${code:--}" "$block_bytes" \
+                "$accepted_bytes" "$rejected_bytes"
+            # Persist gated rows so the baseline machinery below can bless
+            # and compare them; Xtensa stays ungated as in the default mode.
+            case "$target" in
+                xtensa-*) ;;
+                *) [ -n "$code" ] && printf '%s\tblock_%s\t%s\n' \
+                    "$target" "$shape" "$code" >> "$RESULTS" ;;
+            esac
+        done
+        continue
+    fi
 
     if [ "$LATEST_MATRIX" = "1" ]; then
         for shape in u32 w16 block128; do
@@ -310,6 +357,24 @@ if [ "$skipped" -gt 0 ]; then
 fi
 [ "$failed" -gt 0 ] && printf '%s target(s) failed to build.\n\n' "$failed"
 
+if [ "$BLOCK_MATRIX" = "1" ]; then
+    if [ "$matrix_missing" -gt 0 ]; then
+        printf '%s block-matrix function(s) had no code-size measurement.\n' \
+            "$matrix_missing" >&2
+        exit 1
+    fi
+    [ "$failed" -gt 0 ] && exit 1
+    [ "$skipped" -gt 0 ] && exit 2
+    printf 'block_B is size_of::<Block<T, N>>(). accepted_B counts builder\n'
+    printf 'completion plus publication; rejected_B counts completion plus\n'
+    printf 'returning the complete rejected block to the caller.\n'
+    printf 'These are logical payload-traffic bounds; code_B is emitted flash.\n'
+    printf 'Run scripts/cycles.sh for accepted/rejected instruction paths.\n'
+    printf '\n'
+    # Fall through to the baseline gate: block rows bless into and compare
+    # against baseline-block.tsv, so post-promotion regressions are gated.
+fi
+
 if [ "$LATEST_MATRIX" = "1" ] || [ "$LATEST_BLOCK_MATRIX" = "1" ]; then
     if [ "$matrix_missing" -gt 0 ]; then
         printf '%s LatestBuf matrix section(s) had no code-size measurement.\n' \
@@ -364,8 +429,8 @@ if [ "$BLESS" = "1" ]; then
         exit 1
     fi
     {
-        printf '# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh --bless
-'
+        printf '# ph-eventing code-size baseline. Regenerate: %s
+' "$REGEN"
         printf '# rustc-commit: %s
 ' "$RUSTC_ID"
         printf '#
@@ -400,8 +465,8 @@ if [ ! -f "$BASELINE" ]; then
     printf '
 SKIP baseline gate: %s does not exist yet.
 ' "$BASELINE"
-    printf 'Create it with: ./scripts/codesize.sh --bless
-'
+    printf 'Create it with: %s
+' "$REGEN"
     exit 2
 fi
 
@@ -419,8 +484,8 @@ SKIP baseline gate: baseline was recorded with rustc %s, this is %s.
 '
     printf 'signal. Re-bless deliberately after reviewing the diff:
 '
-    printf '  ./scripts/codesize.sh --bless
-'
+    printf '  %s
+' "$REGEN"
     exit 2
 fi
 
@@ -475,8 +540,8 @@ if [ "${regressions:-0}" -gt 0 ]; then
     printf '
 %s row(s) grew by more than %s bytes.
 ' "$regressions" "$TOLERANCE"
-    printf 'If the growth is intended, review it and run: ./scripts/codesize.sh --bless
-'
+    printf 'If the growth is intended, review it and run: %s
+' "$REGEN"
     exit 1
 fi
 printf '  ok -- no row grew by more than %s bytes\n' "$TOLERANCE"
