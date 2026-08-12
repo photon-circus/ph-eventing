@@ -45,7 +45,9 @@ the supporting work behind it second:
 - Records obey the stale-claims discipline: when a decision closes, a
   measurement lands, or a claim changes, the record is updated in the
   same change that moves the canonical source.
-- The 0.2.0 types (`RingBuf`, `EventBuf`, `SeqRing`) receive records
-  retroactively when next materially touched.
+- The 0.2.0 types receive records retroactively when next materially
+  touched. [`seq-ring.md`](seq-ring.md) and [`event-buf.md`](event-buf.md)
+  landed under that rule when #25 removed their constructors; `RingBuf`
+  (doc-touched only this cycle) still waits for its material touch.
 - [`latest-buf.md`](latest-buf.md) is the exemplar for structure and
   depth.

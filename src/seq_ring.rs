@@ -6,8 +6,9 @@
 //! - Sequence numbers are monotonically increasing `u32`; `0` is reserved to mean "empty".
 //! - The consumer can drain in-order (`poll_one`/`poll_up_to`) or sample the newest value (`latest`).
 //! - If the consumer lags by more than `N`, it skips ahead and reports the number of dropped items.
-//!   The one exception is the sequence wrap, which can drop a few extra entries depending on `N` —
-//!   see "Known limitation: extra drops at the sequence wrap" below.
+//!   Two boundaries qualify that accounting: the sequence wrap can drop a few extra entries
+//!   depending on `N`, and a gap of one whole sequence span aliases to "nothing new" and reports
+//!   zero — see the two "Known limitation" sections below.
 //!
 //! # Memory ordering
 //! The producer invalidates the per-slot sequence, writes the value, publishes the new per-slot
@@ -24,7 +25,9 @@
 //! Slot values are read and written with volatile accesses, and the consumer holds its copy as
 //! `MaybeUninit<T>` until the re-check passes. A copy that raced with an overwrite is therefore
 //! discarded as raw bytes and never materialises as a `T` that could violate the type's validity
-//! invariants.
+//! invariants — for reads that complete within one sequence span; the re-check compares sequence
+//! values, so it carries the counter-width ABA bound stated under "Known limitation: whole-span
+//! sequence aliasing" below.
 //!
 //! # Known deviation: the seqlock data race
 //!
@@ -61,9 +64,11 @@
 //!   this ring from two threads, you will get a UB report pointing into this crate. That is the
 //!   deviation, not a new bug. `scripts/miri.*` shows the split-pass approach: full checking
 //!   everywhere else, race detector off for this ring alone.
-//! - **A raced copy is never returned.** The double sequence check discards it, and it is held as
-//!   `MaybeUninit<T>` until validated, so it cannot even briefly exist as a `T` that violates the
-//!   type's validity invariants.
+//! - **A raced copy is never returned** — within the span bound. The double sequence check
+//!   discards it, and it is held as `MaybeUninit<T>` until validated, so it cannot even briefly
+//!   exist as a `T` that violates the type's validity invariants. The check compares sequence
+//!   values, so a read preempted for one whole span of publications can pass both checks against
+//!   a rewritten slot; see "Known limitation: whole-span sequence aliasing".
 //!
 //! ## If that is not acceptable
 //! - [`crate::EventBuf`] is race-free by construction — its producer and consumer never touch the
@@ -100,8 +105,10 @@
 //!
 //! **This is a data-loss bound, not a soundness problem.** The affected read fails its sequence
 //! check and is counted in [`PollStats::dropped`], so `read + dropped` still accounts for every
-//! published item and no stale or torn value is ever returned. It is indistinguishable from the
-//! ordinary lag-induced drops the consumer already reports.
+//! published item and no stale or torn value is returned — both within the span bound of the
+//! "Known limitation: whole-span sequence aliasing" section below, which is where each of those
+//! guarantees runs out. It is indistinguishable from the ordinary lag-induced drops the consumer
+//! already reports.
 //!
 //! The same misalignment makes the lag-recovery jump resume up to one sequence later than it
 //! strictly needs to. That is bounded by the table above and reported identically.
@@ -111,6 +118,48 @@
 //! divisor of `2^32 - 1` if you want the wrap to be exactly seamless. Avoid values like 96 or 121
 //! if a burst of drops at a predictable interval would matter to you. If no loss is acceptable at
 //! all, [`crate::EventBuf`] applies backpressure instead and has no wrap boundary of this kind.
+//!
+//! # Known limitation: whole-span sequence aliasing
+//!
+//! Sequence arithmetic is modular. `push` skips the reserved value `0`, so the counter cycles
+//! through `2^32 - 1` distinct nonzero values, and every comparison and distance the consumer
+//! computes is exact only up to that span. Two consequences follow — both inherent to any
+//! fixed-width seqlock at its counter width:
+//!
+//! - **A whole-span gap from the resume cursor reports nothing.** If the distance from the
+//!   consumer's resume cursor to the newest publication reaches exactly `2^32 - 1` (or any whole
+//!   multiple), the published sequence aliases the cursor and `poll_one`/`poll_up_to` take their
+//!   nothing-new early return: zero reads and zero drops. Larger distances report only the
+//!   remainder modulo the span. The `read + dropped` conservation promise is therefore exact
+//!   while the resume cursor stays within one span of the newest publication — residual backlog
+//!   from a partial drain counts against that distance, so this is *not* simply "fewer than one
+//!   span of publications between calls" (the sufficient call-cadence bound is below) — and
+//!   silence after an extreme stall is not evidence that nothing was lost.
+//! - **A whole-span mid-read stall defeats the sequence re-check.** The torn-copy guard compares
+//!   the slot's sequence before and after the copy. A consumer preempted *inside* that copy for
+//!   exactly one whole span of publications sees the same sequence value on both sides of a slot
+//!   that was rewritten in between — counter-width ABA — and a mixed copy would be accepted as
+//!   `T`. The discard argument for the documented deviation is therefore bounded: it holds for
+//!   any read that completes in less than one full span of producer publications.
+//!
+//! Reachability arithmetic, so the bound is a decision rather than a surprise: one span is
+//! ~4.29 billion publications. At a sustained 1 MHz push rate a poll gap must exceed ~71.6
+//! minutes — and the mid-read stall must hold the consumer *between two instructions of one
+//! copy* for that long — before either case is reachable; at 10 kHz it is ~5 days. The escape
+//! hatch is structural, and the bound is measured from the **resume cursor**, not from call
+//! cadence: aliasing needs the distance from the resume cursor to the newest publication to
+//! reach one whole span, and a partial drain leaves residual backlog that counts against it. A
+//! nonzero ordered poll (`poll_one`, or `poll_up_to` with a nonzero budget) always leaves the
+//! cursor at most `N - 1` behind the newest publication it observed — the lag-recovery jump
+//! handles a lag over `N`, and draining even one item brings a lag of at most `N` below that —
+//! so keeping the publications between consecutive nonzero polls below one span *minus*
+//! `N - 1` suffices. [`Consumer::skip_to_latest`] leaves the cursor exactly **one** behind the
+//! newest it observed (so the next poll yields that newest item); its post-call allowance is
+//! therefore one span minus one, not a full span.
+//! `poll_up_to(0, …)` returns before touching the resume cursor, and the non-advancing
+//! [`Consumer::latest`] never moves it. Separately, bound consumer preemption during a single
+//! read to less than a span of publications. If neither bound can be stated for your system,
+//! [`crate::EventBuf`] has no sequence wrap of any kind.
 //!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.
