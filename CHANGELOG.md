@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## 0.3.0 - 2026-08-12
 
+**What this release delivers.** 0.2.0 made the costs measurable; 0.3.0 grows
+the vocabulary and holds every new word to the same standard. Four primitives
+ship — `LatestBuf` (freshness-first snapshot with loss evidence),
+`Block`/`BlockBuilder` (complete contiguous sample windows, composed with the
+transport you choose rather than adding a queue policy), `EventFlags`
+(coalesced ISR-to-task conditions), and `CountedSignal` (exact saturating
+count) — each with a frozen clause contract, an enduring engineering record,
+exhaustive Loom models, Miri coverage, and code-size and instruction
+measurements gated on the assembled release tree. The one breaking change is
+the scheduled removal of the panicking constructors: `try_*` is now the only
+acquisition API. And the crate stays deliberately paranoid: every guarantee
+is stated with the boundary where it stops holding — the counter-width span
+limits on `SeqRing` accounting, `LatestBuf::skipped`, and `BlockBuilder`
+contiguity; the seqlock's formal data race, now with a reproducible model
+witness; bounded polling under continuous overwrite; and source-level
+boundedness with each ISA's realisation disclosed — so an integrator can
+decide *against* a type with full information instead of discovering the
+edge in the field.
+
 ### Added
 - `LatestBuf<T>` — a three-slot, freshness-first SPSC snapshot channel for
   state where the newest value beats FIFO delivery. Publication is one bounded
@@ -189,6 +208,11 @@ All notable changes to this project will be documented in this file.
 - `LatestBuf::skipped` is exact only while the consumer's resume generation
   stays within one non-zero `u32` span of the newest publication (contract
   non-promise X6); a full-cycle gap can also report `skipped = 0`.
+- `BlockBuilder` contiguity shares the same counter-width boundary: the check
+  compares `u32` sequence identity only, so a partial builder held across
+  exactly one whole omitted span accepts the recurring sequence as contiguous
+  (F2 span non-promise; the block module docs carry the reachability
+  arithmetic and the `clear()`-on-outage recovery guidance).
 
 ## 0.2.0 - 2026-08-10
 

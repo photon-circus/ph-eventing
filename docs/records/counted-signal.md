@@ -49,6 +49,9 @@ IDs in parentheses; the clauses are the normative statements.
   contract, algorithm, and evidence case — not a weakened reading of
   this one. `&self` on the hot path is a receiver choice; it does not
   permit sharing a handle (`Send + !Sync` remains).
+- **No non-clearing observation, by design.** `take_count` is the only
+  read and it clears; `Debug` is deliberately opaque — printing the live
+  count would be an advisory peek without the take's snapshot semantics.
 - **No payload, no per-occurrence identity (X1, X2).** Only the count in
   a take interval is retained. Ordering between individual increments
   is intentionally absent; unrelated data gains no publication fence
@@ -137,7 +140,8 @@ in contract §8 and proposal §3.1–§3.2):**
   own caller and evidence. Width genericity would create
   target-dependent contracts.
 
-**Review history:** issue #30 closed with the lane PROPOSED; PR #33
+**Review history** *(the lane's path to acceptance)*: issue #30 closed
+with the lane PROPOSED; PR #33
 carries the admission package. Bugbot high finding (stale MAX load drops
 increments) agreed and fixed with a sentinel re-read + Loom litmus — first
 as a bounded CAS, then (Codex P1) as the no-op RMW after review showed the

@@ -160,4 +160,4 @@ closed, BlockBuf has no remaining gate but the #34 acceptance review.
 matrix `bc54a9a`: 18 cycle rows, 8-target flash); joint D3 matrix on
 the LatestBuf lane (`latest-block-composition-measurements.md`,
 `8593b4a`, PR #35); proposal §6 / §6.1 (cost model and decision rule);
-tracking: issue #26 decision P, draft PR #34, contract PR #37.
+tracking: issue #26 decision P, PR #34 (merged), contract PR #37.

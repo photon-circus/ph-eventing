@@ -87,7 +87,7 @@ IDs in parentheses; the clauses are the normative statements.
 | Raise unions into pending; take returns-and-clears exactly (M1, R1–R2, T1–T2, C1, C3) | Unit set: empty/all masks, bit 31, duplicate coalesce, multi-bit round-trip, empty raise/take no-ops | Pinned |
 | Racing raise partitions across take windows; never erased (C1–C3) | Loom `event_flags_raise_racing_take_is_partitioned_exactly` and `event_flags_distinct_raises_partition_across_takes`; native/Miri threaded stress | Proven |
 | Observed raise publishes prior application memory (S1) | Loom `event_flags_observed_raise_publishes_payload`; fails when either Release or Acquire is independently weakened to Relaxed | Proven |
-| One `fetch_or` / one `swap(0)`; no CAS loop, no history-proportional work (B1–B3) | Source review; Cortex-M3 QEMU: raise **12** / take **8** instructions whether empty or set (constant w.r.t. occupancy and set-bit count) | Measured |
+| One source-level `fetch_or` / one `swap(0)`; no algorithmic retry, no history-proportional work — per-ISA the single RMW may be a contention-bounded LDREX/STREX pair (B1–B3) | Source review; Cortex-M3 QEMU on the assembled 0.3.0 tree: raise **12** / take **10** instructions whether empty or set (constant w.r.t. occupancy and set-bit count — the state pairs are enforced as a cycles gate; take was 8 on the per-lane tree, merged-binary codegen) | Measured, gated |
 | Portable-atomic ISR windows stay small on constrained targets | `event-flags-atomic-window.sh`: thumbv6m **4** always gated in `verify.sh`; ESP32-S2 **5** / ESP32-S3 **0** (native `s32c1i`) opt-in via `ESP=1`; one masked RMW, no branch/CAS loop | Measured |
 | Sole-role `Send + !Sync` handles; reacquisition continues pending state (H1–H4) | Exclusivity/reuse unit test; `Send` + container-`Sync` type tests; producer/consumer `compile_fail` doctests pin `!Sync`; `const_new_works_in_static_context` | Proven |
 | Transparent panic-free 32-bit mask (W1–W2) | `EventMask` four-byte transparent layout; `from_index` returns `None` outside `0..32` (no shift panic) | Pinned |
@@ -122,7 +122,9 @@ issue #30):**
   `u64` is not one native operation on the shipped 32-bit targets.
 - **D4 — no non-clearing peek.** An advisory snapshot invites
   check-then-act reasoning the concurrent take/raise pair cannot uphold;
-  observation is destructive `take_all` by design.
+  observation is destructive `take_all` by design — `Debug` is
+  deliberately opaque for the same reason (printing the pending mask
+  would be the advisory peek the frozen API rejects).
 - **D5 — no stream `Sink`/`Source`/`Link`; signal traits deferred.**
   Coalesced state is not an item stream. CountedSignal's
   increment/count-snapshot vocabulary disproves the original single
@@ -133,14 +135,14 @@ issue #30):**
 (portable-atomic ISR latency on thumbv6m / ESP32-S2/S3) were sequenced
 behind shared decision H; once H closed, the contract freeze, secondary
 confirmations (width, no-peek, trait posture), and the interrupt-window
-campaign landed together as the complete admission package. Draft PR #36
-carries the package for acceptance review; issue #29 is closed as
-PROPOSED — ready for candidate evaluation, not yet acceptance into the
-release. Evaluation may still reject the primitive on API fit or
-measured cost, with the evidence retained either way.
+campaign landed together as the complete admission package. PR #36 then
+carried the package through nine review rounds to convergence and the
+maintainer's acceptance (2026-08-12, merged into `release/0.3.0`);
+issue #29 closed at PROPOSED and carries the post-closure corrections
+the reviews produced.
 
 **Where the numbers live:** proposal §4 (behaviour/Loom/Miri, 11-target
 code size, pinned Cortex-M3 cycles beside CountedSignal's 8/7 anchor,
 portable-atomic interrupt windows); `scripts/event-flags-atomic-window.sh`
-(disassembly probe); tracking: issues #26/#29/#30, draft PR #36;
+(disassembly probe); tracking: issues #26/#29/#30, PR #36 (merged);
 implementation freeze commit `e9859d4`, handle decision `f26d4c3`.

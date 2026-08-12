@@ -1046,7 +1046,7 @@ cargo test
 `SeqRing`), and one ordinary example each in `src/ring.rs`, `src/event_buf.rs`,
 `src/latest_buf.rs`, `src/block.rs`, `src/event_flags.rs`, and `src/traits.rs`
 (`src/counted_signal.rs` carries only its two `compile_fail` pins, no ordinary
-example). Total: 101 unit tests + 13 doctests, plus 11 `compile_fail` doctests: the
+example). Total: 103 unit tests + 13 doctests, plus 11 `compile_fail` doctests: the
 `N == 0` rejection (`E0080`) on the three ring types and `BlockBuilder`, the
 deliberately absent `Source<T>` impl on `LatestBuf`'s consumer (`E0277`,
 decision D2 — the pin keeps a convenience impl from arriving silently), two

@@ -92,6 +92,7 @@ IDs in parentheses; the clauses are the normative statements.
 | No torn or mixed value — one-publication Rust value semantics (P6/C6) | Threaded patterned-payload stress; detector-on Miri | Proven |
 | Wait-free producer, bounded consumer, no CAS loop (B1–B3) | Algorithm review (no loops); pinned QEMU cycle regions constant w.r.t. lag and occupancy | Measured |
 | Orderings are necessary, not decorative | Mutation runs: all 6 exchange and 4 role-handoff weakenings detected (8 by Loom; 2 relinquish-only mutations by Miri, seeds 53/47) | Proven |
+| `replaced_unread` is per-call truth, not an aggregate (P4) | Loom: every report correlated with its predecessor's fate (taken/pending ⇒ not replaced) in every interleaving, plus the aggregate taken/displaced/pending conservation as an independent check; mutation-verified both ways; deterministic per-publish asserts in the handshake model | Proven |
 | Exact skipped accounting within one wrap span (C3, G1–G3) | Wrap-boundary unit set mirroring `SeqRing`'s `seq_distance` tests; full-cycle pin (`full_generation_cycle_uses_documented_approximation`) | Pinned |
 | Reacquisition continues, never restarts (H4) | Drop-and-reacquire continuation tests; both cross-context role-handoff Loom models; detector-on Miri | Proven |
 | Empty poll costs one `Acquire` load, no RMW (A.1) | Loom equivalence model; measured: 7–8 instructions off empty polls, +5–6 on pending Cortex-M3 paths | Measured, selected |

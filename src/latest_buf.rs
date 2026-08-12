@@ -5,7 +5,7 @@
 //! [`PublishReport::replaced_unread`] reports it. The consumer takes only the
 //! latest value and receives its generation plus the exact number skipped.
 //!
-//! The prototype uses three slots with exclusive ownership: one producer
+//! The channel uses three slots with exclusive ownership: one producer
 //! slot, one consumer slot, and one slot named by an atomic exchange state.
 //! An endpoint accesses a slot only after acquiring it through a single
 //! atomic swap. Producer and consumer therefore never touch the same payload
