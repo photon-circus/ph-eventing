@@ -35,6 +35,25 @@ All notable changes to this project will be documented in this file.
   Exact bounded saturation depends on retaining a sole `Send + !Sync` producer
   handle. Cortex-M3 instruction counts remain 8 / 7 after the sentinel-RMW
   path (`./scripts/verify.sh cycles`).
+- Evaluable `LatestBuf<T>` prototype: a three-slot, freshness-first SPSC
+  snapshot channel with bounded single-swap publication and at-most-one-swap
+  take operations,
+  replacement and skipped-generation evidence, and channel-resident endpoint
+  state so handle reacquisition continues rather than restarting. Deferred
+  assumptions are exact accounting within one non-zero `u32` wrap (approximate
+  beyond it), no `Source<T>` implementation, and generic payloads supporting
+  samples or complete blocks.
+- LatestBuf target/payload measurement mode for all 11 embedded targets plus
+  pinned QEMU instruction regions. The measured A.1 Acquire-load fast path
+  removes the atomic RMW from empty polls for +6-16 bytes of `take_latest`
+  flash, including +8 bytes on ESP32-S2. Private role indices now have an
+  all-zero encoding, moving const-initialized channels from `.data` to `.bss`
+  and removing 48-420 bytes of flash/startup copy in the measured payloads.
+- Joint LatestBuf/BlockBuf D3 measurement mode over 2/8/16-byte samples and
+  `N = 8/32/128`, covering all 11 targets plus pinned QEMU regions. It records
+  sample scheduling, final block completion/publication, consumer cost, and
+  136-8,280 bytes of combined channel/builder RAM without stacking candidate
+  branches.
 ### Removed
 - **Breaking:** the panicking `SeqRing::{producer, consumer}` and
   `EventBuf::{producer, consumer}`, deprecated since 0.2.0 with removal scheduled for 0.3.0.
@@ -48,11 +67,23 @@ All notable changes to this project will be documented in this file.
   shipped orderings.
 
 ### Documentation
+- BlockBuf engineering record (`docs/records/block-buf.md`) — Track 1 acceptance package: composition identity under closed D3, measured publication costs (`bc54a9a`), joint composition rows. Its status header initially recorded promotion as waiting on decision P; P has since closed as Copy composition and the record reads DECISION-COMPLETE.
+### Added
+- `Block<T, N>` and `BlockBuilder<T, N>` provide complete, contiguous sample
+  windows without introducing another queue policy. The builder rejects gaps
+  explicitly, skips reserved sequence zero at wrap, and yields a public block
+  only after all `N` samples are initialized. Compose blocks with
+  `EventBuf<Block<...>, Q>` today or the proposed `LatestBuf<Block<...>>` for
+  freshness-first handoff.
+
+### Documentation
 - Cycle decisions **P** and **S** are closed (2026-08-11). **P**: BlockBuf's publication
   foundation is **Copy composition** for the supported shapes — no library-wide threshold is
   claimed; the per-shape measured rows are the budget statement, the nine-shape matrix rides
   into the release baselines at promotion, and the docs owe integrators the double-copy
-  hazard guidance (make the builder the DMA target, or publish from task context). **S**:
+  hazard guidance (the builder's storage is deliberately private — budget both copies, or
+  publish from task context; direct-to-granted-slot filling is decision S's registered
+  reopening condition). **S**:
   SlotPool is **deferred**, not rejected — full evaluation evidence banked on its branch,
   draft PR closed, and an adopter-gated reopening trigger registered (a measured budget
   breach, a direct-to-granted-slot requirement, or a standalone zero-copy adopter). Every

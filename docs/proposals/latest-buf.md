@@ -3,7 +3,7 @@
 - **Status:** Exploratory design proposal
 - **Scope:** Additive primitives and traits only
 - **Compatibility:** No changes to existing `Sink`, `Source`, or `Link` traits
-- **Implementation status:** Not implemented
+- **Implementation status:** Implemented on `candidate/latest-buf` (PR #35)
 - **Received:** 2026-08-11 (0.3.0 cycle; see `docs/0.3.0-candidates.md` §3)
 
 ## 1. Summary

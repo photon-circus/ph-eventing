@@ -89,9 +89,10 @@ IDs in parentheses; the clauses are the normative statements.
 | Reacquisition continues, never restarts (H4) | Drop-and-reacquire continuation tests; both cross-context role-handoff Loom models; detector-on Miri | Proven |
 | Empty poll costs one `Acquire` load, no RMW (A.1) | Loom equivalence model; measured: 7–8 instructions off empty polls, +5–6 on pending Cortex-M3 paths | Measured, selected |
 | No `Source<T>` impl can arrive silently (D2, X7) | `compile_fail,E0277` doctest on `Consumer` | Pinned |
+| Handles stay `Send + !Sync` (H2) | `compile_fail` doctests on `Producer` and `Consumer` | Pinned |
 | Cost claims per target | 11-target code-size matrix incl. ESP32-S2/S3; pinned QEMU 10.0.11 cycle regions; 66-region joint block matrix reproduced across two QEMU versions | Measured |
 
-Full CI for the lane: 78 unit tests, 12 doctests, 4 compile-fail, 94.12%
+Full CI for the lane: 76 unit tests, 12 doctests, 6 compile-fail, 94.12%
 line coverage, zero skips.
 
 ## 4. The record
