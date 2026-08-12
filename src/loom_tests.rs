@@ -11,7 +11,7 @@
 //! of executions grows exponentially. A bug that needs four items to show up is
 //! almost always visible with two.
 //!
-//! Run with `./scripts/loom.ps1` or `./scripts/loom.sh`.
+//! Run with `./scripts/loom.sh` (it sets the preemption bound the gate uses).
 //!
 //! [Loom]: https://github.com/tokio-rs/loom
 

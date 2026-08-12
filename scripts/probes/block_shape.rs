@@ -1,8 +1,13 @@
-//! Probe-only structural twins of BlockBuf at `bc54a9a`.
+//! Probe-only structural twins of `Block`/`BlockBuilder`, pinned at the
+//! evaluation revision (`bc54a9a`).
 //!
-//! Candidate branches must not stack. Sharing this source between the code-size
-//! and cycle probes keeps the measured `Block<T, N>` layout and final
-//! `BlockBuilder::push` path identical without importing the BlockBuf branch.
+//! Origin: during the 0.3.0 cycle the LatestBuf and BlockBuf candidates lived
+//! on separate branches that were not allowed to stack, so the D3 composition
+//! probes measured against this twin instead of importing the BlockBuf
+//! branch. Both types now ship from one tree, so the twin's remaining job is
+//! stability: the composition rows keep measuring the exact evaluated layout.
+//! Switching these probes to the real `ph_eventing::Block` types is a
+//! deliberate future re-measure (new rows, new bless), not a cleanup.
 
 #![allow(dead_code)]
 

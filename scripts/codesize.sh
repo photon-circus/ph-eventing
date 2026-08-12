@@ -34,11 +34,14 @@
 #   ./scripts/codesize.sh latest-block-matrix # LatestBuf sample/block D3 matrix
 #   XTENSA=1 ./scripts/codesize.sh         # add ESP32 rows (needs esp-rs fork)
 #
-# Reading the output: each number is the byte size of one function, so it
-# attributes to a single API shape rather than to a whole binary. `cs_incr` and
-# `cs_take` isolate the two CountedSignal hot paths. `bss` is the `static
-# EventBuf<u32, 64>`; it should be identical on every target and `data` should
-# be 0 -- that pair is the const-`new` claim.
+# Reading the default output: each number is the byte size of one function, so
+# it attributes to a single API shape rather than to a whole binary. `cs_incr`
+# and `cs_take` isolate the two CountedSignal hot paths; `flags_acq`,
+# `flags_raise`, and `flags_take` do the same for EventFlags role acquisition
+# and its two operations. `bss` is the `static EventBuf<u32, 64>` (268 B) and
+# `seq_bss` the `static SeqRing<u32, 64>` (524 B); both should be identical on
+# every target and `data` should be 0 -- that trio is the const-`new` claim.
+# The matrix modes print their own column legends.
 
 set -u
 

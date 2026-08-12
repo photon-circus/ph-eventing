@@ -19,7 +19,7 @@
 # A prebuilt copy is published at hub.docker.com/r/stevegiacomelli/ph-eventing-verify;
 # each 0.x.y tag is the frozen environment of that release's evidence:
 #
-#   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.2.0 ./scripts/verify.sh
+#   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.3.0 ./scripts/verify.sh
 #
 # Build locally instead (from the repo root -- the context must include
 # rust-toolchain.toml and the lockfiles):
