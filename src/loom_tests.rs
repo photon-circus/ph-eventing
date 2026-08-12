@@ -364,55 +364,51 @@ fn latest_buf_consumer_reacquisition_continues_across_threads() {
             assert_eq!(producer.publish(1).generation, 1);
         }
 
-        let first_took = Arc::new(AtomicBool::new(false));
-        let later_published = Arc::new(AtomicBool::new(false));
+        let first_dropped = Arc::new(AtomicBool::new(false));
 
         let first_channel = Arc::clone(&channel);
-        let first_signal = Arc::clone(&first_took);
+        let first_signal = Arc::clone(&first_dropped);
         let first = thread::spawn(move || {
             let consumer = first_channel.try_consumer().unwrap();
             assert_eq!(consumer.take_latest().unwrap().generation, 1);
             drop(consumer);
-            // Relaxed deliberately: successful reacquisition, not this test
-            // signal, must publish the role-owned continuation state.
+            // Relaxed deliberately: the role handoff's own Release-drop /
+            // AcqRel-swap edge must carry the continuation state; this flag
+            // only sequences the model and supplies no happens-before for it.
             first_signal.store(true, Ordering::Relaxed);
         });
 
-        let publisher_channel = Arc::clone(&channel);
-        let publisher_start = Arc::clone(&first_took);
-        let publisher_done = Arc::clone(&later_published);
-        let publisher = thread::spawn(move || {
-            // Yield-retry until the first take happened: every terminating
-            // execution publishes generations 2 and 3 into the post-take
-            // channel state instead of skipping the scenario.
-            while !publisher_start.load(Ordering::Relaxed) {
-                thread::yield_now();
-            }
-            let producer = publisher_channel.try_producer().unwrap();
-            let _ = producer.publish(2);
-            let _ = producer.publish(3);
-            publisher_done.store(true, Ordering::Release);
-        });
-
+        // One thread plays publisher and reacquiring consumer so the model
+        // keeps a single spin gate (more threads/gates exceeded loom's
+        // per-path branch budget under the gate's preemption bound). The
+        // consumer handoff still travels only through the taken flag's
+        // Release-drop / AcqRel-swap edge: the Relaxed gate gives no
+        // happens-before, and the acquisition swap is an RMW reading the
+        // latest role flag in modification order, so every terminating
+        // execution completes the cross-context handoff (evaluation L3).
         let second = thread::spawn(move || {
-            while !later_published.load(Ordering::Acquire) {
+            while !first_dropped.load(Ordering::Relaxed) {
                 thread::yield_now();
             }
-            // The first handle was dropped before this flag chain fired, and
-            // the acquisition swap is an RMW reading the latest role flag in
-            // modification order — the handoff completes in every
-            // terminating execution (evaluation L3), no vacuous branch.
+            {
+                let producer = channel.try_producer().unwrap();
+                let _ = producer.publish(2);
+                let _ = producer.publish(3);
+            }
             let consumer = channel
                 .try_consumer()
                 .expect("role released by the observed drop");
             consumer
                 .take_latest()
-                .expect("generation 3 pending after the Release/Acquire handoff")
+                .expect("generation 3 pending in this thread's program order")
         });
 
         first.join().unwrap();
-        publisher.join().unwrap();
         let item = second.join().unwrap();
+        // skipped == 1 discriminates continuation from restart: a consumer
+        // whose channel-resident state reset would report skipped == 2
+        // (distance from generation 0), a continuation from the taken
+        // generation 1 reports exactly one displaced publication.
         assert_eq!(item.generation, 3);
         assert_eq!(item.value, 3);
         assert_eq!(item.skipped, 1);
