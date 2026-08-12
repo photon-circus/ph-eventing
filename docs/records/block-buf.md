@@ -1,12 +1,12 @@
 # BlockBuf — engineering record
 
-- **Status:** candidate, DECISION-COMPLETE — complete development package
-  on `candidate/block-buf` (draft PR #34); D3 type-identity confirmed
-  (composition, no `LatestBlockBuf`); **cycle decision P closed as Copy
-  composition** (2026-08-11, planning-record P/S closure) with the
+- **Status:** **ACCEPTED — ships in 0.3.0** (maintainer acceptance
+  2026-08-12; PR #34 merged into `release/0.3.0`, with the block
+  code-size baseline blessed and CI-gated at promotion). D3
+  type-identity confirmed (composition, no `LatestBlockBuf`); **cycle
+  decision P closed as Copy composition** (2026-08-11) with the
   per-shape measured rows as the budget statement; **S closed as
   deferred** (SlotPool evidence banked, adopter-gated trigger).
-  Promotion to PROPOSED awaits the #34 acceptance review.
 - **Normative sources:** [proposal](../proposals/block-buf.md)
   (§5–§9 cited below) · LatestBuf
   [contract §9 D3](../proposals/latest-buf-contract.md) ·

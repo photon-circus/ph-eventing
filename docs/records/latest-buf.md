@@ -1,11 +1,12 @@
 # LatestBuf — engineering record
 
-- **Status:** candidate, PROPOSED — complete admission package on
-  `candidate/latest-buf` (draft PR #35); every design decision closed
-  (D1–D3, A.1–A.3); awaiting acceptance review and release assembly.
+- **Status:** **ACCEPTED — ships in 0.3.0** (maintainer acceptance
+  2026-08-12; PR #35 merged into `release/0.3.0`). Every design decision
+  closed (D1–D3, A.1–A.3); seven review rounds converged before
+  acceptance.
 - **Normative sources:** [contract](../proposals/latest-buf-contract.md)
   (clause IDs cited below) · [proposal](../proposals/latest-buf.md) ·
-  lane-resident until #35 merges (paths become repo-relative then):
+  merged with #35 (repo-relative on the release branch):
   [evaluation record](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-evaluation.md) ·
   [measurements](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md) ·
   [joint composition matrix](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md).

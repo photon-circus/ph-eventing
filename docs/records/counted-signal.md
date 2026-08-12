@@ -1,9 +1,10 @@
 # CountedSignal — engineering record
 
-- **Status:** candidate, PROPOSED — complete admission package on
-  `candidate/counted-signal` (PR #33); accepted contract; shared
-  handle decision H closed on this lane's evidence; MAX short-circuit
-  exactness fix landed; awaiting acceptance review and release assembly.
+- **Status:** **ACCEPTED — ships in 0.3.0** (maintainer acceptance
+  2026-08-12; PR #33 merged into `release/0.3.0`). Accepted contract;
+  shared handle decision H closed on this lane's evidence; the stale-MAX
+  exactness fix and the sentinel-RMW refinement both landed under
+  review before acceptance.
 - **Normative sources:** [contract](../proposals/counted-signal-contract.md)
   (clause IDs cited below) · [proposal](../proposals/counted-signal.md) ·
   measurements inline in proposal §3.1 (eight-target code size; pinned

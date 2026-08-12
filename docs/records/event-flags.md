@@ -1,9 +1,9 @@
 # EventFlags — engineering record
 
-- **Status:** candidate, PROPOSED — complete admission package on
-  `candidate/event-flags` (draft PR #36); contract frozen
-  (M/R/T/C/S/B/H/W/X); shared handle decision H closed; awaiting
-  acceptance review and release assembly.
+- **Status:** **ACCEPTED — ships in 0.3.0** (maintainer acceptance
+  2026-08-12; PR #36 merged into `release/0.3.0`). Contract frozen
+  (M/R/T/C/S/B/H/W/X); shared handle decision H closed; nine review
+  rounds converged before acceptance.
 - **Normative sources:** [contract](../proposals/event-flags-contract.md)
   (clause IDs cited below) · [proposal](../proposals/event-flags.md) ·
   admission evidence embedded in the proposal (§4) and
