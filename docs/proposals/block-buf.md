@@ -9,7 +9,7 @@
   [`records/block-buf.md`](../records/block-buf.md).
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §2 (received
-  2026-08-11); triaged Tier 1 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
+  2026-08-11); triaged Tier 1 in [`../planning/0.3.0-candidates.md`](../planning/0.3.0-candidates.md) §4.
 - **Taxonomy row:** retention *latest complete block* · overload
   *replace/reject whole block* · representative use *DMA, IMU/DSP windows*.
 - **Related:** [`latest-buf.md`](latest-buf.md) §11 (the complete-block

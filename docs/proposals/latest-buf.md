@@ -10,7 +10,7 @@
 - **Compatibility:** No changes to existing `Sink`, `Source`, or `Link` traits
 - **Implementation status:** shipped (implemented on `candidate/latest-buf`,
   merged into `release/0.3.0` via PR #35)
-- **Received:** 2026-08-11 (0.3.0 cycle; see `docs/0.3.0-candidates.md` §3)
+- **Received:** 2026-08-11 (0.3.0 cycle; see `docs/planning/0.3.0-candidates.md` §3)
 
 ## 1. Summary
 

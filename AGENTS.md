@@ -152,9 +152,10 @@ ph-eventing/
 ├── deny.toml               # cargo-deny policy: advisories, licences, bans, sources
 ├── RELEASING.md            # release checklist (version choice, verification, publish, yank)
 ├── docs/
+│   ├── README.md           # map of the documentation layers below
 │   ├── records/            # engineering records: the enduring per-type briefing layer
 │   ├── proposals/          # design-decision documents: proposals, frozen contracts, measurements
-│   └── 0.3.0-candidates.md # the 0.3.0 cycle's planning record (historical)
+│   └── planning/           # per-cycle planning records (0.3.0-candidates.md, historical)
 └── src/
     ├── lib.rs              # Crate root, public exports, doctests
     ├── macros.rs           # static_spsc! -- declarative static bring-up

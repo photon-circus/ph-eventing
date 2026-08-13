@@ -8,7 +8,7 @@
   with an adopter-gated reopening trigger ([slot-pool.md](slot-pool.md));
   `LatestBuf` shipped from its own proposal.
 - **Received:** 2026-08-11 (0.3.0 cycle; triage in
-  [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4)
+  [`../planning/0.3.0-candidates.md`](../planning/0.3.0-candidates.md) §4)
 - **Structure note (2026-08-11):** the substantive design text for the
   Tier 1/2 primitives has moved to per-primitive design documents —
   [`block-buf.md`](block-buf.md), [`slot-pool.md`](slot-pool.md),

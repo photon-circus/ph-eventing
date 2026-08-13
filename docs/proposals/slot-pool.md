@@ -15,7 +15,7 @@
 - **Prior status:** EXPLORATORY — design exploration vehicle, not yet PROPOSED.
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §3 (received
-  2026-08-11); triaged Tier 2 in [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
+  2026-08-11); triaged Tier 2 in [`../planning/0.3.0-candidates.md`](../planning/0.3.0-candidates.md) §4.
 - **Taxonomy row:** retention *every admitted owned buffer* · overload
   *reservation fails* · representative use *large zero-copy payloads*.
 - **Related:** [`block-buf.md`](block-buf.md) (named candidate foundation

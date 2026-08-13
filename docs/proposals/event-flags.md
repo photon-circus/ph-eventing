@@ -7,7 +7,7 @@
   [`records/event-flags.md`](../records/event-flags.md).
 - **Origin:** substantive design text moved from the
   [bounded-handoff taxonomy](exploratory-primitives.md) §4; triaged Tier 1 in
-  [`../0.3.0-candidates.md`](../0.3.0-candidates.md) §4.
+  [`../planning/0.3.0-candidates.md`](../planning/0.3.0-candidates.md) §4.
 - **Contract:** [`event-flags-contract.md`](event-flags-contract.md) — stable
   M/R/T/C/S/B/H/W/X clause IDs and the evidence map.
 - **Related:** [`counted-signal.md`](counted-signal.md) — same bounded
