@@ -14,12 +14,21 @@ assuming a green check covers them.
 - [ ] `./scripts/ci.sh` — all checks pass, **no `SKIP` lines**
       (a skipped check is not a passed check; install the tool and re-run)
 
-If this touches atomics, orderings, fences, `unsafe`, or anything in
-`seq_ring.rs` / `event_buf.rs` / `sync.rs`:
+If this touches atomics, orderings, fences, `unsafe`, or anything in the
+concurrent modules (`seq_ring.rs`, `event_buf.rs`, `latest_buf.rs`,
+`event_flags.rs`, `counted_signal.rs`, `sync.rs`):
 
 - [ ] `./scripts/miri.sh` — clean
-- [ ] `./scripts/loom.sh` — all models verified
+- [ ] `./scripts/loom.sh` — all models verified (run via the script: it sets
+      the preemption bound the gate uses)
 - [ ] Ordering changes are justified in a comment, not just in this PR
+
+If this changes an API shape or a hot path:
+
+- [ ] `./scripts/codesize.sh` (plus the relevant matrix mode) — numbers pasted
+      or baseline deliberately re-blessed with the reasoning stated
+- [ ] `./scripts/cycles.sh` for hot-path changes — compared inside the
+      reference image when measuring against documented numbers
 
 If this touches `Cargo.toml`:
 

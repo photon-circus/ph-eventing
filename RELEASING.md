@@ -165,6 +165,37 @@ gathered with (see `scripts/verify/Dockerfile`):
 Record the printed toolchain and QEMU versions in the release PR alongside the
 results — a verdict without its environment is not reproducible evidence.
 
+### The reference image is part of the release
+
+The evidence above is only reproducible if the image that produced it stays
+reachable, so every release publishes the image under **one frozen tag,
+never retagged**: `stevegiacomelli/ph-eventing-verify:X.Y.Z`. A Dockerfile
+rebuild is NOT guaranteed to reproduce a published tag (apt rotates
+versions) — the published tag is the pin, which is why forgetting this step
+quietly destroys the release's reproducibility story.
+
+1. **Validate the exact image first** (agent step): the build-time version
+   guards fired cleanly, and the strict offline check passes — `--network
+   none` **and** a fresh `CARGO_TARGET_DIR`; a warm mounted `target/`
+   silently invalidates the test.
+2. **Tag and push** (maintainer step, like `cargo publish`):
+
+   ```bash
+   docker tag ph-eventing-verify stevegiacomelli/ph-eventing-verify:X.Y.Z
+   docker push stevegiacomelli/ph-eventing-verify:X.Y.Z
+   ```
+
+3. **Re-run the final matrix against the published tag** so the recorded
+   evidence names the immutable pin, not a local build:
+
+   ```bash
+   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:X.Y.Z ./scripts/verify.sh
+   ```
+
+4. The `VERIFY_IMAGE` example in `scripts/verify/Dockerfile` names the
+   current release's tag — step 5 of this checklist already covers keeping
+   it fresh.
+
 ## 7. Check what will actually ship
 
 ```bash
@@ -217,6 +248,9 @@ Needs a crates.io token (`cargo login`). This is the irreversible step.
   docs.rs's target, for example. Watch <https://docs.rs/ph-eventing>; a failure
   shows in the build log there, not in your terminal.
 - **Create the GitHub release** against the tag, pasting the changelog section.
+- **Confirm the reference image tag is on Docker Hub**
+  (`stevegiacomelli/ph-eventing-verify:X.Y.Z`, from step 6) — the release's
+  evidence cites it, so a missing tag is a broken citation.
 - **Merge the release branch back into `master`** via its PR. Do not skip or
   defer this. Until it merges, the released state exists only on a branch: the
   tag is unreachable from `master`, `master`'s `Cargo.toml` still names the

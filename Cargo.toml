@@ -1,13 +1,13 @@
 [package]
 name = "ph-eventing"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.92.0"
 # no-std and zero-allocation are the entry fee, not the value -- plenty of
 # crates clear that bar. Lead with what is actually on offer: predictable
 # behaviour and a cost you can measure. See AGENTS.md § What this crate
 # optimises for.
-description = "Deterministic zero-allocation ring buffers for no-std embedded targets: bounded behaviour, no hidden cost, Loom-verified orderings"
+description = "Deterministic zero-allocation SPSC primitives for no-std embedded targets — ring buffers, a latest-value snapshot channel, condition flags, saturating counters, and complete sample blocks: bounded behaviour, measured cost, Loom-verified orderings"
 authors = ["Steven Giacomelli <steve@giacomelli.ca>"]
 license = "MIT"
 repository = "https://github.com/photon-circus/ph-eventing"
@@ -35,7 +35,9 @@ include = [
     "build.rs",
     "Cargo.toml",
     "LICENSE",
-    "README.md",
+    # Root-anchored: a bare `README.md` is gitignore-style and matches every
+    # README.md in the tree (e.g. docs/records/README.md), which must not ship.
+    "/README.md",
 ]
 
 [dependencies]
@@ -54,6 +56,11 @@ portable-atomic = { version = "1.13", optional = true, default-features = false,
 # crate. Test combinations individually — `scripts/ci.sh` does.
 [features]
 default = []
+# Internal, underscore-prefixed, and not part of the public contract: lets the
+# QEMU cycle probe (scripts/cycles) construct a saturated CountedSignal so the
+# sentinel arm of `increment` is a measured region rather than a source-review
+# claim. Enables one #[doc(hidden)] constructor; nothing else.
+_cycles-probe = []
 portable-atomic = ["dep:portable-atomic"]
 portable-atomic-unsafe-assume-single-core = [
     "portable-atomic",

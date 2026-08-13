@@ -1,14 +1,15 @@
 # LatestBuf — engineering record
 
-- **Status:** candidate, PROPOSED — complete admission package on
-  `candidate/latest-buf` (draft PR #35); every design decision closed
-  (D1–D3, A.1–A.3); awaiting acceptance review and release assembly.
+- **Status:** **ACCEPTED — ships in 0.3.0** (maintainer acceptance
+  2026-08-12; PR #35 merged into `release/0.3.0`). Every design decision
+  closed (D1–D3, A.1–A.3); seven review rounds converged before
+  acceptance.
 - **Normative sources:** [contract](../proposals/latest-buf-contract.md)
   (clause IDs cited below) · [proposal](../proposals/latest-buf.md) ·
-  lane-resident until #35 merges (paths become repo-relative then):
-  [evaluation record](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-evaluation.md) ·
-  [measurements](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md) ·
-  [joint composition matrix](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md).
+  merged with #35 (repo-relative on the release branch):
+  [evaluation record](../proposals/latest-buf-evaluation.md) ·
+  [measurements](../proposals/latest-buf-measurements.md) ·
+  [joint composition matrix](../proposals/latest-block-composition-measurements.md).
 
 ## 1. Value statement
 
@@ -30,10 +31,13 @@ timestamp authority, or a multi-producer/multi-consumer bus.
 Ordered by how likely they are to surprise an integrator. Contract clause
 IDs in parentheses; the clauses are the normative statements.
 
-- **Loss is the designed behaviour, not a fault mode (X1).** Under any
-  producer/consumer rate mismatch, intermediate publications are
-  displaced. The type is wrong for any consumer that must observe every
-  value — that is `EventBuf`'s niche.
+- **Loss is the designed behaviour, not a fault mode (X1).** When the
+  producer outpaces the consumer, publications that were still pending
+  unread are displaced by the next publish and reported through
+  `replaced_unread` (P4 sets it only when an unread value was actually
+  pending — a consumer that keeps up, including any consumer-faster
+  rate mismatch, sees no displacement at all). The type is wrong for any
+  consumer that must observe every value — that is `EventBuf`'s niche.
 - **The skipped count has a documented exactness boundary (C3, X6).**
   `skipped` is exact while fewer than one full generation span (2³²−1
   publications) separates two takes; beyond that it under-counts, and a
@@ -60,10 +64,13 @@ IDs in parentheses; the clauses are the normative statements.
   out-of-band reset — a forced release could free a role while a live
   handle exists, defeating the exclusive-ownership soundness argument.
   Handle lifetime is the application's property.
-- **Memory is three payload slots, always (B3).** Fixed and in `.bss`,
-  but real: measured channels are 48/84/420 B for the shipped payload
-  matrix, and the block-payload shapes run 136–8,280 B of combined
-  channel + builder RAM across the measured grid. State the per-shape
+- **Memory is three payload slots, always (B3).** Fixed in size, and it
+  lives wherever the value is placed: a `const`-constructed `static`
+  lands in `.bss` (the measured no-flash/no-startup-copy claim); a local
+  consumes stack. Real either way: measured channels are 48/84/420 B for
+  the shipped payload matrix, and the block-payload shapes run
+  136–8,280 B of combined channel + builder RAM across the measured
+  grid — charged to stack if built as locals. State the per-shape
   number for your payload; the docs are required to.
 - **Block payloads invert at small N (D3 obligation).** Publishing
   complete blocks through `LatestBuf<Block<T, N>>` beats per-sample
@@ -85,13 +92,15 @@ IDs in parentheses; the clauses are the normative statements.
 | No torn or mixed value — one-publication Rust value semantics (P6/C6) | Threaded patterned-payload stress; detector-on Miri | Proven |
 | Wait-free producer, bounded consumer, no CAS loop (B1–B3) | Algorithm review (no loops); pinned QEMU cycle regions constant w.r.t. lag and occupancy | Measured |
 | Orderings are necessary, not decorative | Mutation runs: all 6 exchange and 4 role-handoff weakenings detected (8 by Loom; 2 relinquish-only mutations by Miri, seeds 53/47) | Proven |
+| `replaced_unread` is per-call truth, not an aggregate (P4) | Loom: every report correlated with its predecessor's fate (taken/pending ⇒ not replaced) in every interleaving, plus the aggregate taken/displaced/pending conservation as an independent check; mutation-verified both ways; deterministic per-publish asserts in the handshake model | Proven |
 | Exact skipped accounting within one wrap span (C3, G1–G3) | Wrap-boundary unit set mirroring `SeqRing`'s `seq_distance` tests; full-cycle pin (`full_generation_cycle_uses_documented_approximation`) | Pinned |
 | Reacquisition continues, never restarts (H4) | Drop-and-reacquire continuation tests; both cross-context role-handoff Loom models; detector-on Miri | Proven |
 | Empty poll costs one `Acquire` load, no RMW (A.1) | Loom equivalence model; measured: 7–8 instructions off empty polls, +5–6 on pending Cortex-M3 paths | Measured, selected |
 | No `Source<T>` impl can arrive silently (D2, X7) | `compile_fail,E0277` doctest on `Consumer` | Pinned |
+| Handles are `Send` when `T: Send`, always `!Sync` (H2) | `compile_fail` doctests on `Producer` and `Consumer` pin `!Sync`; the `Send` bound is the compiler's own (`T: Copy` does not imply `T: Send`, and a `PhantomData<*const ()>` payload correctly fails an `assert_send` probe) | Pinned |
 | Cost claims per target | 11-target code-size matrix incl. ESP32-S2/S3; pinned QEMU 10.0.11 cycle regions; 66-region joint block matrix reproduced across two QEMU versions | Measured |
 
-Full CI for the lane: 78 unit tests, 12 doctests, 4 compile-fail, 94.12%
+Full CI at lane acceptance (per-lane tree; the assembled 0.3.0 release matrix supersedes these totals): 76 unit tests, 12 doctests, 6 compile-fail, 94.12%
 line coverage, zero skips.
 
 ## 4. The record
@@ -138,7 +147,7 @@ overclaimed stall-only trigger — every finding confirmed, none
 disputed). The corrected text is *stricter* than the drafts it replaced.
 
 **Where the numbers live** (lane-resident until #35 merges):
-[`latest-buf-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-buf-measurements.md)
+[`latest-buf-measurements.md`](../proposals/latest-buf-measurements.md)
 (11-target code size, pinned cycles, A.1 comparison, RAM);
-[`latest-block-composition-measurements.md`](https://github.com/photon-circus/ph-eventing/blob/candidate/latest-buf/docs/proposals/latest-block-composition-measurements.md)
+[`latest-block-composition-measurements.md`](../proposals/latest-block-composition-measurements.md)
 (the joint D3 matrix); tracking: issues #26/#27, PRs #35/#37.

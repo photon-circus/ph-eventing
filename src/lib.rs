@@ -1,14 +1,20 @@
-//! Stack-allocated ring buffers for no-std embedded targets.
+//! Deterministic handoff primitives for no-std embedded targets.
 //!
 //! # Primitives
 //!
 //! | Type | When to reach for it |
 //! |------|----------------------|
+//! | [`Block`] / [`BlockBuilder`] | Complete contiguous sample windows; compose with a transport. |
 //! | [`RingBuf`] | Single-owner ring — simple, no atomics, `&mut` access. |
 //! | [`SeqRing`] | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 //! | [`EventBuf`] | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+//! | [`CountedSignal`] | Saturating SPSC count for identical, payload-free events. |
+//! | [`EventFlags`] | Coalesced SPSC condition set — one bit per condition, one atomic operation per hot path. |
+//! | [`LatestBuf`] | Freshness-first SPSC snapshot — retains one newest unread value. |
 //!
-//! All three are fixed-size, zero-allocation, and generic over `T: Copy`.
+//! All are fixed-size and zero-allocation. The buffer types are generic
+//! over `T: Copy`; [`CountedSignal`] carries no payload and [`EventFlags`]
+//! provides exactly 32 payload-free conditions.
 //!
 //! # Common traits
 //!
@@ -17,6 +23,12 @@
 //! | [`Sink<T>`](traits::Sink) | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 //! | [`Source<T>`](traits::Source) | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 //! | [`Link<In,Out>`](traits::Link) | Both | Blanket impl for any `Sink<In> + Source<Out>` |
+//! | [`LatestSink<T>`](traits::LatestSink) | Publish a newest value | `latest_buf::Producer` |
+//! | [`LatestSource<T>`](traits::LatestSource) | Take the newest value with loss evidence | `latest_buf::Consumer` |
+//!
+//! [`forward`](traits::forward) bridges the stream pair only; `LatestBuf`
+//! deliberately stands outside it (decision D2), and the signal types
+//! implement neither family.
 //!
 //! The [`traits::forward`] function transfers items from any `Source` to any
 //! `Sink`, making it easy to bridge different buffer types.
@@ -59,10 +71,13 @@
 //! let mut consumer = ring.try_consumer().expect("consumer");
 //!
 //! producer.push(42);
-//! consumer.poll_one(|seq, v| {
+//! // Assert the delivery flag, not just the hook body: an empty ring would
+//! // skip the hook and the assertions inside it would pass vacuously.
+//! let delivered = consumer.poll_one(|seq, v| {
 //!     assert_eq!(seq, 1);
 //!     assert_eq!(*v, 42);
 //! });
+//! assert!(delivered);
 //! ```
 //!
 //! # Quick start — `EventBuf`
@@ -101,7 +116,8 @@
 //! The crate is `#![no_std]` by default. Tests require `std`.
 //!
 //! # Targets without atomics
-//! `SeqRing` and `EventBuf` require 32-bit atomics. For targets that lack them
+//! Every concurrent primitive — `SeqRing`, `EventBuf`, `EventFlags`,
+//! `CountedSignal`, and `LatestBuf` — requires 32-bit atomics. For targets that lack them
 //! (for example `thumbv6m-none-eabi`), enable
 //! `portable-atomic-unsafe-assume-single-core` or `portable-atomic-critical-section`.
 //! The crate always compiles those modules, so no-atomic targets need one of
@@ -112,12 +128,12 @@
 //! - `RingBuf` has no atomics and no interior mutability — standard Rust borrow
 //!   rules apply. It stores slots as `MaybeUninit<T>` and reads only live
 //!   entries, so it does contain `unsafe`.
-//! - `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one
-//!   consumer must be active. Handle acquisition is `try_producer()` /
-//!   `try_consumer()`, which return `None` rather than panicking — on a
-//!   microcontroller a panic is a reset. (The panicking `producer()` /
-//!   `consumer()`, deprecated since 0.2.0, were removed in 0.3.0.) Using
-//!   unsafe to bypass these constraints is undefined behavior.
+//! - `SeqRing`, `EventBuf`, and `EventFlags` are SPSC by design: exactly one
+//!   producer and one consumer must be active. Handle acquisition is
+//!   `try_producer()` / `try_consumer()`, which return `None` rather than
+//!   panicking — on a microcontroller a panic is a reset. (The panicking
+//!   `producer()` / `consumer()`, deprecated since 0.2.0, were removed in
+//!   0.3.0.) Using unsafe to bypass these constraints is undefined behavior.
 //!
 //!   The examples here use `.expect(...)` for brevity, which is a panic. That
 //!   is fine in a doctest on a host; in firmware, branch on the `None`:
@@ -133,9 +149,14 @@
 //! - [`EventBuf`] is race-free by construction — its producer and consumer
 //!   never touch the same slot — and passes Miri with the data-race detector
 //!   enabled.
-//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. The
-//!   copy is never returned and never becomes an invalid value, but the access
-//!   is undefined behaviour by the letter of the memory model. Practical
+//! - [`SeqRing`] is a seqlock and carries a **known formal data race**. A
+//!   raced copy is discarded and never becomes an invalid value — within the
+//!   whole-span bound: the discard compares `u32` sequences, so a consumer
+//!   stalled mid-read for a full `2^32 - 1` publications can pass both checks
+//!   against a rewritten slot (the [`seq_ring`] "whole-span sequence
+//!   aliasing" section carries the reachability arithmetic and escape
+//!   hatches). The access itself is undefined behaviour by the letter of the
+//!   memory model. Practical
 //!   consequence: running Miri over a test that drives this ring from two
 //!   threads reports UB inside this crate — that is the deviation, not a new
 //!   bug. It is a deliberate trade of formal soundness for accepting any
@@ -147,8 +168,9 @@
 //! The typical embedded shape is a producer in an interrupt handler and a
 //! consumer in a task loop.
 //!
-//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, so `&buf` can be
-//!   handed to both contexts. The `Producer` and `Consumer` handles are
+//! - [`SeqRing`] and [`EventBuf`] are `Sync` when `T: Send`, and [`EventFlags`]
+//!   is `Sync`, so a shared reference can be handed to both contexts. The
+//!   `Producer` and `Consumer` handles are
 //!   `Send + !Sync`: move each into the context that owns it, never share one.
 //! - The handles borrow the buffer, so the buffer must outlive them.
 //! - **`new()` is a `const fn`** on the normal build, so
@@ -172,7 +194,8 @@
 //! - Once every `2^32 - 1` pushes the sequence counter wraps, and a few extra entries are dropped
 //!   there because `push` skips the reserved sequence `0`: exactly one for a power-of-two `N`,
 //!   none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. Reported as ordinary drops, never a
-//!   stale or torn value. Prefer a power of two for `N`; see the [`seq_ring`] module docs.
+//!   stale or torn value within the whole-span bound stated in the [`seq_ring`]
+//!   module docs. Prefer a power of two for `N`.
 //! - `Consumer::dropped` saturates rather than wrapping; `usize` is 32 bits on
 //!   the targets this crate ships to, so a long-lived lagging consumer can
 //!   reach the top of the range.
@@ -182,6 +205,12 @@
 //! - `pop` returns the oldest item, or `None` when empty.
 //! - `peek` copies the oldest item without advancing the consumer cursor.
 //! - `drain(max, hook)` consumes up to `max` items through a callback.
+//!
+//! # EventFlags semantics
+//! - [`event_flags::Producer::raise`] unions a mask into the pending set.
+//! - [`event_flags::Consumer::take_all`] atomically returns and clears that set.
+//! - Duplicate raises may coalesce; ordering and multiplicity are not retained.
+//! - A take that observes a raise also observes memory actions sequenced before it.
 #![no_std]
 
 #[cfg(all(not(target_has_atomic = "32"), not(feature = "portable-atomic")))]
@@ -201,16 +230,24 @@ enable either the portable-atomic-unsafe-assume-single-core or portable-atomic-c
 #[macro_use]
 mod macros;
 
+pub mod block;
+pub mod counted_signal;
 pub mod event_buf;
+pub mod event_flags;
+pub mod latest_buf;
 pub mod ring;
 pub mod seq_ring;
 pub(crate) mod sync;
 pub mod traits;
 
+pub use block::{Block, BlockBuilder, FillError};
+pub use counted_signal::{CountSnapshot, CountedSignal};
 pub use event_buf::EventBuf;
+pub use event_flags::{EventFlags, EventMask};
+pub use latest_buf::{LatestBuf, LatestItem, PublishReport};
 pub use ring::RingBuf;
 pub use seq_ring::{PollStats, SeqRing};
-pub use traits::{Link, Sink, Source};
+pub use traits::{LatestSink, LatestSource, Link, Sink, Source};
 
 #[cfg(all(loom, test))]
 mod loom_tests;

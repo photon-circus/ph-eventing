@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | ✅        |
+| 0.3.x   | ✅        |
+| < 0.3   | ❌ — upgrade; fixes land on the latest minor only |
 
 ## Reporting a Vulnerability
 
@@ -26,9 +27,22 @@ disclosure.
 ph-eventing is a `#![no_std]` library with no network, filesystem, or OS
 interaction. Security-relevant concerns are primarily:
 
-- **Memory safety** — unsound `unsafe` blocks, torn reads, data races.
+- **Memory safety** — unsound `unsafe` blocks, torn reads, data races, in any
+  of the concurrent primitives (`SeqRing`, `EventBuf`, `LatestBuf`,
+  `EventFlags`, `CountedSignal`) or the `MaybeUninit` handling in
+  `Block`/`BlockBuilder` and `RingBuf`.
 - **Denial of service** — unbounded loops or panics in library code on
-  well-formed input.
+  well-formed input. Every hot-path operation is documented as bounded per
+  call; a reproducible violation of a documented bound is in scope.
+
+**Already-documented deviations are not vulnerabilities in themselves.**
+`SeqRing` carries a deliberate, documented formal data race (the seqlock
+deviation — see the `seq_ring` module docs and `docs/records/seq-ring.md`),
+and the counter-width span limits on `SeqRing` accounting,
+`LatestBuf::skipped`, and `BlockBuilder` contiguity are documented
+boundaries with stated reachability arithmetic. A report that one of these
+*manifests beyond its documented bound* — or that the documentation
+understates the exposure — is very much in scope and welcome.
 
 ## Disclosure
 

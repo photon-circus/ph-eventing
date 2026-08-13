@@ -1,7 +1,10 @@
-# LatestBuf semantic contract (draft)
+# LatestBuf semantic contract
 
-- **Status:** Draft for review — step 1 of the adoption sequence in
-  [`latest-buf.md`](latest-buf.md) §21.
+- **Status:** **Normative for the shipped 0.3.0 type** — clauses frozen,
+  every decision point closed (§9), evidence map complete. Drafted as step 1
+  of the adoption sequence in [`latest-buf.md`](latest-buf.md) §21; the
+  clause IDs below are load-bearing for tests, models, and the
+  [engineering record](../records/latest-buf.md).
 - **Rule of this document:** the contract is written against an **abstract
   channel**, independently of any implementation. Nothing here may mention
   slots, atomics, orderings, or ownership transfer — those belong to the
@@ -67,8 +70,9 @@ and all clauses below are stated against the sequence of those instants.
 - **P6.** `publish` publishes the complete value or, if the operation never
   linearizes (e.g. the producer is torn down mid-call by the environment),
   nothing. No partial publication is ever observable. ("Complete" means:
-  the value later observed under `g` is bit-for-bit the `v` passed to this
-  call.)
+  the value later observed under `g` comes from that one `v` under Rust value
+  semantics; it is never torn or mixed with another publication. This does
+  not promise preservation or observability of padding bytes.)
 
 ## 4. Consumer clauses (C)
 
@@ -106,9 +110,9 @@ and all clauses below are stated against the sequence of those instants.
   wrap span**: an observed generation may repeat or appear to regress
   relative to one taken a full cycle earlier, and consumers must not treat
   generation comparison as a total order across such a gap (X6).
-- **C6.** The value returned under generation `g` is exactly and completely
-  the value published under `g` (with P6: no torn, mixed, or partially
-  initialized value is ever returned).
+- **C6.** The value returned under generation `g` is the complete Rust value
+  published under `g` (with P6: no torn, mixed, or partially initialized value
+  is ever returned).
 - **C7.** `take_latest` never waits for the producer, never invokes it,
   and never delays it: its cost bound (B2) is independent of producer
   activity, and the consumer may hold a returned value indefinitely
@@ -166,8 +170,10 @@ the measured implementation, per environment.
   (`try_producer` / `try_consumer` returning `Option`, matching the crate's
   0.2.0+ convention); a second concurrent acquisition of the same role
   fails.
-- **H2.** Handles are `Send + !Sync`, and dropping a handle makes its role
-  re-acquirable. (Same model as `SeqRing`/`EventBuf`; the `!Sync` is what
+- **H2.** Handles are `Send` when `T: Send` — the handle can move a payload
+  across contexts, so a non-`Send` payload correctly pins it; `T: Copy` alone
+  does not imply `T: Send` — always `!Sync`, and dropping a handle makes its
+  role re-acquirable. (Same model as `SeqRing`/`EventBuf`; the `!Sync` is what
   makes moving a handle into an ISR sound.)
 - **H3.** A channel is constructible in a `static` (const construction on
   the normal build), matching the existing primitives.

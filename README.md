@@ -7,17 +7,23 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.92.0-blue)](rust-toolchain.toml)
 [![no_std](https://img.shields.io/badge/no__std-yes-green)](src/lib.rs)
 
-Stack-allocated ring buffers for no-std embedded targets.
+Deterministic zero-allocation handoff primitives for no-std embedded targets.
 
 ## What's in the box
 
 | Type | Use case |
 |------|----------|
+| [`Block<T, N>` / `BlockBuilder<T, N>`](#complete-blocks) | Build complete contiguous sample windows, then compose them with a transport. |
 | [`RingBuf<T, N>`](#ringbuf) | Single-owner ring buffer — simple, no atomics, `&mut` access. |
 | [`SeqRing<T, N>`](#seqring) | Lock-free SPSC ring that **overwrites** old entries (lossy, high-throughput). |
 | [`EventBuf<T, N>`](#eventbuf) | Lock-free SPSC ring with **backpressure** — rejects pushes when full. |
+| [`CountedSignal`](#countedsignal) | Saturating SPSC count for identical, payload-free events. |
+| [`EventFlags`](#eventflags) | Coalesced SPSC condition set — 32 payload-free conditions, one atomic hot-path operation. |
+| [`LatestBuf<T>`](#latestbuf) | Freshness-first SPSC snapshot — retains one newest unread value. |
 
-All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Copy`.
+All types are fixed-size, `#![no_std]`, and zero-allocation. The buffers are
+generic over `T: Copy`; `CountedSignal` carries no payload and `EventFlags`
+carries an `EventMask(u32)`.
 
 ## What this optimises for
 
@@ -25,9 +31,11 @@ All three are fixed-size, `#![no_std]`, zero-allocation, and generic over `T: Co
 **behaviour you can predict and cost you can measure**:
 
 - **Predictability first.** No unbounded loops, no hidden allocation, and no
-  panic reachable from a hot path. For the two SPSC types, no data loss that
-  cannot be observed either — every drop is reported (`SeqRing`) or prevented
-  (`EventBuf`). `RingBuf` is the deliberate exception: it is a single-owner
+  panic reachable from a hot path. For the concurrent types, no data loss that
+  cannot be observed either — every drop is reported (`SeqRing`, exact while
+  the consumer's resume cursor stays within one sequence span of the newest
+  entry; see its section) or prevented (`EventBuf`), or explicitly coalesced
+  by contract (`EventFlags`). `RingBuf` is the deliberate exception: it is a single-owner
   window that overwrites silently, with no drop counter and no backpressure.
   Reach for it when losing the oldest entry is the point, not when delivery
   matters.
@@ -47,7 +55,9 @@ tooling that costs nothing at runtime — not a friendlier API that allocates,
 panics, or hides a cost.
 
 ## Features
-- Three ring buffer flavours: single-owner, lossy SPSC, and backpressure SPSC.
+- Three ring buffer flavours plus a freshness-first SPSC snapshot channel.
+- Complete contiguous sample blocks with an explicit fill-side builder.
+- `EventFlags` for coalesced ISR-to-task condition notification.
 - Common `Sink`/`Source`/`Link` traits for writing generic event-processing code.
 - `forward(src, snk, max)` utility to bridge any `Source` → `Sink`.
 - No heap, no dynamic dispatch, no required dependencies.
@@ -57,7 +67,8 @@ panics, or hides a cost.
 ## Compatibility
 - MSRV: Rust 1.92.0.
 - `SeqRing::new()` and `EventBuf::new()` assert `N > 0`.
-- `SeqRing` and `EventBuf` require 32-bit atomics by default.
+- `SeqRing`, `EventBuf`, and `EventFlags` require 32-bit atomics by default.
+- `LatestBuf` also requires 32-bit atomics and stores exactly three payload slots.
 - For `thumbv6m-none-eabi` (and other no-atomic targets), enable one of:
   - `portable-atomic-unsafe-assume-single-core`
   - `portable-atomic-critical-section` (requires a critical-section implementation in the binary)
@@ -68,6 +79,49 @@ panics, or hides a cost.
   combinations individually; `scripts/ci.sh` enumerates the supported set.
 
 ## Usage
+
+### Complete blocks
+
+`BlockBuilder<T, N>` privately accumulates sequenced samples and yields a
+`Block<T, N>` only when all `N` contiguous samples are present. A gap is
+returned to the caller without changing the partial block, and clearing or
+dropping a partial builder publishes nothing. Timestamping is payload policy:
+use a timestamped type for `T` when required.
+
+`Block` is deliberately not another queue. Compose it with the overload policy
+you need: `EventBuf<Block<T, N>, Q>` queues complete blocks and rejects the
+newest when full; `LatestBuf<Block<T, N>>` retains only the
+latest complete block.
+
+**Budget the composition before choosing it.** Publication copies the
+complete block, so cost scales with block bytes (150–8,651 reference
+instructions across the measured 2/8/16-byte × N = 8/32/128 grid), a
+rejected push costs nearly as much as an accepted one (the complete block
+is preserved and returned, within 2–25 instructions), and RAM is multiple
+complete blocks — `Q` slots plus the private builder. Small windows can
+invert the economics (per-sample publication beats blocks at the
+8/16-byte `N = 8` corners), and DMA integrations currently cannot avoid
+the double copy in ISR context — the builder's storage is deliberately
+private, so either budget both copies or publish from task context. The
+`block` module docs carry the full measured disclosure.
+
+```rust
+use ph_eventing::{BlockBuilder, EventBuf};
+
+let mut fill = BlockBuilder::<i16, 4>::new();
+for (sequence, sample) in [(10, 1), (11, 2), (12, 3)] {
+    assert!(fill.push(sequence, sample).expect("contiguous").is_none());
+}
+let block = fill.push(13, 4).expect("contiguous").expect("complete");
+
+let queue = EventBuf::<_, 2>::new();
+let producer = queue.try_producer().expect("no producer taken yet");
+let consumer = queue.try_consumer().expect("no consumer taken yet");
+// Backpressure is returned, never unwrapped: a full queue hands the
+// complete block back through `Err` for the caller's policy.
+assert!(producer.push(block).is_ok());
+assert_eq!(consumer.pop().expect("one block queued").samples(), &[1, 2, 3, 4]);
+```
 
 ### RingBuf
 
@@ -109,6 +163,39 @@ assert_eq!(consumer.poll_one_value(), Some((1, 123)));
 // consumer.poll_one(|seq, v| { ... });
 ```
 
+### LatestBuf
+
+A three-slot SPSC snapshot channel for state where freshness dominates FIFO
+delivery. Publishing never rejects; it reports whether an unread value was
+replaced. Taking returns the newest complete value with generation and skipped
+counts. Exact skipped counts are guaranteed within one non-zero `u32` wrap
+span; beyond it the count **under-counts, and a gap of exactly one or more
+whole cycles reports `skipped = 0`** — silence there is not evidence that
+nothing was lost. The boundary is a rate × take-interval property (~49.7
+days between takes at 1 kHz publishing, ~72 minutes at 1 MHz); if the
+count itself is your requirement, carry a wider producer-assigned sequence
+in `T`, and if consumer liveness is, use a watchdog — the
+`LatestItem::skipped` docs carry the full disclosure. The
+consumer intentionally implements `LatestSource`, not `Source`, so gap evidence
+is not silently discarded. `T` may be one sample or a complete block. Empty
+polls use an Acquire load rather than an atomic RMW; pending polls transfer
+ownership with one `AcqRel` swap. The all-zero initial representation keeps a
+const-initialized channel in `.bss` with no payload-proportional flash or
+startup-copy cost.
+
+```rust
+use ph_eventing::LatestBuf;
+
+let channel = LatestBuf::<u32>::new();
+let producer = channel.try_producer().expect("producer");
+let consumer = channel.try_consumer().expect("consumer");
+
+let _ = producer.publish(10);
+assert!(producer.publish(20).replaced_unread);
+let item = consumer.take_latest().expect("latest");
+assert_eq!((item.value, item.generation, item.skipped), (20, 2, 1));
+```
+
 ### EventBuf
 
 A bounded SPSC queue with backpressure. When the buffer is full, `push`
@@ -131,10 +218,69 @@ assert_eq!(consumer.pop(), Some(1));
 assert!(producer.push(3).is_ok());     // space freed
 ```
 
+### CountedSignal
+
+A saturating count for repeated events whose payload and ordering do not
+matter. The sole producer is load-bearing: it permits exact saturation with a
+fixed source-level sequence that treats observed `u32::MAX` as maybe-stale and
+confirms it through a no-op RMW re-read — an RMW observes the latest value in
+modification order, so there is no compare-exchange and no algorithmic retry;
+the contract discloses how each single RMW is realised per ISA.
+
+```rust
+use ph_eventing::CountedSignal;
+
+let signal = CountedSignal::new();
+let producer = signal.try_producer().expect("no producer taken yet");
+let consumer = signal.try_consumer().expect("no consumer taken yet");
+
+producer.increment();
+producer.increment();
+let snapshot = consumer.take_count();
+assert_eq!(snapshot.count(), 2);
+assert!(!snapshot.is_saturated());
+```
+
+### EventFlags
+
+A coalesced condition set for ISR-to-task notification. Repeated raises of one
+condition may merge; a take returns and clears every condition that occurred at
+least once since the preceding take.
+
+```rust
+use ph_eventing::{EventFlags, EventMask};
+
+const DATA_READY: EventMask = EventMask::from_bits(1 << 0);
+const OVERFLOW: EventMask = EventMask::from_bits(1 << 1);
+
+let flags = EventFlags::new();
+let producer = flags.try_producer().expect("no producer taken yet");
+let consumer = flags.try_consumer().expect("no consumer taken yet");
+
+producer.raise(DATA_READY);
+producer.raise(DATA_READY); // coalesces
+producer.raise(OVERFLOW);
+
+assert_eq!(consumer.take_all(), DATA_READY | OVERFLOW);
+assert!(consumer.take_all().is_empty());
+```
+
+`EventFlags` deliberately does not implement the stream traits below: a
+coalesced condition set is not a sequence of items, and destructive take plus
+a rejecting downstream sink could silently lose the mask.
+
 ### Common Traits
 
-All producers implement `Sink<T>` and all consumers implement `Source<T>`,
-so you can write generic code that works with any combination:
+The ring-buffer producers implement `Sink<T>` and their consumers
+implement `Source<T>`, so generic code works with any combination of the
+listed handles. Signal types such as `CountedSignal` are outside that
+stream vocabulary (no `T` payload), and `EventFlags` is condition
+signalling, not a payload stream — its handles deliberately implement
+neither (see its section above). `LatestBuf` deliberately stands
+outside it as well: its consumer implements `LatestSource<T>` (and its
+producer `LatestSink<T>`), because `try_pop` cannot report the
+displacement that is this channel's designed overload behaviour — a
+generic `Source` bound will not compile against it, by decision D2:
 
 ```rust
 use ph_eventing::{SeqRing, EventBuf};
@@ -160,6 +306,8 @@ assert!(err.is_none());
 | `Sink<T>` | Accept events | `RingBuf`, `seq_ring::Producer`, `event_buf::Producer` |
 | `Source<T>` | Yield events | `seq_ring::Consumer`, `event_buf::Consumer` |
 | `Link<In,Out>` | Both | Blanket impl for `Sink<In> + Source<Out>` |
+| `LatestSink<T>` | Publish latest | `latest_buf::Producer` (reports replacement) |
+| `LatestSource<T>` | Take latest | `latest_buf::Consumer` (reports generation + skipped) |
 
 ### Declarative static bring-up
 
@@ -201,8 +349,13 @@ them is a runtime step and always will be.
 - If the consumer lags by more than `N`, it skips ahead and reports drops via `PollStats`.
 - Once every `2^32 - 1` pushes the sequence counter wraps and a few extra entries are dropped —
   exactly one for a power-of-two `N`, none if `N` divides `2^32 - 1`, up to `N - 1` otherwise. They
-  are reported as ordinary drops; no stale or torn value is ever returned. See
-  [Choosing `N`](#choosing-n).
+  are reported as ordinary drops; no stale or torn value is returned (within the span bound
+  below). See [Choosing `N`](#choosing-n).
+- Sequence arithmetic is modular over that `2^32 - 1` span, and both headline guarantees carry
+  its bound: a whole-span gap from the consumer's resume cursor aliases to "nothing new" and
+  reports **zero** drops, and the torn-copy re-check shares the same counter-width ABA limit for
+  a consumer stalled mid-read. Reachability arithmetic and the structural escape hatches are in
+  the rustdoc ("Known limitation: whole-span sequence aliasing").
 
 ### EventBuf
 - FIFO order: `pop` always returns the oldest item.
@@ -211,21 +364,50 @@ them is a runtime step and always will be.
 - `drain(max, hook)` consumes up to `max` items through a callback and returns the count.
 - No data is silently lost — the producer always knows when the buffer cannot accept more.
 
+### CountedSignal
+- Counts below `u32::MAX` are exact; the counter saturates rather than wrapping.
+- `take_count` atomically clears the counter and reports whether it saturated.
+- A concurrent increment belongs wholly to the current take or the next one.
+- The sole `Send + !Sync` producer handle is part of the correctness contract.
+- Count operations do not publish unrelated application memory; payload data
+  needs a separate synchronization mechanism.
+- The reference Cortex-M3 probe measures `increment` at 8 retired
+  instructions on the below-`MAX` hot path and 9 on the saturated sentinel
+  arm, and `take_count` at 9 (rustc 1.92.0, QEMU 10.0.11, measured on the
+  assembled 0.3.0 tree). The third arm — a
+  stale `MAX` re-read below `MAX` after a take — is the saturated arm plus
+  one `fetch_add` by construction; all rows are uncontended single-pass
+  counts (the contract discloses the per-ISA RMW realisation).
+
+### EventFlags
+- `raise(mask)` unions conditions into the pending set; duplicate bits may coalesce.
+- `take_all()` atomically returns and clears every pending condition.
+- Conditions are unordered and carry no payload or multiplicity.
+- `EventMask` is exactly 32 bits; `from_index` rejects out-of-range indices without panicking.
+- A take that observes a raise also observes memory writes sequenced before it.
+- There is no non-clearing peek and no stream/signal trait implementation in the initial surface.
+
 ## Safety and Concurrency
 - `RingBuf` has no atomics and no interior mutability — standard Rust borrow rules apply. It stores slots as `MaybeUninit<T>` and reads only live entries, so it does contain `unsafe`.
-- `SeqRing` and `EventBuf` are SPSC by design: exactly one producer and one consumer may be
-  active. Handle acquisition is `try_producer()`/`try_consumer()`, which return `None` rather
-  than panicking — on a microcontroller a panic is a reset, and the panic machinery costs flash
-  you may not have. (The panicking `producer()`/`consumer()`, deprecated since 0.2.0, were
-  **removed in 0.3.0**.) Using unsafe to bypass the SPSC constraint (or sharing handles
-  concurrently) is undefined behavior.
-- `T: Copy` is required by all types to avoid allocation and return values by copy.
+- `SeqRing`, `EventBuf`, `EventFlags`, `CountedSignal`, and `LatestBuf` are SPSC by design: exactly one producer and one consumer may be
+  active. Use `try_producer()`/`try_consumer()`, which return `None` rather than panicking —
+  on a microcontroller a panic is a reset, and the panic machinery costs flash you may not have.
+  The panicking `producer()`/`consumer()`, deprecated since 0.2.0, **were removed in
+  0.3.0**. Using unsafe to bypass `SeqRing`/`EventBuf`/`LatestBuf` ownership can be undefined
+  behavior. Forging or concurrently sharing a `CountedSignal` producer breaks
+  its bounded no-wrap contract; the handle is `!Sync` to prevent that in safe Rust.
+  Forging a second `LatestBuf` producer or consumer similarly breaks the three-slot
+  exclusive-ownership exchange.
+- `T: Copy` is required by all payload-carrying types to avoid allocation and return values by copy.
+- `EventFlags` has no unsafe slot access and passes Miri with the race detector enabled.
 - `EventBuf` is race-free by construction: its producer and consumer never touch the same slot,
   and it passes Miri with the data-race detector enabled.
 - `SeqRing` is a seqlock and carries a **known formal data race** — the consumer may copy a slot
-  the producer is overwriting, then discard the copy when the sequence re-check fails. The copy is
-  never returned and never becomes an invalid value, but the access is undefined behaviour by the
-  letter of the memory model.
+  the producer is overwriting, then discard the copy when the sequence re-check fails. A raced
+  copy is discarded and never becomes an invalid value within the whole-span bound (the re-check
+  compares `u32` sequences, so a consumer stalled mid-read for a full `2^32 − 1` publications can
+  pass both checks against a rewritten slot; see the SeqRing section above and the rustdoc). The
+  access itself is undefined behaviour by the letter of the memory model.
   - **This affects your tooling, not just ours:** if you run `cargo miri test` over a test that
     drives `SeqRing` from two threads, Miri will report UB pointing into this crate. That is the
     known deviation, not a new bug.
@@ -242,8 +424,9 @@ them is a runtime step and always will be.
 The typical embedded shape is a producer in an interrupt handler and a consumer
 in a task loop. That works, with three things to know:
 
-- **The buffer is shared; the handles are owned.** `SeqRing<T, N>` and
-  `EventBuf<T, N>` are `Sync` when `T: Send`, so `&buf` can be handed to both
+- **The primitive is shared; the handles are owned.** `SeqRing<T, N>`,
+  `EventBuf<T, N>`, and `LatestBuf<T>` are `Sync` when `T: Send`, and `EventFlags` and
+  `CountedSignal` are `Sync`, so the primitive can be handed to both
   contexts. `Producer` and `Consumer` are `Send + !Sync` — move each one into
   the context that owns it, and never share a single handle between contexts.
   There is no way to get a second `Producer` while one is live:
@@ -278,14 +461,15 @@ in a task loop. That works, with three things to know:
   | A divisor of `2^32 - 1` (3, 5, 15, 17, 51, 85, 255, 257, 65537, …) | 0 |
   | Anything else | Up to `N - 1` — `N = 48` drops 15, `N = 96` drops 33, `N = 121` drops 58 |
 
-  These are reported through `PollStats` like any other drop, and no stale or torn value is ever
-  returned — it is a data-loss bound, not a correctness one. One lost entry per `2^32` pushes is
+  These are reported through `PollStats` like any other drop, and no stale or torn value is
+  returned (within the whole-span bound stated in the SeqRing section and rustdoc) — it is a
+  data-loss bound, not a correctness one. One lost entry per `2^32` pushes is
   beneath the noise floor for anything that already tolerates overwrite, so a power of two is
   almost always the right call. `EventBuf` has no wrap boundary of this kind.
 
 ## Quality and verification
 
-`SeqRing` and `EventBuf` are lock-free, so a green test run on x86 is weak
+The concurrent primitives are atomic, so a green test run on x86 is weak
 evidence — a strongly-ordered host cannot exhibit the ordering bugs that appear
 on ARM and RISC-V. What backs this crate, in descending order of strength:
 
@@ -293,7 +477,7 @@ on ARM and RISC-V. What backs this crate, in descending order of strength:
 |----------|---------------------|
 | [Loom](https://github.com/tokio-rs/loom) models | Exhaustive: every interleaving and every legal relaxed-load value, for the modelled size |
 | [Miri](https://github.com/rust-lang/miri) | UB, data races, and weak-memory behaviour; also run on 32-bit and big-endian targets |
-| 67 unit + 11 doctests + 3 compile-fail | Behaviour, including threaded stress tests for both SPSC types; `N == 0` rejected at compile time |
+| 103 unit + 13 doctests + 11 compile-fail | Behaviour, including threaded stress tests for all SPSC types; `N == 0` rejected at compile time on the three buffers and `BlockBuilder`; `LatestBuf`'s absent `Source` impl and handle `!Sync` pinned (D2/H2); CountedSignal and EventFlags handle `!Sync` pinned |
 | 3 embedded targets | `thumbv6m` / `thumbv7em` / `riscv32imac` compile checks |
 | Code-size baseline | Flash cost gated in CI across 8 pinned targets; growth past +16 bytes fails |
 | QEMU instruction counts | Hot-path cost is constant w.r.t. occupancy, measured per instruction |

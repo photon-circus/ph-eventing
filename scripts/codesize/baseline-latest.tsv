@@ -1,0 +1,73 @@
+# ph-eventing code-size baseline. Regenerate: ./scripts/codesize.sh latest-matrix --bless
+# rustc-commit: ded5c06cf21d2b93bffd5d884aa6e96934ee4234
+#
+# Host-independent: byte-identical on x86_64-pc-windows-msvc and
+# x86_64-unknown-linux-gnu for the same pinned rustc, verified across all
+# eight gated targets. That is what makes committing it sound.
+#
+# Xtensa is deliberately absent -- it needs the esp-rs fork, and gating it
+# would make that fork mandatory for every contributor.
+armv7a-none-eabi	latest_block128_publish	128
+armv7a-none-eabi	latest_block128_take	172
+armv7a-none-eabi	latest_roles_consumer	64
+armv7a-none-eabi	latest_roles_producer	64
+armv7a-none-eabi	latest_u32_publish	112
+armv7a-none-eabi	latest_u32_take	152
+armv7a-none-eabi	latest_w16_publish	124
+armv7a-none-eabi	latest_w16_take	168
+armv7r-none-eabi	latest_block128_publish	128
+armv7r-none-eabi	latest_block128_take	172
+armv7r-none-eabi	latest_roles_consumer	64
+armv7r-none-eabi	latest_roles_producer	64
+armv7r-none-eabi	latest_u32_publish	112
+armv7r-none-eabi	latest_u32_take	152
+armv7r-none-eabi	latest_w16_publish	124
+armv7r-none-eabi	latest_w16_take	168
+riscv32imac-unknown-none-elf	latest_block128_publish	124
+riscv32imac-unknown-none-elf	latest_block128_take	158
+riscv32imac-unknown-none-elf	latest_roles_consumer	48
+riscv32imac-unknown-none-elf	latest_roles_producer	34
+riscv32imac-unknown-none-elf	latest_u32_publish	72
+riscv32imac-unknown-none-elf	latest_u32_take	106
+riscv32imac-unknown-none-elf	latest_w16_publish	100
+riscv32imac-unknown-none-elf	latest_w16_take	130
+thumbv6m-none-eabi	latest_block128_publish	94
+thumbv6m-none-eabi	latest_block128_take	118
+thumbv6m-none-eabi	latest_roles_consumer	42
+thumbv6m-none-eabi	latest_roles_producer	42
+thumbv6m-none-eabi	latest_u32_publish	76
+thumbv6m-none-eabi	latest_u32_take	96
+thumbv6m-none-eabi	latest_w16_publish	98
+thumbv6m-none-eabi	latest_w16_take	114
+thumbv7em-none-eabi	latest_block128_publish	112
+thumbv7em-none-eabi	latest_block128_take	134
+thumbv7em-none-eabi	latest_roles_consumer	46
+thumbv7em-none-eabi	latest_roles_producer	46
+thumbv7em-none-eabi	latest_u32_publish	88
+thumbv7em-none-eabi	latest_u32_take	102
+thumbv7em-none-eabi	latest_w16_publish	116
+thumbv7em-none-eabi	latest_w16_take	122
+thumbv7m-none-eabi	latest_block128_publish	112
+thumbv7m-none-eabi	latest_block128_take	134
+thumbv7m-none-eabi	latest_roles_consumer	46
+thumbv7m-none-eabi	latest_roles_producer	46
+thumbv7m-none-eabi	latest_u32_publish	88
+thumbv7m-none-eabi	latest_u32_take	102
+thumbv7m-none-eabi	latest_w16_publish	116
+thumbv7m-none-eabi	latest_w16_take	122
+thumbv8m.base-none-eabi	latest_block128_publish	96
+thumbv8m.base-none-eabi	latest_block128_take	120
+thumbv8m.base-none-eabi	latest_roles_consumer	34
+thumbv8m.base-none-eabi	latest_roles_producer	34
+thumbv8m.base-none-eabi	latest_u32_publish	78
+thumbv8m.base-none-eabi	latest_u32_take	100
+thumbv8m.base-none-eabi	latest_w16_publish	100
+thumbv8m.base-none-eabi	latest_w16_take	116
+thumbv8m.main-none-eabi	latest_block128_publish	102
+thumbv8m.main-none-eabi	latest_block128_take	124
+thumbv8m.main-none-eabi	latest_roles_consumer	36
+thumbv8m.main-none-eabi	latest_roles_producer	36
+thumbv8m.main-none-eabi	latest_u32_publish	80
+thumbv8m.main-none-eabi	latest_u32_take	102
+thumbv8m.main-none-eabi	latest_w16_publish	108
+thumbv8m.main-none-eabi	latest_w16_take	122

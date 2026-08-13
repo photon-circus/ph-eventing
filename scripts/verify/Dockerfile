@@ -19,7 +19,7 @@
 # A prebuilt copy is published at hub.docker.com/r/stevegiacomelli/ph-eventing-verify;
 # each 0.x.y tag is the frozen environment of that release's evidence:
 #
-#   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.2.0 ./scripts/verify.sh
+#   VERIFY_IMAGE=stevegiacomelli/ph-eventing-verify:0.3.0 ./scripts/verify.sh
 #
 # Build locally instead (from the repo root -- the context must include
 # rust-toolchain.toml and the lockfiles):
@@ -28,9 +28,14 @@
 #
 # Run any script inside it, or everything:
 #
-#   ./scripts/verify.sh            # ci.sh + miri.sh + loom.sh + cycles.sh
+#   ./scripts/verify.sh            # ci + miri + loom + cycles + atomic-window
 #   ./scripts/verify.sh cycles     # one of them
+#   ./scripts/verify.sh atomic-window  # EventFlags thumbv6m interrupt-mask gate
 #   ./scripts/verify.sh shell      # poke around
+#
+# Deliberately NO esp-rs here. EventFlags ESP32-S2/S3 interrupt-window rows are
+# opt-in on hosts that have the fork (ESP=1); baking esp-rs into this image
+# would make the fork mandatory for a green verify matrix.
 #
 # The stable toolchain baked here is whatever was current at image build time.
 # That is deliberate: the stable check exists to catch regressions on a NEWER

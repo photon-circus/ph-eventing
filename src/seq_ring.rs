@@ -6,8 +6,9 @@
 //! - Sequence numbers are monotonically increasing `u32`; `0` is reserved to mean "empty".
 //! - The consumer can drain in-order (`poll_one`/`poll_up_to`) or sample the newest value (`latest`).
 //! - If the consumer lags by more than `N`, it skips ahead and reports the number of dropped items.
-//!   The one exception is the sequence wrap, which can drop a few extra entries depending on `N` —
-//!   see "Known limitation: extra drops at the sequence wrap" below.
+//!   Two boundaries qualify that accounting: the sequence wrap can drop a few extra entries
+//!   depending on `N`, and a gap of one whole sequence span aliases to "nothing new" and reports
+//!   zero — see the two "Known limitation" sections below.
 //!
 //! # Memory ordering
 //! The producer invalidates the per-slot sequence, writes the value, publishes the new per-slot
@@ -24,7 +25,9 @@
 //! Slot values are read and written with volatile accesses, and the consumer holds its copy as
 //! `MaybeUninit<T>` until the re-check passes. A copy that raced with an overwrite is therefore
 //! discarded as raw bytes and never materialises as a `T` that could violate the type's validity
-//! invariants.
+//! invariants — for reads that complete within one sequence span; the re-check compares sequence
+//! values, so it carries the counter-width ABA bound stated under "Known limitation: whole-span
+//! sequence aliasing" below.
 //!
 //! # Known deviation: the seqlock data race
 //!
@@ -57,13 +60,23 @@
 //!   failure" is not a guarantee: the compiler is *permitted* to assume the race cannot happen.
 //!   `read_volatile`/`write_volatile` block the optimisations that would plausibly exploit it
 //!   (splitting, duplicating, hoisting the copy); nothing blocks the ones nobody has thought of.
+//! - **Loom shows it too, if you let it.** A model that asserts delivered payload *values*
+//!   fails: Loom serialises the non-atomic slot memory (the copy returns the latest bytes)
+//!   while C11 coherence lets both Relaxed sequence checks keep returning the stale
+//!   pre-invalidation sequence — a non-atomic read establishes no happens-before to force the
+//!   re-check forward. That is the formal gap of the abstract machine witnessed concretely; the
+//!   fence pairing above is what closes it on real hardware, where observing the new value
+//!   implies the earlier invalidation is visible to the fenced re-check. The shipped models
+//!   therefore assert the sequence protocol and conservation, never payload values.
 //! - **Your own Miri runs will flag it.** If you run `cargo miri test` over a test that drives
 //!   this ring from two threads, you will get a UB report pointing into this crate. That is the
 //!   deviation, not a new bug. `scripts/miri.*` shows the split-pass approach: full checking
 //!   everywhere else, race detector off for this ring alone.
-//! - **A raced copy is never returned.** The double sequence check discards it, and it is held as
-//!   `MaybeUninit<T>` until validated, so it cannot even briefly exist as a `T` that violates the
-//!   type's validity invariants.
+//! - **A raced copy is never returned** — within the span bound. The double sequence check
+//!   discards it, and it is held as `MaybeUninit<T>` until validated, so it cannot even briefly
+//!   exist as a `T` that violates the type's validity invariants. The check compares sequence
+//!   values, so a read preempted for one whole span of publications can pass both checks against
+//!   a rewritten slot; see "Known limitation: whole-span sequence aliasing".
 //!
 //! ## If that is not acceptable
 //! - [`crate::EventBuf`] is race-free by construction — its producer and consumer never touch the
@@ -100,8 +113,10 @@
 //!
 //! **This is a data-loss bound, not a soundness problem.** The affected read fails its sequence
 //! check and is counted in [`PollStats::dropped`], so `read + dropped` still accounts for every
-//! published item and no stale or torn value is ever returned. It is indistinguishable from the
-//! ordinary lag-induced drops the consumer already reports.
+//! published item and no stale or torn value is returned — both within the span bound of the
+//! "Known limitation: whole-span sequence aliasing" section below, which is where each of those
+//! guarantees runs out. It is indistinguishable from the ordinary lag-induced drops the consumer
+//! already reports.
 //!
 //! The same misalignment makes the lag-recovery jump resume up to one sequence later than it
 //! strictly needs to. That is bounded by the table above and reported identically.
@@ -111,6 +126,49 @@
 //! divisor of `2^32 - 1` if you want the wrap to be exactly seamless. Avoid values like 96 or 121
 //! if a burst of drops at a predictable interval would matter to you. If no loss is acceptable at
 //! all, [`crate::EventBuf`] applies backpressure instead and has no wrap boundary of this kind.
+//!
+//! # Known limitation: whole-span sequence aliasing
+//!
+//! Sequence arithmetic is modular. `push` skips the reserved value `0`, so the counter cycles
+//! through `2^32 - 1` distinct nonzero values, and every comparison and distance the consumer
+//! computes is exact only up to that span. Two consequences follow — both inherent to any
+//! fixed-width seqlock at its counter width:
+//!
+//! - **A whole-span gap from the resume cursor reports nothing.** If the distance from the
+//!   consumer's resume cursor to the newest publication reaches exactly `2^32 - 1` (or any whole
+//!   multiple), the published sequence aliases the cursor and `poll_one`/`poll_up_to` take their
+//!   nothing-new early return: zero reads and zero drops. Larger distances report only the
+//!   remainder modulo the span. The `read + dropped` conservation promise is therefore exact
+//!   while the resume cursor stays within one span of the newest publication — residual backlog
+//!   from a partial drain counts against that distance, so this is *not* simply "fewer than one
+//!   span of publications between calls" (the sufficient call-cadence bound is below) — and
+//!   silence after an extreme stall is not evidence that nothing was lost.
+//! - **A whole-span mid-read stall defeats the sequence re-check.** The torn-copy guard compares
+//!   the slot's sequence before and after the copy. A consumer preempted *inside* that copy for
+//!   exactly one whole span of publications sees the same sequence value on both sides of a slot
+//!   that was rewritten in between — counter-width ABA — and a mixed copy would be accepted as
+//!   `T`. The discard argument for the documented deviation is therefore bounded: it holds for
+//!   any read that completes in less than one full span of producer publications.
+//!
+//! Reachability arithmetic, so the bound is a decision rather than a surprise: one span is
+//! ~4.29 billion publications. At a sustained 1 MHz push rate a poll gap must exceed ~71.6
+//! minutes — and the mid-read stall must hold the consumer *between two instructions of one
+//! copy* for that long — before either case is reachable; at 10 kHz it is ~5 days. The escape
+//! hatch is structural, and the bound is measured from the **resume cursor**, not from call
+//! cadence: aliasing needs the distance from the resume cursor to the newest publication to
+//! reach one whole span, and a partial drain leaves residual backlog that counts against it. A
+//! nonzero ordered poll (`poll_one`, or `poll_up_to` with a nonzero budget) always leaves the
+//! cursor at most `N - 1` behind the newest publication it observed at entry (each call freezes
+//! that entry sample as its drain goal, which is also what bounds the call) — the lag-recovery jump
+//! handles a lag over `N`, and draining even one item brings a lag of at most `N` below that —
+//! so keeping the publications between consecutive nonzero polls below one span *minus*
+//! `N - 1` suffices. [`Consumer::skip_to_latest`] leaves the cursor exactly **one** behind the
+//! newest it observed (so the next poll yields that newest item); its post-call allowance is
+//! therefore one span minus one, not a full span.
+//! `poll_up_to(0, …)` returns before touching the resume cursor, and the non-advancing
+//! [`Consumer::latest`] never moves it. Separately, bound consumer preemption during a single
+//! read to less than a span of publications. If neither bound can be stated for your system,
+//! [`crate::EventBuf`] has no sequence wrap of any kind.
 //!
 //! # Notes
 //! - `T` is `Copy` to allow returning values by copy without allocation.
@@ -177,7 +235,8 @@ pub struct PollStats {
     pub read: usize,
     /// Number of items skipped because the consumer lagged or slots were overwritten.
     pub dropped: usize,
-    /// Newest sequence observed while polling.
+    /// Newest sequence sampled at poll entry — the frozen drain goal for
+    /// that call (later publications wait for the next poll).
     pub newest: u32,
 }
 
@@ -483,7 +542,9 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         self.dropped_accum = 0;
     }
 
-    /// Drain at most one item (in-order).
+    /// Drain at most one item (in-order). Bounded per call — this is
+    /// [`poll_up_to`](Self::poll_up_to)`(1, …)` and inherits its frozen
+    /// entry-sample window.
     /// Returns true if an item was delivered to the hook.
     #[inline]
     pub fn poll_one(&mut self, hook: impl FnOnce(u32, &T)) -> bool {
@@ -507,11 +568,22 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         result
     }
 
-    /// Drain up to `max` items (in-order).
+    /// Drain up to `max` items (in-order) from the window that existed when
+    /// the call began.
     /// Hook sees `&T` but it is a reference to a **local copy** inside poll.
     ///
+    /// The newest published sequence is sampled **once at entry** and the
+    /// drain stops there: items the producer publishes while the poll runs
+    /// wait for the next call, and nothing is lost or double-counted by the
+    /// hand-off. Freezing the goal is what makes every call bounded — at
+    /// most one lag-recovery jump plus a walk of at most `N` slots plus
+    /// `max` reads, regardless of how fast the producer publishes. (The
+    /// previous formulation re-read the newest sequence every iteration, so
+    /// a producer that stayed ahead could starve the poll indefinitely.)
+    ///
     /// If `max == 0`, this returns immediately with `read = 0`, `dropped = 0`, and
-    /// `newest` set to the latest published sequence.
+    /// `newest` set to the latest published sequence. Otherwise
+    /// [`PollStats::newest`] reports the entry sample the drain ran against.
     pub fn poll_up_to(&mut self, max: usize, mut hook: impl FnMut(u32, &T)) -> PollStats {
         if max == 0 {
             return PollStats {
@@ -521,7 +593,8 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
             };
         }
 
-        let mut newest = self.ring.newest_seq();
+        // The frozen high-water mark: the drain goal for this entire call.
+        let newest = self.ring.newest_seq();
         if newest == 0 || newest == self.last_seq {
             return PollStats {
                 read: 0,
@@ -533,24 +606,26 @@ impl<'a, T: Copy, const N: usize> Consumer<'a, T, N> {
         let mut read = 0usize;
         let mut dropped = 0usize;
 
-        while read < max {
-            newest = self.ring.newest_seq();
-            if self.last_seq == newest {
-                break;
-            }
+        // At most one lag-recovery jump per call, computed against the frozen
+        // mark: the cursor only moves toward it below, so the distance never
+        // grows again within this call.
+        let lag = SeqRing::<T, N>::seq_distance(self.last_seq, newest) as usize;
+        if lag > N {
+            let keep_from = newest.wrapping_sub((N - 1) as u32);
+            let resume_after = keep_from.wrapping_sub(1);
+            // Everything in (last_seq, keep_from) is gone; count what was
+            // really assigned rather than the raw sequence span.
+            let jumped = SeqRing::<T, N>::seq_distance(self.last_seq, resume_after) as usize;
+            dropped = dropped.saturating_add(jumped);
+            self.last_seq = resume_after;
+        }
 
-            let lag = SeqRing::<T, N>::seq_distance(self.last_seq, newest) as usize;
-            if lag > N {
-                let keep_from = newest.wrapping_sub((N - 1) as u32);
-                let resume_after = keep_from.wrapping_sub(1);
-                // Everything in (last_seq, keep_from) is gone; count what was
-                // really assigned rather than the raw sequence span.
-                let jumped = SeqRing::<T, N>::seq_distance(self.last_seq, resume_after) as usize;
-                dropped = dropped.saturating_add(jumped);
-                self.last_seq = resume_after;
-                continue;
-            }
-
+        // Bounded by construction: after the jump at most `N` sequences lie
+        // between the cursor and the frozen mark, and every iteration —
+        // hit or miss — advances the cursor by exactly one toward it. A miss
+        // means the producer overwrote that slot after the entry sample; the
+        // item is genuinely gone and is counted as dropped.
+        while read < max && self.last_seq != newest {
             let next = SeqRing::<T, N>::next_after(self.last_seq);
 
             match self.ring.read_seq_inner(next) {
@@ -873,6 +948,38 @@ mod tests {
         assert_eq!(stats.read, 1);
         assert_eq!(stats.dropped, 0);
         assert_eq!(got, Some((1, 20)));
+    }
+
+    #[test]
+    fn poll_window_is_frozen_at_entry() {
+        // The bounded-poll pin: the drain goal is sampled once at entry, so
+        // an item published while the poll runs waits for the next call —
+        // freezing the goal is what bounds the call under continuous
+        // overwrite — and nothing is lost or double-counted at the hand-off.
+        let ring = SeqRing::<u32, 4>::new();
+        let producer = ring.try_producer().unwrap();
+        let mut consumer = ring.try_consumer().unwrap();
+
+        producer.push(10);
+        producer.push(20);
+
+        let mut seen = std::vec::Vec::new();
+        let stats = consumer.poll_up_to(4, |seq, v| {
+            if seq == 1 {
+                // Published mid-poll: must not extend this call's window.
+                producer.push(30);
+            }
+            seen.push((seq, *v));
+        });
+        assert_eq!(stats.read, 2);
+        assert_eq!(stats.dropped, 0);
+        assert_eq!(stats.newest, 2);
+        assert_eq!(seen, [(1, 10), (2, 20)]);
+
+        let stats = consumer.poll_up_to(4, |seq, v| assert_eq!((seq, *v), (3, 30)));
+        assert_eq!(stats.read, 1);
+        assert_eq!(stats.dropped, 0);
+        assert_eq!(stats.newest, 3);
     }
 
     #[test]

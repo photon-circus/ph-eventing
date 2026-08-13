@@ -13,6 +13,10 @@
 #      its logic (no stale or torn payload, exact drop accounting) is still
 #      verified under Miri's scheduler.
 #
+# Everything else runs in pass 1 WITH the detector on -- that includes
+# LatestBuf, whose race-freedom under the detector is its headline soundness
+# claim (contract P6/C6), and EventBuf's race-free-by-construction claim.
+#
 # Cross-target passes catch pointer-width and endianness bugs. The bare-metal
 # targets cannot be run: Miri needs `std` for the test harness, and no_std
 # targets have none. The 32-bit std targets stand in for them -- they share the
