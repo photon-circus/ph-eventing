@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
 ## 0.3.0 - 2026-08-12
 
 **What this release delivers.** 0.2.0 made the costs measurable; 0.3.0 grows

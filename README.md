@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/ph-eventing)](https://crates.io/crates/ph-eventing)
 [![docs.rs](https://img.shields.io/docsrs/ph-eventing)](https://docs.rs/ph-eventing)
-[![CI: local](https://img.shields.io/badge/CI-local-blue)](scripts/ci.sh)
+[![CI](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml/badge.svg)](https://github.com/photon-circus/ph-eventing/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/crates/l/ph-eventing)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.92.0-blue)](rust-toolchain.toml)
 [![no_std](https://img.shields.io/badge/no__std-yes-green)](src/lib.rs)
